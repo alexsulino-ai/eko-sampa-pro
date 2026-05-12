@@ -393,7 +393,18 @@ document.addEventListener('alpine:init', () => {
         },
 
         elementPositionStyle(item) {
-            return `left:${item.x}px;top:${item.y}px;width:${item.width}px;height:${item.height}px`;
+            if (!item || typeof item !== 'object') {
+                return 'position:absolute;left:0;top:0;width:100px;height:40px';
+            }
+            const x = Number(item.x);
+            const y = Number(item.y);
+            const w = Number(item.width);
+            const h = Number(item.height);
+            const left = Number.isFinite(x) ? x : 0;
+            const top = Number.isFinite(y) ? y : 0;
+            const width = Number.isFinite(w) ? w : this.minElementWidth;
+            const height = Number.isFinite(h) ? h : this.minElementHeight;
+            return `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px`;
         },
 
         elementFrameCss(item) {
@@ -1003,19 +1014,13 @@ document.addEventListener('alpine:init', () => {
             }
 
             nodes.forEach((node) => {
-                const canvas = node.closest('.eko-sampa-editor__canvas');
                 interact(node)
                     .draggable({
                         ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-field',
                         /** Reduz conflito com duplo clique para editar */
                         hold: 160,
                         inertia: false,
-                        modifiers: [
-                            interact.modifiers.restrict({
-                                restriction: canvas || node.parentElement,
-                                elementRect: { top: 0, left: 0, bottom: 1, right: 1 },
-                            }),
-                        ],
+                        /** Sem restrict: o canvas está dentro de um stage com transform:scale; o restrict do Interact calculava mal e prendia tudo no canto. O clamp em JS mantém o layout dentro do canvas. */
                         listeners: {
                             start(event) {
                                 const id = event.target.getAttribute('data-element-id');

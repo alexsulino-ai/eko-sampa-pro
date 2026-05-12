@@ -168,10 +168,9 @@ if (! defined('ABSPATH')) {
                 <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Live preview', 'eko-sampa'); ?></h3>
                 <iframe
                     class="mt-2 h-[min(24rem,50vh)] w-full min-h-[8rem] rounded border border-slate-100 bg-white"
-                    sandbox=""
+                    sandbox="allow-same-origin"
                     referrerpolicy="no-referrer"
                     title="<?php echo esc_attr__('Order preview', 'eko-sampa'); ?>"
-                    src="about:blank"
                     x-bind:srcdoc="previewSrcdoc"
                 ></iframe>
             </div>

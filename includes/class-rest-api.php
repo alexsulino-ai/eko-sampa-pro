@@ -873,6 +873,17 @@ final class Eko_Sampa_Rest_Api {
             $html['html'] = wp_kses_post($html['html']);
         }
 
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            $h = isset($html['html']) && is_string($html['html']) ? $html['html'] : '';
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+            error_log(
+                '[eko-sampa] render-draft tid=' . $tid
+                . ' client_id=' . (int) ($order['client_id'] ?? 0)
+                . ' order_row_id=' . (int) ($order['id'] ?? 0)
+                . ' html_len=' . strlen($h)
+            );
+        }
+
         return new \WP_REST_Response($html);
     }
 

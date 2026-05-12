@@ -104,6 +104,8 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                                 <textarea
                                                     id="eko-inline-edit"
                                                     class="eko-sampa-editor__inline-field pointer-events-auto absolute inset-0 z-[45] box-border resize-none rounded-sm border border-indigo-400/80 bg-white/95 p-1.5 text-sm text-slate-900 shadow-inner outline-none ring-1 ring-indigo-300/40"
+                                                    rows="3"
+                                                    x-model="inlineValue"
                                                     placeholder="<?php echo esc_attr__('Ctrl+Enter to save · Line breaks allowed', 'eko-sampa'); ?>"
                                                     @mousedown.stop
                                                     @click.stop

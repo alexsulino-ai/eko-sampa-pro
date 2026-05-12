@@ -515,11 +515,12 @@ document.addEventListener('alpine:init', () => {
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         wrapPreviewSrcdoc(inner) {
             const body = String(inner || '');
-            const doc =
+            /** srcdoc must receive real HTML; escaping " broke all attributes (preview blank / broken). */
+            return (
                 '<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#f8fafc}</style></head><body>' +
                 body +
-                '</body></html>';
-            return doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+                '</body></html>'
+            );
         },
         fieldSelectOptions(f) {
             try {
@@ -703,22 +704,38 @@ document.addEventListener('alpine:init', () => {
                 this.previewSrcdoc = '';
                 return;
             }
+            const payload = {
+                template_id: tid,
+                client_id: parseInt(String(this.form.client_id || 0), 10),
+                id: parseInt(String(this.form.id || 0), 10),
+                dynamic_data_json: this.form.dynamic_data_json || {},
+            };
+            let dbg = false;
             try {
+                dbg = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ekoSampaPreviewDebug') === '1';
+            } catch (e) {
+                void e;
+            }
+            try {
+                if (dbg) {
+                    console.warn('[eko-sampa preview] render-draft request', payload);
+                }
                 const data = await window.ekoSampaApi('orders/render-draft', {
                     method: 'POST',
-                    body: {
-                        template_id: tid,
-                        client_id: parseInt(String(this.form.client_id || 0), 10),
-                        id: parseInt(String(this.form.id || 0), 10),
-                        dynamic_data_json: this.form.dynamic_data_json || {},
-                    },
+                    body: payload,
                 });
                 const inner =
                     typeof data === 'object' && data && data.html
                         ? String(data.html)
                         : '<p>Invalid preview.</p>';
+                if (dbg) {
+                    console.warn('[eko-sampa preview] render-draft html length', inner.length);
+                }
                 this.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
             } catch (e) {
+                if (dbg) {
+                    console.warn('[eko-sampa preview] render-draft error', e);
+                }
                 const msg = String(e.message || e)
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')

@@ -144,6 +144,21 @@ final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
             return false;
         }
 
+        $field_model = new Eko_Sampa_Service_Field();
+        if (! $field_model->delete_all_for_service($id)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log('[eko-sampa] service_delete: delete_all_for_service returned false for service_id=' . $id . ' last_error=' . $this->db()->last_error);
+            }
+
+            return false;
+        }
+
+        $tpl_table = $this->db()->prefix . 'eko_sampa_templates';
+        $this->db()->update($tpl_table, ['service_id' => 0], ['service_id' => $id], ['%d'], ['%d']);
+        $ord_table = $this->db()->prefix . 'eko_sampa_orders';
+        $this->db()->update($ord_table, ['service_id' => 0], ['service_id' => $id], ['%d'], ['%d']);
+
         if ($this->is_unrestricted()) {
             $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d';
             $prep = $this->prepare($sql, [$id]);
@@ -152,7 +167,13 @@ final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
             $prep = $this->prepare($sql, [$id, $this->current_user_id()]);
         }
 
-        return false !== $this->db()->query($prep);
+        $ok = $this->db()->query($prep);
+        if (false === $ok && defined('WP_DEBUG') && WP_DEBUG) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+            error_log('[eko-sampa] service_delete_failed id=' . $id . ' sql=' . $prep . ' last_error=' . $this->db()->last_error);
+        }
+
+        return false !== $ok;
     }
 
     /**

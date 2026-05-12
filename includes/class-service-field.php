@@ -162,10 +162,25 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     /**
-     * @param array<string, mixed> $args
-     *
-     * @return array<int, array<string, mixed>>
+     * Remove all field rows for a service (used before deleting the service).
      */
+    public function delete_all_for_service(int $service_id): bool {
+        if ($service_id <= 0 || ! $this->actor_may_touch_service($service_id)) {
+            return false;
+        }
+
+        $sql  = 'DELETE FROM ' . $this->table() . ' WHERE service_id = %d';
+        $prep = $this->prepare($sql, [$service_id]);
+        $ok   = $this->db()->query($prep);
+
+        if (false === $ok && defined('WP_DEBUG') && WP_DEBUG) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+            error_log('[eko-sampa] delete_all_for_service failed service_id=' . $service_id . ' sql=' . $prep . ' last_error=' . $this->db()->last_error);
+        }
+
+        return false !== $ok;
+    }
+
     public function list_for_service(int $service_id, array $args = []): array {
         if (! $this->actor_may_touch_service($service_id)) {
             return [];
