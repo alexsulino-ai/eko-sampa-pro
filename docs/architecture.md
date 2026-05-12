@@ -565,3 +565,48 @@ Não implementar:
 
 Objetivo:
 entregar MVP funcional e estável.
+
+---
+
+# MVP congelado — estado do código (referência)
+
+Esta secção alinha a documentação ao repositório **sem alterar a arquitetura aprovada**. O que está listado como “implementado” existe no código atual; “adiado” permanece fora do MVP ou só parcialmente ligado.
+
+## Implementado (includes / views / assets)
+
+* `class-plugin.php`, `class-database.php`, `class-model-base.php`
+* Modelos: `class-client.php`, `class-service.php`, `class-service-field.php`, `class-template.php`, `class-order.php`
+* Rotas frontend: `class-frontend-router.php` + `templates/frontend-blank.php`
+* Redirect wp-admin: `class-admin-redirect.php`
+* Shortcodes: `class-shortcodes.php`
+* Assets: `class-assets.php` + `assets/css/frontend.css`, `assets/js/frontend-app.js`, `assets/js/editor-canvas.js`, `assets/css/admin.css`, `assets/js/admin.js`
+* REST: `class-rest-api.php` (`eko-sampa/v1`)
+* Upload galeria: `class-upload-service.php`
+* Render impressão/preview: `class-template-renderer.php`
+* Roles: `class-roles.php`
+* Router wp-admin mínimo + hooks WC vazios: `class-router.php`
+* WooCommerce **opcional**: `class-wc-bridge.php` (painel no pedido WC quando `woo_order_id` corresponde)
+* Vistas parciais do shell: `views/frontend-partial-*.php`, `views/editor-canvas.php`, `views/frontend-print.php`, `views/frontend-login.php`
+
+## Adiado / não usado no MVP atual
+
+* Classes `class-ajax-*.php` — substituídas na prática pelo REST.
+* `class-layer.php` — elementos do editor persistem em `templates.json_data` (objeto `elements`).
+* Uso operacional da tabela `wp_eko_sampa_layers` — criada por `dbDelta`; reservada para evolução.
+* `class-print-service.php` / `class-thumbnail-service.php` — não existem; impressão via `class-template-renderer.php` + rota `print`.
+* Páginas WP criadas automaticamente na ativação — **não** ocorrem; usam-se rewrites e/ou shortcodes.
+* Registro frontend / aprovação de utilizador — fora do escopo atual (só login frontend).
+
+## Congelamento
+
+Não alterar nesta fase: stack (Tailwind CDN + Alpine + Interact + Sortable), estrutura de pastas, sistema de rotas virtuais, nem substituir o frontend por outro framework.
+
+## Estabilização MVP (código real)
+
+* **REST:** limite de corpo JSON ~512 KiB (`rest_pre_dispatch`); `json_data` de template limitado (~384 KiB codificado); listagens com `limit`/`offset` (default `limit=50` se omitido).
+* **`GET /lookups/order-form`:** um pedido devolve listas de clientes, serviços e templates (até 500 cada) para o formulário de ordens, respeitando `filter_user_id` do administrador.
+* **Ordens — `dynamic_data_json`:** apenas mapa plano (não listas), chaves sanitizadas, valores escalares, até ~120 chaves e 8000 caracteres por valor; rejeição se estrutura inválida.
+* **Campos de serviço:** slug único por `service_id` (REST 409 se duplicado).
+* **Preview de ordem:** HTML do render passa por `wp_kses_post` na API; no frontend o preview usa `iframe` com `sandbox` + `data:` URL (sem `x-html`).
+* **Impressão (`frontend-print.php`):** HTML final também filtrado com `wp_kses_post`.
+* **Editor:** debounce ao rebind do Interact após alterações nas camadas; cliente recusa guardar JSON acima de ~380 KiB antes do PATCH.

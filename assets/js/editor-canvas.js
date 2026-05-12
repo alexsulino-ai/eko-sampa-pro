@@ -1,6 +1,44 @@
 /**
  * Visual editor: Alpine state + Interact drag/resize + Sortable layers + REST persistence.
  */
+(function () {
+    if (typeof window.ekoSampaApi === 'function') {
+        return;
+    }
+    window.ekoSampaApi = async function (path, opts) {
+        const cfg = window.ekoSampaEditor || {};
+        const root = String(cfg.root || '').replace(/\/?$/, '/');
+        const url = root + String(path || '').replace(/^\//, '');
+        const headers = Object.assign(
+            { 'X-WP-Nonce': cfg.nonce || '' },
+            (opts && opts.headers) || {}
+        );
+        let body = opts && opts.body;
+        if (body && typeof body === 'object' && !(body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+            body = JSON.stringify(body);
+        }
+        const res = await fetch(url, Object.assign({}, opts || {}, { headers, credentials: 'same-origin', body }));
+        if (!res.ok) {
+            let msg = res.statusText;
+            try {
+                const j = await res.json();
+                if (j && j.message) {
+                    msg = j.message;
+                }
+            } catch (e) {
+                void e;
+            }
+            throw new Error(msg);
+        }
+        const ct = res.headers.get('content-type') || '';
+        if (ct.indexOf('application/json') !== -1) {
+            return res.json();
+        }
+        return res.text();
+    };
+})();
+
 document.addEventListener('alpine:init', () => {
     Alpine.data('ekoEditorCanvas', () => ({
         zoomPercent: 100,
@@ -23,6 +61,7 @@ document.addEventListener('alpine:init', () => {
         saveState: '',
         saveTimer: null,
         layerSort: null,
+        interactDebounceTimer: null,
         inlineOpen: false,
         inlineValue: '',
         inlineTargetId: null,
@@ -46,10 +85,13 @@ document.addEventListener('alpine:init', () => {
             this.$watch(
                 'elements',
                 () => {
-                    this.$nextTick(() => {
-                        this.bindInteract();
-                        this.bindLayersSort();
-                    });
+                    clearTimeout(this.interactDebounceTimer);
+                    this.interactDebounceTimer = setTimeout(() => {
+                        this.$nextTick(() => {
+                            this.bindInteract();
+                            this.bindLayersSort();
+                        });
+                    }, 120);
                     this.scheduleSave();
                 },
                 { deep: true }
@@ -229,17 +271,25 @@ document.addEventListener('alpine:init', () => {
             const fd = new FormData();
             fd.append('file', f);
             try {
-                await fetch(String(this.cfg().root || '').replace(/\/?$/, '/') + 'gallery', {
+                const res = await fetch(String(this.cfg().root || '').replace(/\/?$/, '/') + 'gallery', {
                     method: 'POST',
                     headers: { 'X-WP-Nonce': this.cfg().nonce || '' },
                     body: fd,
                     credentials: 'same-origin',
-                }).then(async (r) => {
-                    if (!r.ok) {
-                        throw new Error('Upload failed');
-                    }
-                    return r.json();
                 });
+                let data = {};
+                try {
+                    data = await res.json();
+                } catch (e) {
+                    data = {};
+                }
+                if (!res.ok) {
+                    const msg =
+                        (data && typeof data.message === 'string' && data.message) ||
+                        (data && data.code && String(data.code)) ||
+                        'HTTP ' + res.status;
+                    throw new Error(msg);
+                }
                 await this.refreshGallery();
             } catch (e) {
                 this.saveState = String(e.message || e);
@@ -288,13 +338,19 @@ document.addEventListener('alpine:init', () => {
             }
             this.saveState = '…';
             try {
+                const body = {
+                    json_data: { elements: this.elements },
+                    width_mm: this.widthMm,
+                    height_mm: this.heightMm,
+                };
+                const raw = JSON.stringify(body);
+                if (raw.length > 380000) {
+                    this.saveState = 'JSON too large to save';
+                    return;
+                }
                 await this.api('templates/' + id, {
                     method: 'PATCH',
-                    body: {
-                        json_data: { elements: this.elements },
-                        width_mm: this.widthMm,
-                        height_mm: this.heightMm,
-                    },
+                    body,
                 });
                 this.saveState = 'OK';
             } catch (e) {

@@ -20,26 +20,27 @@ if (! defined('ABSPATH')) {
         </div>
         <div class="flex flex-wrap gap-2">
             <?php if (current_user_can('manage_options')) : ?>
-                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="filterUserId" @change="load()">
+                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="filterUserId" @change="page=1; loadLookups(); load()">
                     <option value=""><?php echo esc_html__('All users', 'eko-sampa'); ?></option>
                     <template x-for="u in users" :key="u.id">
                         <option :value="u.id" x-text="u.display_name + ' (' + u.id + ')'"></option>
                     </template>
                 </select>
             <?php endif; ?>
-            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="q" @keydown.enter.prevent="load()" placeholder="<?php echo esc_attr__('Order ID…', 'eko-sampa'); ?>" />
-            <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="status" @change="load()">
+            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="q" @keydown.enter.prevent="page=1; load()" placeholder="<?php echo esc_attr__('Order ID…', 'eko-sampa'); ?>" />
+            <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="status" @change="page=1; load()">
                 <option value=""><?php echo esc_html__('All statuses', 'eko-sampa'); ?></option>
                 <option value="pending">pending</option>
                 <option value="in_progress">in_progress</option>
                 <option value="print_queue">print_queue</option>
                 <option value="completed">completed</option>
             </select>
-            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
+            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
             <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" @click="reset()"><?php echo esc_html__('New', 'eko-sampa'); ?></button>
         </div>
     </div>
     <p class="text-sm text-red-600" x-show="err" x-text="err"></p>
+    <p class="text-xs text-slate-500" x-show="loading" x-cloak><?php echo esc_html__('Loading…', 'eko-sampa'); ?></p>
     <div class="grid gap-6 lg:grid-cols-2">
         <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -47,6 +48,8 @@ if (! defined('ABSPATH')) {
                     <tr>
                         <th class="px-4 py-2">ID</th>
                         <th class="px-4 py-2"><?php echo esc_html__('Status', 'eko-sampa'); ?></th>
+                        <th class="px-4 py-2"><?php echo esc_html__('WC', 'eko-sampa'); ?></th>
+                        <th class="px-4 py-2"><?php echo esc_html__('Print', 'eko-sampa'); ?></th>
                         <th class="px-4 py-2"></th>
                     </tr>
                 </thead>
@@ -55,6 +58,8 @@ if (! defined('ABSPATH')) {
                         <tr class="hover:bg-slate-50/80">
                             <td class="px-4 py-2 font-mono text-slate-900" x-text="r.id"></td>
                             <td class="px-4 py-2 text-slate-600" x-text="r.status"></td>
+                            <td class="px-4 py-2 font-mono text-xs text-slate-600" x-text="r.woo_order_id ? r.woo_order_id : '—'"></td>
+                            <td class="px-4 py-2 text-slate-600" x-text="r.print_ready == 1 ? '<?php echo esc_js(__('Yes', 'eko-sampa')); ?>' : '<?php echo esc_js(__('No', 'eko-sampa')); ?>'"></td>
                             <td class="px-4 py-2 text-right whitespace-nowrap">
                                 <button type="button" class="text-indigo-600 hover:underline" @click="fetchPreview(r.id)"><?php echo esc_html__('Preview', 'eko-sampa'); ?></button>
                                 <a class="ml-2 text-indigo-600 hover:underline" :href="printUrl(r.id)" target="_blank"><?php echo esc_html__('Print', 'eko-sampa'); ?></a>
@@ -66,6 +71,13 @@ if (! defined('ABSPATH')) {
                     </template>
                 </tbody>
             </table>
+            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
+                <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="page"></span></span>
+                <div class="flex gap-2">
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
+                </div>
+            </div>
         </div>
         <div class="space-y-4">
             <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -108,6 +120,13 @@ if (! defined('ABSPATH')) {
                             <option value="completed">completed</option>
                         </select>
                     </label>
+                    <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('WooCommerce order ID', 'eko-sampa'); ?>
+                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" min="0" x-model.number="form.woo_order_id" placeholder="<?php echo esc_attr__('Optional link', 'eko-sampa'); ?>" />
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-700 sm:col-span-2">
+                        <input type="checkbox" x-model="form.print_ready" :true-value="1" :false-value="0" />
+                        <?php echo esc_html__('Print ready', 'eko-sampa'); ?>
+                    </label>
                 </div>
                 <div class="mt-4 border-t border-slate-100 pt-3">
                     <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Dynamic data (slug → value)', 'eko-sampa'); ?></p>
@@ -122,7 +141,13 @@ if (! defined('ABSPATH')) {
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Live preview', 'eko-sampa'); ?></h3>
-                <div class="mt-2 min-h-[8rem] overflow-auto rounded border border-slate-100 bg-slate-50 p-2 text-sm" x-html="previewHtml"></div>
+                <iframe
+                    class="mt-2 h-[min(24rem,50vh)] w-full min-h-[8rem] rounded border border-slate-100 bg-white"
+                    sandbox=""
+                    referrerpolicy="no-referrer"
+                    title="<?php echo esc_attr__('Order preview', 'eko-sampa'); ?>"
+                    :src="previewFrameSrc"
+                ></iframe>
             </div>
         </div>
     </div>

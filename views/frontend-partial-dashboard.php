@@ -55,7 +55,51 @@ if (class_exists('Eko_Sampa_Service')) {
         </div>
     </div>
 
-    <div class="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">
-        <?php echo esc_html__('Production status and deeper widgets can plug in here as modules ship.', 'eko-sampa'); ?>
+    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Quick links', 'eko-sampa'); ?></h3>
+        <p class="mt-1 text-sm text-slate-500"><?php echo esc_html__('Jump to a section you use often.', 'eko-sampa'); ?></p>
+        <ul class="mt-4 flex flex-wrap gap-2">
+            <?php
+            $quick = [
+                [
+                    'view'  => 'clients',
+                    'label' => __('Clients', 'eko-sampa'),
+                    'show'  => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
+                ],
+                [
+                    'view'  => 'services',
+                    'label' => __('Services', 'eko-sampa'),
+                    'show'  => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
+                ],
+                [
+                    'view'  => 'templates',
+                    'label' => __('Templates', 'eko-sampa'),
+                    'show'  => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
+                ],
+                [
+                    'view'  => 'editor',
+                    'label' => __('Editor', 'eko-sampa'),
+                    'show'  => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
+                ],
+                [
+                    'view'  => 'orders',
+                    'label' => __('Orders', 'eko-sampa'),
+                    'show'  => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
+                ],
+                [
+                    'view'  => 'profile',
+                    'label' => __('Profile', 'eko-sampa'),
+                    'show'  => true,
+                ],
+            ];
+            foreach ($quick as $item) {
+                if (empty($item['show'])) {
+                    continue;
+                }
+                $href = esc_url(Eko_Sampa_Frontend_Router::get_url((string) $item['view']));
+                echo '<li><a class="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50" href="' . $href . '">' . esc_html((string) $item['label']) . '</a></li>';
+            }
+            ?>
+        </ul>
     </div>
 </div>

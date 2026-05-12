@@ -61,7 +61,7 @@ final class Eko_Sampa_Plugin {
      */
     public function boot(): void {
         $this->maybe_upgrade_database();
-        $this->load_textdomain();
+        add_action('init', [$this, 'load_textdomain_on_init'], 1);
 
         $this->roles->register_hooks();
         $this->frontend_router->register_hooks();
@@ -70,6 +70,10 @@ final class Eko_Sampa_Plugin {
         $this->rest_api->register_hooks();
         $this->router->register_hooks();
         $this->assets->register_hooks();
+
+        if (class_exists('WooCommerce', false)) {
+            (new Eko_Sampa_Wc_Bridge())->register_hooks();
+        }
 
         /**
          * Fires after Eko Sampa core services are registered.
@@ -120,7 +124,7 @@ final class Eko_Sampa_Plugin {
         $this->database->migrate();
     }
 
-    private function load_textdomain(): void {
+    public function load_textdomain_on_init(): void {
         load_plugin_textdomain(
             'eko-sampa',
             false,

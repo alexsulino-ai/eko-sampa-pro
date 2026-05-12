@@ -47,6 +47,33 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Whether `slug` is free for this service (optionally ignoring one field row).
+     */
+    public function slug_is_available(int $service_id, string $slug, ?int $except_field_id): bool {
+        if ($service_id <= 0) {
+            return false;
+        }
+
+        $clean = sanitize_title($slug);
+        if ($clean === '') {
+            return false;
+        }
+
+        $sql  = 'SELECT id FROM ' . $this->table() . ' WHERE service_id = %d AND slug = %s';
+        $vals = [$service_id, $clean];
+        if ($except_field_id !== null && $except_field_id > 0) {
+            $sql .= ' AND id != %d';
+            $vals[] = $except_field_id;
+        }
+        $sql .= ' LIMIT 1';
+
+        $prep = $this->prepare($sql, $vals);
+        $found = $this->db()->get_var($prep);
+
+        return null === $found || '' === $found || 0 === (int) $found;
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function create(int $service_id, array $data): int|false {
@@ -56,6 +83,11 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
 
         $row = $this->sanitize_row($data, false, $service_id);
         if ($row === []) {
+            return false;
+        }
+
+        $slug = (string) ($row['slug'] ?? '');
+        if ($slug !== '' && ! $this->slug_is_available($service_id, $slug, null)) {
             return false;
         }
 
@@ -94,6 +126,13 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         }
 
         $service_id = (int) ($existing['service_id'] ?? 0);
+        if (array_key_exists('slug', $data)) {
+            $candidate = sanitize_title((string) $data['slug']);
+            if ($candidate !== '' && ! $this->slug_is_available($service_id, $candidate, $id)) {
+                return false;
+            }
+        }
+
         $row        = $this->sanitize_row($data, true, $service_id);
         if ($row === []) {
             return true;

@@ -101,6 +101,22 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Find an OS row linked to a WooCommerce order ID (woo_order_id column).
+     */
+    public function get_by_woo_order_id(int $woo_order_id): ?array {
+        if ($woo_order_id <= 0) {
+            return null;
+        }
+
+        [$extra, $own] = $this->ownership_sql();
+        $sql  = 'SELECT * FROM ' . $this->table() . ' WHERE woo_order_id = %d' . $extra . ' LIMIT 1';
+        $prep = $this->prepare($sql, array_merge([$woo_order_id], $own));
+        $row  = $this->db()->get_row($prep, ARRAY_A);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function update(int $id, array $data): bool {
@@ -323,6 +339,62 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Flat map: string keys, scalar values only; caps size for MVP stability.
+     *
+     * @return array<string, string>|false
+     */
+    private function normalize_dynamic_data_array(mixed $value): array|false {
+        if (! is_array($value)) {
+            return false;
+        }
+
+        if (function_exists('array_is_list') && array_is_list($value)) {
+            return false;
+        }
+
+        $out = [];
+        $i   = 0;
+
+        foreach ($value as $k => $v) {
+            if (++$i > 120) {
+                return false;
+            }
+
+            $key = sanitize_key((string) $k);
+            if ($key === '') {
+                continue;
+            }
+
+            if (is_array($v) || is_object($v)) {
+                return false;
+            }
+
+            if ($v === null) {
+                $out[ $key ] = '';
+
+                continue;
+            }
+
+            if (is_bool($v)) {
+                $out[ $key ] = $v ? '1' : '0';
+
+                continue;
+            }
+
+            $s = (string) $v;
+            if (strlen($s) > 8000) {
+                return false;
+            }
+
+            $out[ $key ] = strlen($s) > 240
+                ? sanitize_textarea_field($s)
+                : sanitize_text_field($s);
+        }
+
+        return $out;
+    }
+
+    /**
      * @return string|null|string false on invalid.
      */
     private function normalize_json(mixed $value): string|false|null {
@@ -331,7 +403,12 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         }
 
         if (is_array($value)) {
-            return wp_json_encode($value, JSON_UNESCAPED_UNICODE) ?: false;
+            $flat = $this->normalize_dynamic_data_array($value);
+            if (false === $flat) {
+                return false;
+            }
+
+            return wp_json_encode($flat, JSON_UNESCAPED_UNICODE) ?: false;
         }
 
         if (is_string($value)) {
@@ -340,7 +417,16 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
                 return false;
             }
 
-            return wp_json_encode($decoded, JSON_UNESCAPED_UNICODE) ?: false;
+            if (is_array($decoded)) {
+                $flat = $this->normalize_dynamic_data_array($decoded);
+                if (false === $flat) {
+                    return false;
+                }
+
+                return wp_json_encode($flat, JSON_UNESCAPED_UNICODE) ?: false;
+            }
+
+            return false;
         }
 
         return false;

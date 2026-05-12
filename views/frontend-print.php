@@ -68,6 +68,9 @@ if (! function_exists('eko_sampa_build_print_context')) {
 
 $ctx = eko_sampa_build_print_context($order);
 $out = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, true);
+if (isset($out['html']) && is_string($out['html'])) {
+    $out['html'] = wp_kses_post($out['html']);
+}
 
 ?>
 <div class="eko-sampa-print-page mx-auto max-w-5xl p-6">

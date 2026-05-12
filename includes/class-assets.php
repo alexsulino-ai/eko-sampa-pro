@@ -73,7 +73,7 @@ final class Eko_Sampa_Assets {
                     self::HANDLE_EDITOR_CANVAS,
                     'ekoSampaEditor',
                     [
-                        'templateId' => 0,
+                        'templateId' => isset($_GET['template_id']) ? absint((int) $_GET['template_id']) : 0,
                         'root'       => esc_url_raw(rest_url('eko-sampa/v1/')),
                         'nonce'      => wp_create_nonce('wp_rest'),
                     ]

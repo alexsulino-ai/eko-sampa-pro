@@ -44,11 +44,15 @@
 document.addEventListener('alpine:init', () => {
     Alpine.data('ekoClients', () => ({
         rows: [],
+        page: 1,
+        pageSize: 30,
+        hasNext: false,
         q: '',
         filterUserId: '',
         users: [],
         form: { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' },
         err: '',
+        loading: false,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
@@ -61,8 +65,13 @@ document.addEventListener('alpine:init', () => {
             await this.load();
         },
         async load() {
+            this.loading = true;
             this.err = '';
-            const qs = new URLSearchParams({ limit: '200' });
+            const ps = this.pageSize;
+            const qs = new URLSearchParams({
+                limit: String(ps + 1),
+                offset: String((this.page - 1) * ps),
+            });
             if (this.q) {
                 qs.set('s', this.q);
             }
@@ -70,10 +79,29 @@ document.addEventListener('alpine:init', () => {
                 qs.set('filter_user_id', this.filterUserId);
             }
             try {
-                this.rows = await window.ekoSampaApi('clients?' + qs.toString(), { method: 'GET' });
+                const arr = await window.ekoSampaApi('clients?' + qs.toString(), { method: 'GET' });
+                const list = Array.isArray(arr) ? arr : [];
+                this.hasNext = list.length > ps;
+                this.rows = list.slice(0, ps);
             } catch (e) {
                 this.err = String(e.message || e);
+            } finally {
+                this.loading = false;
             }
+        },
+        prevPage() {
+            if (this.page <= 1) {
+                return;
+            }
+            this.page--;
+            this.load();
+        },
+        nextPage() {
+            if (!this.hasNext) {
+                return;
+            }
+            this.page++;
+            this.load();
         },
         edit(row) {
             this.form = Object.assign({ user_id: '' }, row);
@@ -116,12 +144,16 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('ekoServices', () => ({
         rows: [],
         fields: [],
+        page: 1,
+        pageSize: 30,
+        hasNext: false,
         q: '',
         filterUserId: '',
         users: [],
         form: { id: 0, nome: '', descricao: '', is_global: 0 },
         fieldForm: { id: 0, service_id: 0, label: '', slug: '', type: 'text', required: 0, options_json: null, sort_order: 0 },
         err: '',
+        loading: false,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
@@ -134,8 +166,13 @@ document.addEventListener('alpine:init', () => {
             await this.load();
         },
         async load() {
+            this.loading = true;
             this.err = '';
-            const qs = new URLSearchParams({ limit: '200' });
+            const ps = this.pageSize;
+            const qs = new URLSearchParams({
+                limit: String(ps + 1),
+                offset: String((this.page - 1) * ps),
+            });
             if (this.q) {
                 qs.set('s', this.q);
             }
@@ -143,10 +180,29 @@ document.addEventListener('alpine:init', () => {
                 qs.set('filter_user_id', this.filterUserId);
             }
             try {
-                this.rows = await window.ekoSampaApi('services?' + qs.toString(), { method: 'GET' });
+                const arr = await window.ekoSampaApi('services?' + qs.toString(), { method: 'GET' });
+                const list = Array.isArray(arr) ? arr : [];
+                this.hasNext = list.length > ps;
+                this.rows = list.slice(0, ps);
             } catch (e) {
                 this.err = String(e.message || e);
+            } finally {
+                this.loading = false;
             }
+        },
+        prevPage() {
+            if (this.page <= 1) {
+                return;
+            }
+            this.page--;
+            this.load();
+        },
+        nextPage() {
+            if (!this.hasNext) {
+                return;
+            }
+            this.page++;
+            this.load();
         },
         async loadFields(sid) {
             try {
@@ -159,6 +215,22 @@ document.addEventListener('alpine:init', () => {
             this.form = Object.assign({ is_global: 0 }, row);
             this.loadFields(row.id);
             this.newField();
+        },
+        editField(f) {
+            if (!f || !this.form.id) {
+                return;
+            }
+            const req = f.required == null ? 0 : parseInt(String(f.required), 10) ? 1 : 0;
+            this.fieldForm = {
+                id: f.id,
+                service_id: this.form.id,
+                label: f.label != null ? String(f.label) : '',
+                slug: f.slug != null ? String(f.slug) : '',
+                type: f.type != null ? String(f.type) : 'text',
+                required: req,
+                options_json: f.options_json != null ? f.options_json : null,
+                sort_order: f.sort_order != null ? Number(f.sort_order) : 0,
+            };
         },
         reset() {
             this.form = { id: 0, nome: '', descricao: '', is_global: 0 };
@@ -239,12 +311,27 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.data('ekoTemplates', () => ({
         rows: [],
+        page: 1,
+        pageSize: 30,
+        hasNext: false,
         q: '',
         cat: '',
         filterUserId: '',
         users: [],
-        form: { id: 0, nome: '', categoria: '', descricao: '', width_mm: 210, height_mm: 297, service_id: 0, user_id: '' },
+        form: {
+            id: 0,
+            nome: '',
+            categoria: '',
+            descricao: '',
+            width_mm: 210,
+            height_mm: 297,
+            service_id: 0,
+            product_id: 0,
+            preview_image: '',
+            user_id: '',
+        },
         err: '',
+        loading: false,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
@@ -257,8 +344,13 @@ document.addEventListener('alpine:init', () => {
             await this.load();
         },
         async load() {
+            this.loading = true;
             this.err = '';
-            const qs = new URLSearchParams({ limit: '200' });
+            const ps = this.pageSize;
+            const qs = new URLSearchParams({
+                limit: String(ps + 1),
+                offset: String((this.page - 1) * ps),
+            });
             if (this.q) {
                 qs.set('s', this.q);
             }
@@ -269,16 +361,47 @@ document.addEventListener('alpine:init', () => {
                 qs.set('filter_user_id', this.filterUserId);
             }
             try {
-                this.rows = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
+                const arr = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
+                const list = Array.isArray(arr) ? arr : [];
+                this.hasNext = list.length > ps;
+                this.rows = list.slice(0, ps);
             } catch (e) {
                 this.err = String(e.message || e);
+            } finally {
+                this.loading = false;
             }
         },
+        prevPage() {
+            if (this.page <= 1) {
+                return;
+            }
+            this.page--;
+            this.load();
+        },
+        nextPage() {
+            if (!this.hasNext) {
+                return;
+            }
+            this.page++;
+            this.load();
+        },
         editorUrl(id) {
-            const base = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.editor) || '';
-            const u = new URL(base, window.location.origin);
-            u.searchParams.set('template_id', String(id));
-            return u.toString();
+            const idStr = String(id);
+            let base = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.editor) || '';
+            if (typeof base !== 'string') {
+                base = '';
+            }
+            if (!base) {
+                return '/eko-sampa_editor/?template_id=' + encodeURIComponent(idStr);
+            }
+            try {
+                const u = new URL(base, window.location.origin);
+                u.searchParams.set('template_id', idStr);
+                return u.toString();
+            } catch (e) {
+                const sep = base.indexOf('?') >= 0 ? '&' : '?';
+                return base + sep + 'template_id=' + encodeURIComponent(idStr);
+            }
         },
         async duplicate(id) {
             try {
@@ -292,12 +415,28 @@ document.addEventListener('alpine:init', () => {
             window.open(this.editorUrl(id), '_blank');
         },
         reset() {
-            this.form = { id: 0, nome: '', categoria: '', descricao: '', width_mm: 210, height_mm: 297, service_id: 0, user_id: '' };
+            this.form = {
+                id: 0,
+                nome: '',
+                categoria: '',
+                descricao: '',
+                width_mm: 210,
+                height_mm: 297,
+                service_id: 0,
+                product_id: 0,
+                preview_image: '',
+                user_id: '',
+            };
         },
         async save() {
             this.err = '';
             const payload = { ...this.form };
             delete payload.id;
+            delete payload.json_data;
+            delete payload.created_at;
+            delete payload.updated_at;
+            payload.product_id = parseInt(String(payload.product_id || 0), 10);
+            payload.preview_image = payload.preview_image != null ? String(payload.preview_image) : '';
             try {
                 if (this.form.id) {
                     await window.ekoSampaApi('templates/' + this.form.id, { method: 'PATCH', body: payload });
@@ -314,7 +453,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
         edit(row) {
-            this.form = Object.assign({ user_id: '' }, row);
+            const r = Object.assign({ user_id: '' }, row);
+            r.product_id = r.product_id != null ? parseInt(String(r.product_id), 10) : 0;
+            r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
+            r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
+            r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
+            r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
+            this.form = r;
         },
         async remove(id) {
             if (!window.confirm('OK?')) {
@@ -331,6 +476,9 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.data('ekoOrders', () => ({
         rows: [],
+        page: 1,
+        pageSize: 30,
+        hasNext: false,
         clients: [],
         services: [],
         templates: [],
@@ -338,7 +486,7 @@ document.addEventListener('alpine:init', () => {
         status: '',
         filterUserId: '',
         users: [],
-        previewHtml: '',
+        previewFrameSrc: 'about:blank',
         form: {
             id: 0,
             client_id: '',
@@ -347,10 +495,13 @@ document.addEventListener('alpine:init', () => {
             status: 'pending',
             dynamic_data_json: {},
             user_id: '',
+            woo_order_id: 0,
+            print_ready: 0,
         },
         dynKeys: '',
         dynVal: '',
         err: '',
+        loading: false,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
@@ -360,18 +511,33 @@ document.addEventListener('alpine:init', () => {
                     this.users = [];
                 }
             }
-            try {
-                this.clients = await window.ekoSampaApi('clients?limit=500', { method: 'GET' });
-                this.services = await window.ekoSampaApi('services?limit=500', { method: 'GET' });
-                this.templates = await window.ekoSampaApi('templates?limit=500', { method: 'GET' });
-            } catch (e) {
-                void e;
-            }
+            await this.loadLookups();
             await this.load();
         },
+        async loadLookups() {
+            try {
+                const qs = new URLSearchParams({ limit: '500' });
+                if (this.isAdmin && this.filterUserId) {
+                    qs.set('filter_user_id', this.filterUserId);
+                }
+                const b = await window.ekoSampaApi('lookups/order-form?' + qs.toString(), { method: 'GET' });
+                this.clients = Array.isArray(b.clients) ? b.clients : [];
+                this.services = Array.isArray(b.services) ? b.services : [];
+                this.templates = Array.isArray(b.templates) ? b.templates : [];
+            } catch (e) {
+                this.clients = [];
+                this.services = [];
+                this.templates = [];
+            }
+        },
         async load() {
+            this.loading = true;
             this.err = '';
-            const qs = new URLSearchParams({ limit: '200' });
+            const ps = this.pageSize;
+            const qs = new URLSearchParams({
+                limit: String(ps + 1),
+                offset: String((this.page - 1) * ps),
+            });
             if (this.q) {
                 qs.set('s', this.q);
             }
@@ -382,10 +548,29 @@ document.addEventListener('alpine:init', () => {
                 qs.set('filter_user_id', this.filterUserId);
             }
             try {
-                this.rows = await window.ekoSampaApi('orders?' + qs.toString(), { method: 'GET' });
+                const arr = await window.ekoSampaApi('orders?' + qs.toString(), { method: 'GET' });
+                const list = Array.isArray(arr) ? arr : [];
+                this.hasNext = list.length > ps;
+                this.rows = list.slice(0, ps);
             } catch (e) {
                 this.err = String(e.message || e);
+            } finally {
+                this.loading = false;
             }
+        },
+        prevPage() {
+            if (this.page <= 1) {
+                return;
+            }
+            this.page--;
+            this.load();
+        },
+        nextPage() {
+            if (!this.hasNext) {
+                return;
+            }
+            this.page++;
+            this.load();
         },
         reset() {
             this.form = {
@@ -396,12 +581,17 @@ document.addEventListener('alpine:init', () => {
                 status: 'pending',
                 dynamic_data_json: {},
                 user_id: '',
+                woo_order_id: 0,
+                print_ready: 0,
             };
             this.dynKeys = '';
             this.dynVal = '';
         },
         edit(row) {
-            this.form = Object.assign({}, row);
+            const r = Object.assign({}, row);
+            r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
+            r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
+            this.form = r;
             let d = {};
             if (typeof this.form.dynamic_data_json === 'string' && this.form.dynamic_data_json) {
                 try {
@@ -430,6 +620,8 @@ document.addEventListener('alpine:init', () => {
                 template_id: parseInt(String(this.form.template_id || 0), 10),
                 status: this.form.status,
                 dynamic_data_json: this.form.dynamic_data_json,
+                woo_order_id: parseInt(String(this.form.woo_order_id || 0), 10),
+                print_ready: parseInt(String(this.form.print_ready != null ? this.form.print_ready : 0), 10) ? 1 : 0,
             };
             if (this.isAdmin && this.form.user_id) {
                 payload.user_id = parseInt(String(this.form.user_id), 10);
@@ -466,15 +658,39 @@ document.addEventListener('alpine:init', () => {
             }
         },
         printUrl(id) {
-            const p = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.print) || '';
-            return String(p).replace(/\/?$/, '/') + id + '/';
+            const sid = String(id);
+            let p = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.print) || '';
+            if (typeof p !== 'string') {
+                p = '';
+            }
+            if (!p) {
+                return '/eko-sampa_print/' + sid + '/';
+            }
+            return p.replace(/\/?$/, '/') + sid + '/';
         },
         async fetchPreview(id) {
+            this.previewFrameSrc = 'about:blank';
             try {
                 const data = await window.ekoSampaApi('orders/' + id + '/render', { method: 'GET' });
-                this.previewHtml = typeof data === 'object' && data && data.html ? data.html : String(data || '');
+                const inner =
+                    typeof data === 'object' && data && data.html
+                        ? String(data.html)
+                        : '<p>Invalid preview.</p>';
+                const doc =
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#f8fafc">' +
+                    inner +
+                    '</body></html>';
+                this.previewFrameSrc = 'data:text/html;charset=utf-8,' + encodeURIComponent(doc);
             } catch (e) {
-                this.previewHtml = '<p>' + String(e.message || e) + '</p>';
+                const msg = String(e.message || e)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                const doc =
+                    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:8px;font-family:sans-serif">' +
+                    msg +
+                    '</body></html>';
+                this.previewFrameSrc = 'data:text/html;charset=utf-8,' + encodeURIComponent(doc);
             }
         },
     }));

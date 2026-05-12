@@ -18,8 +18,48 @@ final class Eko_Sampa_Rest_Api {
 
     private const NS = 'eko-sampa/v1';
 
+    /** Max raw JSON body size for mutating requests (bytes). */
+    private const MAX_JSON_BODY_BYTES = 524288;
+
+    /** Max encoded `json_data` for templates (bytes), below global body cap. */
+    private const MAX_TEMPLATE_JSON_BYTES = 393216;
+
     public function register_hooks(): void {
+        add_filter('rest_pre_dispatch', [$this, 'enforce_json_body_limit'], 10, 3);
         add_action('rest_api_init', [$this, 'register_routes']);
+    }
+
+    /**
+     * Reject oversized bodies early for this namespace (DoS / runaway editor payloads).
+     *
+     * @param mixed $result
+     */
+    public function enforce_json_body_limit($result, $server, \WP_REST_Request $request) {
+        unset($server);
+        if (null !== $result) {
+            return $result;
+        }
+
+        $route = (string) $request->get_route();
+        if ($route === '' || ! str_contains($route, '/' . self::NS . '/')) {
+            return $result;
+        }
+
+        $method = $request->get_method();
+        if (! in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            return $result;
+        }
+
+        $len = strlen((string) $request->get_body());
+        if ($len > self::MAX_JSON_BODY_BYTES) {
+            return new \WP_Error(
+                'eko_sampa_request_too_large',
+                __('Request body is too large.', 'eko-sampa'),
+                ['status' => 413]
+            );
+        }
+
+        return $result;
     }
 
     public function register_routes(): void {
@@ -273,6 +313,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/lookups/order-form',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_lookups_order_form'],
+                'permission_callback' => [$this, 'require_orders_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/gallery',
             [
                 [
@@ -330,8 +380,9 @@ final class Eko_Sampa_Rest_Api {
      * @return array<string, mixed>
      */
     private function list_args(\WP_REST_Request $request): array {
+        $lim = (int) $request->get_param('limit');
         $args = [
-            'limit'   => (int) $request->get_param('limit'),
+            'limit'   => $lim > 0 ? $lim : 50,
             'offset'  => (int) $request->get_param('offset'),
             'orderby' => (string) $request->get_param('orderby'),
             'order'   => (string) $request->get_param('order'),
@@ -497,13 +548,24 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_fields_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $sid = (int) $request['id'];
-        $id  = (new Eko_Sampa_Service_Field())->create($sid, $this->json_params($request));
+        $sid    = (int) $request['id'];
+        $params = $this->json_params($request);
+        $field  = new Eko_Sampa_Service_Field();
+        $slug   = sanitize_title((string) ($params['slug'] ?? ''));
+        if ($slug !== '' && ! $field->slug_is_available($sid, $slug, null)) {
+            return new \WP_Error(
+                'eko_sampa_field_slug_exists',
+                __('This slug is already used for another field in this service.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
+        $id = $field->create($sid, $params);
         if (! $id) {
             return new \WP_Error('eko_sampa_create_failed', __('Could not create field.', 'eko-sampa'), ['status' => 400]);
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Service_Field())->get((int) $id), 201);
+        return new \WP_REST_Response($field->get((int) $id), 201);
     }
 
     public function route_fields_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -517,13 +579,31 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_fields_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $fid = (int) $request['fid'];
-        $ok  = (new Eko_Sampa_Service_Field())->update($fid, $this->json_params($request));
+        $fid    = (int) $request['fid'];
+        $params = $this->json_params($request);
+        $field  = new Eko_Sampa_Service_Field();
+        $row    = $field->get($fid);
+        if (! is_array($row)) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+        $sid = (int) ($row['service_id'] ?? 0);
+        if (array_key_exists('slug', $params)) {
+            $slug = sanitize_title((string) $params['slug']);
+            if ($slug !== '' && ! $field->slug_is_available($sid, $slug, $fid)) {
+                return new \WP_Error(
+                    'eko_sampa_field_slug_exists',
+                    __('This slug is already used for another field in this service.', 'eko-sampa'),
+                    ['status' => 409]
+                );
+            }
+        }
+
+        $ok = $field->update($fid, $params);
         if (! $ok) {
             return new \WP_Error('eko_sampa_update_failed', __('Could not update field.', 'eko-sampa'), ['status' => 400]);
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Service_Field())->get($fid));
+        return new \WP_REST_Response($field->get($fid));
     }
 
     public function route_fields_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -541,7 +621,13 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (new Eko_Sampa_Template())->create($this->json_params($request));
+        $params = $this->json_params($request);
+        $err    = $this->validate_template_json_payload($params);
+        if ($err instanceof \WP_Error) {
+            return $err;
+        }
+
+        $id = (new Eko_Sampa_Template())->create($params);
         if (! $id) {
             return new \WP_Error('eko_sampa_create_failed', __('Could not create template.', 'eko-sampa'), ['status' => 400]);
         }
@@ -560,8 +646,14 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (int) $request['id'];
-        $ok = (new Eko_Sampa_Template())->update($id, $this->json_params($request));
+        $id     = (int) $request['id'];
+        $params = $this->json_params($request);
+        $err    = $this->validate_template_json_payload($params);
+        if ($err instanceof \WP_Error) {
+            return $err;
+        }
+
+        $ok = (new Eko_Sampa_Template())->update($id, $params);
         if (! $ok) {
             return new \WP_Error('eko_sampa_update_failed', __('Could not update template.', 'eko-sampa'), ['status' => 400]);
         }
@@ -655,10 +747,32 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_bad_template', __('Template not found.', 'eko-sampa'), ['status' => 400]);
         }
 
-        $ctx = $this->build_print_context($order);
+        $ctx  = $this->build_print_context($order);
         $html = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, false);
+        if (isset($html['html']) && is_string($html['html'])) {
+            $html['html'] = wp_kses_post($html['html']);
+        }
 
         return new \WP_REST_Response($html);
+    }
+
+    /**
+     * Single round-trip for order form dropdowns (replaces three parallel list calls).
+     */
+    public function route_lookups_order_form(\WP_REST_Request $request): \WP_REST_Response {
+        $args            = $this->list_args($request);
+        $args['limit']   = 500;
+        $args['offset']  = 0;
+        $args['orderby'] = $args['orderby'] !== '' ? $args['orderby'] : 'id';
+        $args['order']   = $args['order'] !== '' ? $args['order'] : 'ASC';
+
+        return new \WP_REST_Response(
+            [
+                'clients'   => (new Eko_Sampa_Client())->list($args),
+                'services'  => (new Eko_Sampa_Service())->list($args),
+                'templates' => (new Eko_Sampa_Template())->list($args),
+            ]
+        );
     }
 
     public function route_gallery_list(\WP_REST_Request $request): \WP_REST_Response {
@@ -710,6 +824,40 @@ final class Eko_Sampa_Rest_Api {
     }
 
     /**
+     * @param array<string, mixed> $params
+     */
+    private function validate_template_json_payload(array $params): ?\WP_Error {
+        if (! array_key_exists('json_data', $params)) {
+            return null;
+        }
+
+        $raw = $params['json_data'];
+        if (is_string($raw)) {
+            $len = strlen($raw);
+        } else {
+            $enc = wp_json_encode($raw, JSON_UNESCAPED_UNICODE);
+            $len = is_string($enc) ? strlen($enc) : 0;
+            if (false === $enc) {
+                return new \WP_Error(
+                    'eko_sampa_invalid_json',
+                    __('Invalid template JSON.', 'eko-sampa'),
+                    ['status' => 400]
+                );
+            }
+        }
+
+        if ($len > self::MAX_TEMPLATE_JSON_BYTES) {
+            return new \WP_Error(
+                'eko_sampa_payload_too_large',
+                __('Template layout JSON is too large.', 'eko-sampa'),
+                ['status' => 413]
+            );
+        }
+
+        return null;
+    }
+
+    /**
      * @param array<string, mixed> $order
      *
      * @return array<string, string>
@@ -737,7 +885,9 @@ final class Eko_Sampa_Rest_Api {
                 foreach ($decoded as $k => $v) {
                     $key = sanitize_title((string) $k);
                     if ($key !== '') {
-                        $ctx[ strtolower($key) ] = is_scalar($v) ? (string) $v : wp_json_encode($v) ?: '';
+                        $ctx[ strtolower($key) ] = is_scalar($v)
+                            ? (string) $v
+                            : (wp_json_encode($v) ?: '');
                     }
                 }
             }
