@@ -57,6 +57,7 @@ final class Eko_Sampa_Database {
         return [
             '1.0.0' => [$this, 'migrate_to_1_0_0'],
             '1.0.1' => [$this, 'migrate_to_1_0_1'],
+            '1.0.2' => [$this, 'migrate_to_1_0_2'],
         ];
     }
 
@@ -211,5 +212,322 @@ final class Eko_Sampa_Database {
 
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $wpdb->query("ALTER TABLE {$table} ADD COLUMN categoria varchar(191) NOT NULL DEFAULT '' AFTER nome");
+    }
+
+    /**
+     * Align real DB columns with models / REST (Portuguese domain fields + English FK/field DSL).
+     *
+     * Fixes installs where tables pre-existed with English names (e.g. `name` vs `nome`) or
+     * partial schemas so dbDelta never added missing columns.
+     */
+    private function migrate_to_1_0_2(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        $this->schema_align_clients($wpdb);
+        $this->schema_align_services($wpdb);
+        $this->schema_align_fields($wpdb);
+        $this->schema_align_templates($wpdb);
+        $this->schema_align_layers($wpdb);
+        $this->schema_align_orders($wpdb);
+    }
+
+    /**
+     * @return array<string, true> Lowercase column names.
+     */
+    private function table_column_set(wpdb $wpdb, string $table): array {
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table = prefix + known suffix.
+        $rows = $wpdb->get_results("SHOW COLUMNS FROM `{$table}`", ARRAY_A);
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            if (isset($row['Field']) && is_string($row['Field'])) {
+                $out[ strtolower($row['Field']) ] = true;
+            }
+        }
+
+        return $out;
+    }
+
+    private function table_exists(wpdb $wpdb, string $suffix): bool {
+        $like = $wpdb->esc_like($wpdb->prefix . $suffix);
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $like));
+
+        return $found !== null
+            && $found !== ''
+            && strcasecmp((string) $found, $wpdb->prefix . $suffix) === 0;
+    }
+
+    /**
+     * @param array<string, string> $definitions column => MySQL fragment after column name (e.g. "varchar(255) NOT NULL DEFAULT ''")
+     */
+    private function add_missing_columns(wpdb $wpdb, string $table, array $definitions): void {
+        $have = $this->table_column_set($wpdb, $table);
+        foreach ($definitions as $col => $ddl) {
+            $c = strtolower($col);
+            if (isset($have[ $c ])) {
+                continue;
+            }
+            $col_sql = preg_replace('/[^a-z0-9_]/i', '', $col);
+            if ($col_sql === '' || strtolower($col_sql) !== $c) {
+                continue;
+            }
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN `{$col_sql}` {$ddl}");
+            $have[ $c ] = true;
+        }
+    }
+
+    /**
+     * Copy data from legacy column into target when both exist.
+     *
+     * @param bool $numeric When true, treats empty as 0 (for bigint FK columns).
+     */
+    private function copy_column_data_if_both_exist(wpdb $wpdb, string $table, string $target, string $source, bool $numeric = false): void {
+        $have = $this->table_column_set($wpdb, $table);
+        $t    = strtolower($target);
+        $s    = strtolower($source);
+        if (! isset($have[ $t ], $have[ $s ])) {
+            return;
+        }
+
+        $tt = preg_replace('/[^a-z0-9_]/i', '', $target);
+        $ss = preg_replace('/[^a-z0-9_]/i', '', $source);
+        if ($tt === '' || $ss === '') {
+            return;
+        }
+
+        if ($numeric) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query(
+                "UPDATE `{$table}` SET `{$tt}` = `{$ss}` "
+                . "WHERE ( `{$tt}` = 0 OR `{$tt}` IS NULL ) "
+                . "AND ( `{$ss}` IS NOT NULL AND `{$ss}` != 0 )"
+            );
+
+            return;
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query(
+            "UPDATE `{$table}` SET `{$tt}` = `{$ss}` "
+            . "WHERE ( `{$tt}` = '' OR `{$tt}` IS NULL ) "
+            . "AND ( `{$ss}` IS NOT NULL AND `{$ss}` != '' )"
+        );
+    }
+
+    private function drop_column_if_exists(wpdb $wpdb, string $table, string $column): void {
+        $have = $this->table_column_set($wpdb, $table);
+        $c    = strtolower($column);
+        if (! isset($have[ $c ])) {
+            return;
+        }
+
+        $cc = preg_replace('/[^a-z0-9_]/i', '', $column);
+        if ($cc === '' || strtolower($cc) !== $c) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query("ALTER TABLE `{$table}` DROP COLUMN `{$cc}`");
+    }
+
+    private function schema_align_clients(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_clients')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_clients';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'user_id'     => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'nome'        => "varchar(255) NOT NULL DEFAULT ''",
+                'email'       => "varchar(255) NOT NULL DEFAULT ''",
+                'telefone'    => "varchar(100) NOT NULL DEFAULT ''",
+                'documento'   => "varchar(100) NOT NULL DEFAULT ''",
+                'cidade'      => "varchar(100) NOT NULL DEFAULT ''",
+                'estado'      => "varchar(32) NOT NULL DEFAULT ''",
+                'created_at'  => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                'updated_at'  => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+            ]
+        );
+
+        $pairs = [
+            ['nome', 'name'],
+            ['nome', 'full_name'],
+            ['email', 'email_address'],
+            ['telefone', 'phone'],
+            ['telefone', 'mobile'],
+            ['telefone', 'tel'],
+            ['documento', 'document'],
+            ['documento', 'cpf'],
+            ['documento', 'document_id'],
+            ['cidade', 'city'],
+            ['estado', 'state'],
+            ['estado', 'province'],
+        ];
+        foreach ($pairs as [$dest, $src]) {
+            $this->copy_column_data_if_both_exist($wpdb, $table, $dest, $src);
+        }
+
+        foreach (
+            [
+                'name',
+                'full_name',
+                'email_address',
+                'phone',
+                'mobile',
+                'tel',
+                'document',
+                'cpf',
+                'document_id',
+                'city',
+                'state',
+                'province',
+            ] as $legacy
+        ) {
+            $this->drop_column_if_exists($wpdb, $table, $legacy);
+        }
+    }
+
+    private function schema_align_services(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_services')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_services';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'user_id'     => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'nome'        => "varchar(255) NOT NULL DEFAULT ''",
+                'descricao'   => 'text NULL',
+                'is_global'   => 'tinyint(1) NOT NULL DEFAULT 0',
+                'created_at'  => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                'updated_at'  => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+            ]
+        );
+
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'nome', 'name');
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'descricao', 'description');
+        $this->drop_column_if_exists($wpdb, $table, 'name');
+        $this->drop_column_if_exists($wpdb, $table, 'description');
+    }
+
+    private function schema_align_fields(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_fields')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_fields';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'service_id'  => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'label'       => "varchar(255) NOT NULL DEFAULT ''",
+                'slug'        => "varchar(191) NOT NULL DEFAULT ''",
+                'type'        => "varchar(20) NOT NULL DEFAULT 'text'",
+                'required'    => 'tinyint(1) NOT NULL DEFAULT 0',
+                'options_json' => 'longtext NULL',
+                'sort_order'  => 'int(11) NOT NULL DEFAULT 0',
+            ]
+        );
+
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'label', 'rotulo');
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'slug', 'identificador');
+        $this->drop_column_if_exists($wpdb, $table, 'rotulo');
+        $this->drop_column_if_exists($wpdb, $table, 'identificador');
+    }
+
+    private function schema_align_templates(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_templates')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'user_id'       => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'product_id'    => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'service_id'    => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'nome'          => "varchar(255) NOT NULL DEFAULT ''",
+                'categoria'     => "varchar(191) NOT NULL DEFAULT ''",
+                'descricao'     => 'text NULL',
+                'width_mm'      => 'int(11) NOT NULL DEFAULT 0',
+                'height_mm'     => 'int(11) NOT NULL DEFAULT 0',
+                'preview_image' => "varchar(500) NOT NULL DEFAULT ''",
+                'json_data'     => 'longtext NULL',
+                'created_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                'updated_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+            ]
+        );
+
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'nome', 'name');
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'descricao', 'description');
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'categoria', 'category');
+        $this->drop_column_if_exists($wpdb, $table, 'name');
+        $this->drop_column_if_exists($wpdb, $table, 'description');
+        $this->drop_column_if_exists($wpdb, $table, 'category');
+    }
+
+    private function schema_align_layers(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_layers')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_layers';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'template_id' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'layer_type'  => "varchar(50) NOT NULL DEFAULT ''",
+                'layer_order' => 'int(11) NOT NULL DEFAULT 0',
+                'layer_json'  => 'longtext NULL',
+            ]
+        );
+    }
+
+    private function schema_align_orders(wpdb $wpdb): void {
+        if (! $this->table_exists($wpdb, 'eko_sampa_orders')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_orders';
+        $this->add_missing_columns(
+            $wpdb,
+            $table,
+            [
+                'user_id'            => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'client_id'          => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'service_id'         => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'template_id'        => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'woo_order_id'       => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'status'             => "varchar(32) NOT NULL DEFAULT 'pending'",
+                'dynamic_data_json'  => 'longtext NULL',
+                'print_ready'        => 'tinyint(1) NOT NULL DEFAULT 0',
+                'created_at'         => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
+                'updated_at'         => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+            ]
+        );
+
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'client_id', 'cliente_id', true);
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'service_id', 'servico_id', true);
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'template_id', 'modelo_id', true);
+        $this->drop_column_if_exists($wpdb, $table, 'cliente_id');
+        $this->drop_column_if_exists($wpdb, $table, 'servico_id');
+        $this->drop_column_if_exists($wpdb, $table, 'modelo_id');
     }
 }

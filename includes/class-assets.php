@@ -13,6 +13,18 @@ if (! defined('ABSPATH')) {
 
 /**
  * Asset registration and conditional enqueue.
+ *
+ * ## Alpine load order (non-negotiable)
+ *
+ * Bundles that register components with `document.addEventListener('alpine:init', …)` and
+ * `Alpine.data(…)` must **not** list {@see self::HANDLE_ALPINE} in `wp_register_script` deps.
+ * WordPress prints dependencies first; if Alpine runs before those bundles, `alpine:init` has
+ * already fired and components never register (dead UI, no REST calls).
+ *
+ * Rule: **register listeners first, Alpine last** — enqueue `HANDLE_FRONTEND_APP` and
+ * `HANDLE_EDITOR_CANVAS` (and any future `alpine:init` modules) **before** `HANDLE_ALPINE`.
+ * Never add Alpine as a dependency of those bundles; keep Alpine’s own deps empty unless
+ * required otherwise.
  */
 final class Eko_Sampa_Assets {
 
@@ -43,6 +55,9 @@ final class Eko_Sampa_Assets {
     /**
      * Enqueue only on plugin admin screens or WooCommerce product editor when WC is active.
      *
+     * On the editor canvas screen: Sortable → Interact → editor-canvas → **Alpine last**
+     * (same contract as {@see self::enqueue_frontend()}).
+     *
      * @param string $hook_suffix Current admin page hook suffix.
      */
     public function enqueue_admin(string $hook_suffix): void {
@@ -58,9 +73,6 @@ final class Eko_Sampa_Assets {
         }
 
         if ($this->is_editor_canvas_screen($hook_suffix)) {
-            if (wp_script_is(self::HANDLE_ALPINE, 'registered')) {
-                wp_enqueue_script(self::HANDLE_ALPINE);
-            }
             if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {
                 wp_enqueue_script(self::HANDLE_SORTABLE);
             }
@@ -78,6 +90,10 @@ final class Eko_Sampa_Assets {
                         'nonce'      => wp_create_nonce('wp_rest'),
                     ]
                 );
+            }
+            // Alpine last: editor-canvas registers alpine:init before Alpine boots (class docblock).
+            if (wp_script_is(self::HANDLE_ALPINE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_ALPINE);
             }
         }
 
@@ -140,6 +156,23 @@ final class Eko_Sampa_Assets {
             true
         );
 
+        $fe_app_rel = 'assets/js/frontend-app.js';
+        $fe_app     = EKO_SAMPA_PLUGIN_DIR . $fe_app_rel;
+        if (is_readable($fe_app)) {
+            /**
+             * Must load before Alpine: the bundle registers `alpine:init` listeners that call
+             * `Alpine.data(...)`. If Alpine runs first, `alpine:init` has already fired and CRUD
+             * components never register (UI looks static; saves never run).
+             */
+            wp_register_script(
+                self::HANDLE_FRONTEND_APP,
+                EKO_SAMPA_PLUGIN_URL . $fe_app_rel,
+                [],
+                EKO_SAMPA_VERSION,
+                true
+            );
+        }
+
         wp_register_script(
             self::HANDLE_INTERACT,
             'https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js',
@@ -159,22 +192,14 @@ final class Eko_Sampa_Assets {
         $editor_js_rel = 'assets/js/editor-canvas.js';
         $editor_js     = EKO_SAMPA_PLUGIN_DIR . $editor_js_rel;
         if (is_readable($editor_js)) {
+            /**
+             * No Alpine handle in deps: this file must execute before Alpine so `alpine:init`
+             * listeners are registered (same race as frontend-app.js).
+             */
             wp_register_script(
                 self::HANDLE_EDITOR_CANVAS,
                 EKO_SAMPA_PLUGIN_URL . $editor_js_rel,
-                [self::HANDLE_ALPINE, self::HANDLE_INTERACT, self::HANDLE_SORTABLE],
-                EKO_SAMPA_VERSION,
-                true
-            );
-        }
-
-        $fe_app_rel = 'assets/js/frontend-app.js';
-        $fe_app     = EKO_SAMPA_PLUGIN_DIR . $fe_app_rel;
-        if (is_readable($fe_app)) {
-            wp_register_script(
-                self::HANDLE_FRONTEND_APP,
-                EKO_SAMPA_PLUGIN_URL . $fe_app_rel,
-                [self::HANDLE_ALPINE],
+                [self::HANDLE_INTERACT, self::HANDLE_SORTABLE],
                 EKO_SAMPA_VERSION,
                 true
             );
@@ -194,6 +219,9 @@ final class Eko_Sampa_Assets {
 
     /**
      * Public frontend: virtual routes or pages that embed Eko shortcodes.
+     *
+     * Script order: Tailwind → REST/localized bundles (`HANDLE_FRONTEND_APP`) → editor stack
+     * (Sortable, Interact, `HANDLE_EDITOR_CANVAS` when on editor) → **Alpine last** (see class doc).
      */
     public function enqueue_frontend(): void {
         if (! $this->should_enqueue_frontend_assets()) {
@@ -208,10 +236,6 @@ final class Eko_Sampa_Assets {
 
         if (wp_script_is(self::HANDLE_TAILWIND, 'registered')) {
             wp_enqueue_script(self::HANDLE_TAILWIND);
-        }
-
-        if (wp_script_is(self::HANDLE_ALPINE, 'registered')) {
-            wp_enqueue_script(self::HANDLE_ALPINE);
         }
 
         if ($this->should_enqueue_frontend_rest_bundle()) {
@@ -253,6 +277,11 @@ final class Eko_Sampa_Assets {
                     ]
                 );
             }
+        }
+
+        // Alpine last: alpine:init listeners must already be attached (class docblock).
+        if (wp_script_is(self::HANDLE_ALPINE, 'registered')) {
+            wp_enqueue_script(self::HANDLE_ALPINE);
         }
     }
 

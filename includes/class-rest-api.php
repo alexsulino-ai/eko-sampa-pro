@@ -293,6 +293,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/orders/render-draft',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_orders_render_draft'],
+                'permission_callback' => [$this, 'require_orders_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/orders/(?P<id>\d+)/duplicate',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
@@ -460,7 +470,11 @@ final class Eko_Sampa_Rest_Api {
     public function route_clients_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id = (new Eko_Sampa_Client())->create($this->json_params($request));
         if (! $id) {
-            return new \WP_Error('eko_sampa_create_failed', __('Could not create client.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_create_failed',
+                __('Could not create client.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         $row = (new Eko_Sampa_Client())->get((int) $id);
@@ -482,7 +496,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Client())->update($id, $this->json_params($request));
         if (! $ok) {
-            return new \WP_Error('eko_sampa_update_failed', __('Could not update client.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_update_failed',
+                __('Could not update client.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Client())->get($id));
@@ -492,7 +510,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Client())->delete($id);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_delete_failed', __('Could not delete client.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_delete_failed',
+                __('Could not delete client.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response(['deleted' => true]);
@@ -505,7 +527,11 @@ final class Eko_Sampa_Rest_Api {
     public function route_services_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id = (new Eko_Sampa_Service())->create($this->json_params($request));
         if (! $id) {
-            return new \WP_Error('eko_sampa_create_failed', __('Could not create service.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_create_failed',
+                __('Could not create service.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Service())->get((int) $id), 201);
@@ -525,7 +551,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Service())->update($id, $this->json_params($request));
         if (! $ok) {
-            return new \WP_Error('eko_sampa_update_failed', __('Could not update service.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_update_failed',
+                __('Could not update service.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Service())->get($id));
@@ -535,7 +565,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Service())->delete($id);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_delete_failed', __('Could not delete service.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_delete_failed',
+                __('Could not delete service.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response(['deleted' => true]);
@@ -562,7 +596,11 @@ final class Eko_Sampa_Rest_Api {
 
         $id = $field->create($sid, $params);
         if (! $id) {
-            return new \WP_Error('eko_sampa_create_failed', __('Could not create field.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_create_failed',
+                __('Could not create field.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response($field->get((int) $id), 201);
@@ -600,7 +638,11 @@ final class Eko_Sampa_Rest_Api {
 
         $ok = $field->update($fid, $params);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_update_failed', __('Could not update field.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_update_failed',
+                __('Could not update field.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response($field->get($fid));
@@ -610,7 +652,11 @@ final class Eko_Sampa_Rest_Api {
         $fid = (int) $request['fid'];
         $ok  = (new Eko_Sampa_Service_Field())->delete($fid);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_delete_failed', __('Could not delete field.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_delete_failed',
+                __('Could not delete field.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response(['deleted' => true]);
@@ -629,7 +675,11 @@ final class Eko_Sampa_Rest_Api {
 
         $id = (new Eko_Sampa_Template())->create($params);
         if (! $id) {
-            return new \WP_Error('eko_sampa_create_failed', __('Could not create template.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_create_failed',
+                __('Could not create template.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Template())->get((int) $id), 201);
@@ -655,7 +705,11 @@ final class Eko_Sampa_Rest_Api {
 
         $ok = (new Eko_Sampa_Template())->update($id, $params);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_update_failed', __('Could not update template.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_update_failed',
+                __('Could not update template.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Template())->get($id));
@@ -665,7 +719,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Template())->delete($id);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_delete_failed', __('Could not delete template.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_delete_failed',
+                __('Could not delete template.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response(['deleted' => true]);
@@ -675,7 +733,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $new = (new Eko_Sampa_Template())->duplicate($id);
         if (! $new) {
-            return new \WP_Error('eko_sampa_duplicate_failed', __('Could not duplicate template.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_duplicate_failed',
+                __('Could not duplicate template.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Template())->get((int) $new), 201);
@@ -686,12 +748,26 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_orders_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (new Eko_Sampa_Order())->create($this->json_params($request));
-        if (! $id) {
-            return new \WP_Error('eko_sampa_create_failed', __('Could not create order.', 'eko-sampa'), ['status' => 400]);
+        $params = $this->json_params($request);
+        $order  = new Eko_Sampa_Order();
+        if (! $order->relations_visible($params, null)) {
+            return new \WP_Error(
+                'eko_sampa_order_invalid_relations',
+                __('Could not create order: client, service, or template is missing or not allowed for your account.', 'eko-sampa'),
+                ['status' => 400]
+            );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Order())->get((int) $id), 201);
+        $id = $order->create($params);
+        if (! $id) {
+            return new \WP_Error(
+                'eko_sampa_create_failed',
+                __('Could not create order.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
+        }
+
+        return new \WP_REST_Response($order->get((int) $id), 201);
     }
 
     public function route_orders_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -708,7 +784,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Order())->update($id, $this->json_params($request));
         if (! $ok) {
-            return new \WP_Error('eko_sampa_update_failed', __('Could not update order.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_update_failed',
+                __('Could not update order.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Order())->get($id));
@@ -718,7 +798,11 @@ final class Eko_Sampa_Rest_Api {
         $id = (int) $request['id'];
         $ok = (new Eko_Sampa_Order())->delete($id);
         if (! $ok) {
-            return new \WP_Error('eko_sampa_delete_failed', __('Could not delete order.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_delete_failed',
+                __('Could not delete order.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response(['deleted' => true]);
@@ -728,7 +812,11 @@ final class Eko_Sampa_Rest_Api {
         $id  = (int) $request['id'];
         $new = (new Eko_Sampa_Order())->duplicate($id);
         if (! $new) {
-            return new \WP_Error('eko_sampa_duplicate_failed', __('Could not duplicate order.', 'eko-sampa'), ['status' => 400]);
+            return new \WP_Error(
+                'eko_sampa_duplicate_failed',
+                __('Could not duplicate order.', 'eko-sampa'),
+                array_merge(['status' => 400], $this->wpdb_debug_data())
+            );
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Order())->get((int) $new), 201);
@@ -747,7 +835,7 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_bad_template', __('Template not found.', 'eko-sampa'), ['status' => 400]);
         }
 
-        $ctx  = $this->build_print_context($order);
+        $ctx  = Eko_Sampa_Order::template_render_context($order);
         $html = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, false);
         if (isset($html['html']) && is_string($html['html'])) {
             $html['html'] = wp_kses_post($html['html']);
@@ -756,9 +844,38 @@ final class Eko_Sampa_Rest_Api {
         return new \WP_REST_Response($html);
     }
 
-    /**
-     * Single round-trip for order form dropdowns (replaces three parallel list calls).
-     */
+    public function route_orders_render_draft(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $p   = $this->json_params($request);
+        $tid = absint((int) ($p['template_id'] ?? 0));
+        if ($tid <= 0) {
+            return new \WP_Error(
+                'eko_sampa_need_template',
+                __('Template is required for preview.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $tpl = (new Eko_Sampa_Template())->get($tid);
+        if (! is_array($tpl)) {
+            return new \WP_Error('eko_sampa_bad_template', __('Template not found.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        $order = [
+            'id'                  => (int) ($p['id'] ?? 0),
+            'template_id'         => $tid,
+            'client_id'           => absint((int) ($p['client_id'] ?? 0)),
+            'dynamic_data_json'   => $p['dynamic_data_json'] ?? null,
+        ];
+
+        $ctx  = Eko_Sampa_Order::template_render_context($order);
+        $html = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, false);
+        if (isset($html['html']) && is_string($html['html'])) {
+            $html['html'] = wp_kses_post($html['html']);
+        }
+
+        return new \WP_REST_Response($html);
+    }
+
     public function route_lookups_order_form(\WP_REST_Request $request): \WP_REST_Response {
         $args            = $this->list_args($request);
         $args['limit']   = 500;
@@ -812,15 +929,54 @@ final class Eko_Sampa_Rest_Api {
     }
 
     /**
+     * Extra context when a wpdb write fails (only with WP_DEBUG, for local diagnosis).
+     *
+     * @return array<string, string>
+     */
+    private function wpdb_debug_data(): array {
+        if (! defined('WP_DEBUG') || ! WP_DEBUG) {
+            return [];
+        }
+
+        global $wpdb;
+        if (! isset($wpdb) || ! is_object($wpdb)) {
+            return [];
+        }
+
+        $err = (string) $wpdb->last_error;
+
+        return $err !== '' ? ['db_last_error' => $err] : [];
+    }
+
+    /**
+     * Decoded JSON body for mutating routes.
+     *
+     * `WP_REST_Request::get_json_params()` returns null when WordPress did not treat the body as
+     * JSON (e.g. missing or non-standard Content-Type), even if the client sent a JSON object.
+     * We fall back to decoding the raw body so models receive the intended fields.
+     *
      * @return array<string, mixed>
      */
     private function json_params(\WP_REST_Request $request): array {
         $params = $request->get_json_params();
-        if (! is_array($params)) {
-            $params = $request->get_body_params();
+        if (is_array($params)) {
+            return $params;
         }
 
-        return is_array($params) ? $params : [];
+        $body = (string) $request->get_body();
+        if ($body !== '') {
+            $trim = ltrim($body);
+            if ($trim !== '' && ($trim[0] === '{' || $trim[0] === '[')) {
+                $decoded = json_decode($body, true);
+                if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        $fallback = $request->get_body_params();
+
+        return is_array($fallback) ? $fallback : [];
     }
 
     /**
@@ -855,44 +1011,5 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return null;
-    }
-
-    /**
-     * @param array<string, mixed> $order
-     *
-     * @return array<string, string>
-     */
-    private function build_print_context(array $order): array {
-        $ctx = [
-            'order_id' => (string) ($order['id'] ?? ''),
-        ];
-
-        $cid = (int) ($order['client_id'] ?? 0);
-        if ($cid > 0) {
-            $client = (new Eko_Sampa_Client())->get($cid);
-            if (is_array($client)) {
-                foreach (['nome', 'email', 'telefone', 'documento', 'cidade', 'estado'] as $k) {
-                    $ctx[ $k ] = (string) ($client[ $k ] ?? '');
-                    $ctx[ 'client_' . $k ] = (string) ($client[ $k ] ?? '');
-                }
-            }
-        }
-
-        $raw = $order['dynamic_data_json'] ?? null;
-        if (is_string($raw) && $raw !== '') {
-            $decoded = json_decode($raw, true);
-            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
-                foreach ($decoded as $k => $v) {
-                    $key = sanitize_title((string) $k);
-                    if ($key !== '') {
-                        $ctx[ strtolower($key) ] = is_scalar($v)
-                            ? (string) $v
-                            : (wp_json_encode($v) ?: '');
-                    }
-                }
-            }
-        }
-
-        return $ctx;
     }
 }

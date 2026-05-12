@@ -11,6 +11,18 @@
 
 # Tabelas
 
+## Convenção de colunas
+
+* **Domínio (clientes, serviços, templates):** nomes em **português**, `snake_case` (`nome`, `telefone`, `descricao`, `categoria`, …).
+* **Chaves estrangeiras e metadados técnicos:** **inglês** `snake_case` (`user_id`, `client_id`, `service_id`, `json_data`, …).
+* **Tabela `fields`:** nomes **em inglês** estáveis para API/UI (`label`, `slug`, `type`, …).
+
+A migração **1.0.2** alinha tabelas antigas (ex.: coluna `name` → `nome`) sem apagar tabelas.
+
+**Categorias:** não existe tabela `eko_sampa_categories`; use o campo `categoria` em `wp_eko_sampa_templates`.
+
+---
+
 ## clients
 
 Tabela:
@@ -86,6 +98,7 @@ Campos:
 * product_id
 * service_id
 * nome
+* categoria
 * descricao
 * width_mm
 * height_mm
@@ -178,6 +191,12 @@ Criar:
 * upgrades incrementais
 
 Nunca apagar tabelas automaticamente.
+
+Versões:
+
+* **1.0.0** — `dbDelta` baseline (CREATE TABLE).
+* **1.0.1** — coluna `categoria` em templates.
+* **1.0.2** — alinhamento de colunas legadas (inglês vs português), `ADD COLUMN` em falta, cópia de dados e `DROP` de colunas duplicadas obsoletas (ex.: `name` após migração para `nome`).
 
 ---
 

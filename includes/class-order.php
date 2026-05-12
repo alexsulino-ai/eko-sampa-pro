@@ -234,10 +234,12 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Whether referenced client/service/template rows exist and are visible for this actor.
+     *
      * @param array<string, mixed>      $data
-     * @param array<string, mixed>|null $existing_row Current row for partial updates; null on create.
+     * @param array<string, mixed>|null $existing_row
      */
-    private function relations_visible(array $data, ?array $existing_row): bool {
+    public function relations_visible(array $data, ?array $existing_row): bool {
         $keys = ['client_id', 'service_id', 'template_id'];
         $ids  = [];
         foreach ($keys as $key) {
@@ -272,6 +274,57 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         }
 
         return true;
+    }
+
+    /**
+     * Flat context for template preview/print: order id, client columns, dynamic_data slugs.
+     *
+     * `dynamic_data_json` may be a JSON string (DB) or an associative array (REST draft).
+     *
+     * @param array<string, mixed> $order
+     *
+     * @return array<string, string>
+     */
+    public static function template_render_context(array $order): array {
+        $ctx = [
+            'order_id' => (string) ($order['id'] ?? ''),
+        ];
+
+        $cid = (int) ($order['client_id'] ?? 0);
+        if ($cid > 0) {
+            $client = (new Eko_Sampa_Client())->get($cid);
+            if (is_array($client)) {
+                foreach (['nome', 'email', 'telefone', 'documento', 'cidade', 'estado'] as $k) {
+                    $ctx[ $k ]             = (string) ($client[ $k ] ?? '');
+                    $ctx[ 'client_' . $k ] = (string) ($client[ $k ] ?? '');
+                }
+            }
+        }
+
+        $raw     = $order['dynamic_data_json'] ?? null;
+        $decoded = null;
+        if (is_array($raw)) {
+            $decoded = $raw;
+        } elseif (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (JSON_ERROR_NONE !== json_last_error() || ! is_array($decoded)) {
+                $decoded = null;
+            }
+        }
+
+        if (is_array($decoded)) {
+            foreach ($decoded as $k => $v) {
+                $key = strtolower(sanitize_title((string) $k));
+                if ($key === '') {
+                    continue;
+                }
+                $ctx[ $key ] = is_scalar($v)
+                    ? (string) $v
+                    : (wp_json_encode($v) ?: '');
+            }
+        }
+
+        return $ctx;
     }
 
     /**
@@ -360,7 +413,7 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
                 return false;
             }
 
-            $key = sanitize_key((string) $k);
+            $key = strtolower(sanitize_title((string) $k));
             if ($key === '') {
                 continue;
             }

@@ -95,11 +95,8 @@ final class Eko_Sampa_Template_Renderer {
             $height
         );
 
-        $font_size = isset($styles['fontSize']) ? (int) $styles['fontSize'] : 14;
-        $color     = isset($styles['color']) ? sanitize_hex_color((string) $styles['color']) : '#111827';
-        if (! $color) {
-            $color = '#111827';
-        }
+        $frame_css = $this->build_frame_css($styles);
+        $inner_css = $this->build_text_inner_css($styles);
 
         switch ($type) {
             case 'image':
@@ -111,23 +108,170 @@ final class Eko_Sampa_Template_Renderer {
                     return '<div style="' . esc_attr($base . 'background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>';
                 }
 
-                return '<div style="' . esc_attr($base) . '">'
-                    . '<img alt="" src="' . $src . '" style="width:100%;height:100%;object-fit:contain;display:block;" />'
+                $img_css = $this->build_image_img_css($styles);
+
+                return '<div style="' . esc_attr($base . $frame_css) . '">'
+                    . '<img alt="" src="' . $src . '" style="' . esc_attr($img_css) . '" />'
                     . '</div>';
 
             case 'rectangle':
-                return '<div style="' . esc_attr($base . 'background:#f1f5f9;border:1px solid #cbd5e1;') . '"></div>';
+                $rect = $base . $frame_css . 'background:#f1f5f9;';
+
+                return '<div style="' . esc_attr($rect) . '"></div>';
 
             case 'placeholder':
             case 'text':
             default:
                 $raw_content = (string) ($el['content'] ?? '');
                 $text        = $this->replace_tokens($raw_content, $context);
-                $style       = $base . 'font-size:' . max(8, min(120, $font_size)) . 'px;color:' . $color . ';'
-                    . 'display:flex;align-items:flex-start;justify-content:flex-start;padding:2px;overflow:hidden;word-break:break-word;';
+                $inner       = $base . $frame_css . 'box-sizing:border-box;';
 
-                return '<div style="' . esc_attr($style) . '">' . esc_html($text) . '</div>';
+                return '<div style="' . esc_attr($inner) . '">'
+                    . '<div style="' . esc_attr($inner_css) . '">' . esc_html($text) . '</div>'
+                    . '</div>';
         }
+    }
+
+    /**
+     * Outer frame: opacity, border, radius, shadow, rotation (matches editor `elementFrameCss`).
+     *
+     * @param array<string, mixed> $styles
+     */
+    private function build_frame_css(array $styles): string {
+        $opacity = isset($styles['opacity']) ? (float) $styles['opacity'] : 1.0;
+        if ($opacity < 0.0) {
+            $opacity = 0.0;
+        }
+        if ($opacity > 1.0) {
+            $opacity = 1.0;
+        }
+
+        $br = isset($styles['borderRadius']) ? max(0, (int) $styles['borderRadius']) : 0;
+        $bw = isset($styles['borderWidth']) ? max(0, (int) $styles['borderWidth']) : 0;
+        $bs = isset($styles['borderStyle']) ? strtolower((string) $styles['borderStyle']) : 'solid';
+        if (! in_array($bs, [ 'solid', 'dashed', 'dotted', 'none' ], true)) {
+            $bs = 'solid';
+        }
+        $bc = $this->sanitize_css_color($styles['borderColor'] ?? '#cbd5e1', '#cbd5e1');
+        $sh = $this->sanitize_box_shadow($styles['boxShadow'] ?? 'none');
+        $rot = isset($styles['rotate']) ? (float) $styles['rotate'] : 0.0;
+        if ($rot < -360.0) {
+            $rot = -360.0;
+        }
+        if ($rot > 360.0) {
+            $rot = 360.0;
+        }
+
+        $border = 'none';
+        if ($bw > 0 && $bs !== 'none') {
+            $border = sprintf('%dpx %s %s', $bw, $bs, $bc);
+        }
+
+        $css = sprintf(
+            'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:hidden;',
+            $opacity,
+            $br,
+            $border,
+            $sh,
+            $rot
+        );
+
+        return $css;
+    }
+
+    /**
+     * @param array<string, mixed> $styles
+     */
+    private function build_text_inner_css(array $styles): string {
+        $ff = $this->sanitize_font_family($styles['fontFamily'] ?? 'system-ui, sans-serif');
+        $fs = isset($styles['fontSize']) ? max(6, min(200, (int) $styles['fontSize'])) : 16;
+        $fw = isset($styles['fontWeight']) ? (string) $styles['fontWeight'] : '400';
+        $n  = (int) round((float) $fw);
+        $fw = ($n >= 100 && $n <= 900) ? (string) $n : '400';
+        $fst = isset($styles['fontStyle']) && strtolower((string) $styles['fontStyle']) === 'italic' ? 'italic' : 'normal';
+        $td  = isset($styles['textDecoration']) ? strtolower((string) $styles['textDecoration']) : 'none';
+        if (! in_array($td, [ 'none', 'underline', 'line-through', 'underline line-through' ], true)) {
+            $td = 'none';
+        }
+        $ta = isset($styles['textAlign']) ? strtolower((string) $styles['textAlign']) : 'left';
+        if (! in_array($ta, [ 'left', 'center', 'right', 'justify' ], true)) {
+            $ta = 'left';
+        }
+        $color = $this->sanitize_css_color($styles['color'] ?? '#111827', '#111827');
+        $bg    = $this->sanitize_css_color($styles['backgroundColor'] ?? 'transparent', 'transparent');
+        $lh    = isset($styles['lineHeight']) ? (float) $styles['lineHeight'] : 1.35;
+        if ($lh < 0.8 || $lh > 4.0) {
+            $lh = 1.35;
+        }
+        $ls = isset($styles['letterSpacing']) ? max(-20.0, min(40.0, (float) $styles['letterSpacing'])) : 0.0;
+        $tt = isset($styles['textTransform']) ? strtolower((string) $styles['textTransform']) : 'none';
+        if (! in_array($tt, [ 'none', 'uppercase', 'lowercase', 'capitalize' ], true)) {
+            $tt = 'none';
+        }
+
+        return sprintf(
+            'width:100%%;height:100%%;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;background-color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:auto;padding:4px 6px;display:block;',
+            $ff,
+            $fs,
+            $fw,
+            $fst,
+            $td,
+            $ta,
+            $color,
+            $bg,
+            $lh,
+            $ls,
+            $tt
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $styles
+     */
+    private function build_image_img_css(array $styles): string {
+        $fit = isset($styles['objectFit']) ? strtolower((string) $styles['objectFit']) : 'contain';
+        if (! in_array($fit, [ 'contain', 'cover', 'fill', 'none', 'scale-down' ], true)) {
+            $fit = 'contain';
+        }
+
+        return sprintf('width:100%%;height:100%%;display:block;object-fit:%s;', $fit);
+    }
+
+    private function sanitize_font_family(string $raw): string {
+        $t = trim($raw);
+        if ($t === '' || strlen($t) > 220 || preg_match('/[<>{}"\'`;]/', $t)) {
+            return 'system-ui, sans-serif';
+        }
+
+        return $t;
+    }
+
+    private function sanitize_css_color(mixed $raw, string $fallback): string {
+        $s = trim((string) $raw);
+        if ($s === '' || strtolower($s) === 'transparent') {
+            return 'transparent';
+        }
+        $hex = sanitize_hex_color($s);
+        if ($hex) {
+            return $hex;
+        }
+        if (preg_match('/^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)$/i', $s)) {
+            return $s;
+        }
+
+        return $fallback;
+    }
+
+    private function sanitize_box_shadow(mixed $raw): string {
+        $t = trim((string) $raw);
+        if ($t === '' || strtolower($t) === 'none') {
+            return 'none';
+        }
+        if (strlen($t) > 180 || preg_match('/[<>;{}]|url\s*\(/i', $t)) {
+            return 'none';
+        }
+
+        return $t;
     }
 
     /**
@@ -137,12 +281,20 @@ final class Eko_Sampa_Template_Renderer {
         return (string) preg_replace_callback(
             '/\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/',
             static function (array $m) use ($context): string {
-                $key = strtolower((string) ($m[1] ?? ''));
-                if ($key === '') {
+                $raw = trim((string) ($m[1] ?? ''));
+                if ($raw === '') {
                     return '';
                 }
+                $a = strtolower($raw);
+                $b = strtolower(sanitize_title($raw));
+                if (isset($context[ $a ])) {
+                    return $context[ $a ];
+                }
+                if ($b !== '' && isset($context[ $b ])) {
+                    return $context[ $b ];
+                }
 
-                return $context[ $key ] ?? $m[0];
+                return $m[0];
             },
             $text
         );

@@ -27,46 +27,7 @@ if (! is_array($tpl)) {
     return;
 }
 
-if (! function_exists('eko_sampa_build_print_context')) {
-    /**
-     * @param array<string, mixed> $order
-     *
-     * @return array<string, string>
-     */
-    function eko_sampa_build_print_context(array $order): array {
-        $ctx = [
-            'order_id' => (string) ($order['id'] ?? ''),
-        ];
-
-        $cid = (int) ($order['client_id'] ?? 0);
-        if ($cid > 0) {
-            $client = (new Eko_Sampa_Client())->get($cid);
-            if (is_array($client)) {
-                foreach (['nome', 'email', 'telefone', 'documento', 'cidade', 'estado'] as $k) {
-                    $ctx[ $k ]             = (string) ($client[ $k ] ?? '');
-                    $ctx[ 'client_' . $k ] = (string) ($client[ $k ] ?? '');
-                }
-            }
-        }
-
-        $raw = $order['dynamic_data_json'] ?? null;
-        if (is_string($raw) && $raw !== '') {
-            $decoded = json_decode($raw, true);
-            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
-                foreach ($decoded as $k => $v) {
-                    $key = sanitize_title((string) $k);
-                    if ($key !== '') {
-                        $ctx[ strtolower($key) ] = is_scalar($v) ? (string) $v : (wp_json_encode($v) ?: '');
-                    }
-                }
-            }
-        }
-
-        return $ctx;
-    }
-}
-
-$ctx = eko_sampa_build_print_context($order);
+$ctx = Eko_Sampa_Order::template_render_context($order);
 $out = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, true);
 if (isset($out['html']) && is_string($out['html'])) {
     $out['html'] = wp_kses_post($out['html']);

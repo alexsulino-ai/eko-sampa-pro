@@ -1,5 +1,8 @@
 /**
  * REST helper for Eko Sampa frontend (cookie auth + wp_rest nonce).
+ *
+ * Load order: this file must run before Alpine (see `Eko_Sampa_Assets`). It registers
+ * `Alpine.data` inside `alpine:init`; do not add Alpine as a wp_enqueue_script dependency.
  */
 (function () {
     /**
@@ -15,8 +18,11 @@
         );
         let body = opts && opts.body;
         if (body && typeof body === 'object' && !(body instanceof FormData)) {
-            headers['Content-Type'] = 'application/json';
+            headers['Content-Type'] = 'application/json; charset=UTF-8';
             body = JSON.stringify(body);
+        }
+        if (typeof window !== 'undefined' && window.__ekoSampaDebugRest) {
+            console.log('[eko REST]', url, (opts && opts.method) || 'GET', opts && opts.body);
         }
         const res = await fetch(url, Object.assign({}, opts || {}, { headers, credentials: 'same-origin', body }));
         if (!res.ok) {
@@ -25,6 +31,9 @@
                 const j = await res.json();
                 if (j && j.message) {
                     msg = j.message;
+                }
+                if (j && j.data && j.data.db_last_error) {
+                    msg += ' — ' + String(j.data.db_last_error);
                 }
             } catch (e) {
                 void e;
@@ -41,6 +50,7 @@
     window.ekoSampaApi = api;
 })();
 
+// Listener must exist before Alpine starts — enforced in PHP enqueue order, not script deps on Alpine.
 document.addEventListener('alpine:init', () => {
     Alpine.data('ekoClients', () => ({
         rows: [],
@@ -482,11 +492,13 @@ document.addEventListener('alpine:init', () => {
         clients: [],
         services: [],
         templates: [],
+        serviceFields: [],
         q: '',
         status: '',
         filterUserId: '',
         users: [],
-        previewFrameSrc: 'about:blank',
+        previewSrcdoc: '',
+        previewDraftTimer: null,
         form: {
             id: 0,
             client_id: '',
@@ -498,11 +510,39 @@ document.addEventListener('alpine:init', () => {
             woo_order_id: 0,
             print_ready: 0,
         },
-        dynKeys: '',
-        dynVal: '',
         err: '',
         loading: false,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
+        wrapPreviewSrcdoc(inner) {
+            const body = String(inner || '');
+            const doc =
+                '<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#f8fafc}</style></head><body>' +
+                body +
+                '</body></html>';
+            return doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        },
+        fieldSelectOptions(f) {
+            try {
+                const raw = f && f.options_json;
+                if (raw == null || raw === '') {
+                    return [];
+                }
+                const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                if (!Array.isArray(arr)) {
+                    return [];
+                }
+                return arr.map((x) => {
+                    if (typeof x === 'string') {
+                        return { value: x, label: x };
+                    }
+                    const v = x.value != null ? String(x.value) : String(x.v != null ? x.v : '');
+                    const lab = x.label != null ? String(x.label) : String(x.l != null ? x.l : v);
+                    return { value: v, label: lab };
+                });
+            } catch (e) {
+                return [];
+            }
+        },
         async init() {
             if (this.isAdmin) {
                 try {
@@ -513,6 +553,22 @@ document.addEventListener('alpine:init', () => {
             }
             await this.loadLookups();
             await this.load();
+            this.$watch('form.service_id', () => {
+                this.onServiceChange();
+            });
+            this.$watch('form.template_id', () => {
+                this.schedulePreviewDraft();
+            });
+            this.$watch('form.client_id', () => {
+                this.schedulePreviewDraft();
+            });
+            this.$watch(
+                'form.dynamic_data_json',
+                () => {
+                    this.schedulePreviewDraft();
+                },
+                { deep: true }
+            );
         },
         async loadLookups() {
             try {
@@ -584,10 +640,10 @@ document.addEventListener('alpine:init', () => {
                 woo_order_id: 0,
                 print_ready: 0,
             };
-            this.dynKeys = '';
-            this.dynVal = '';
+            this.serviceFields = [];
+            this.previewSrcdoc = '';
         },
-        edit(row) {
+        async edit(row) {
             const r = Object.assign({}, row);
             r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
             r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
@@ -603,14 +659,72 @@ document.addEventListener('alpine:init', () => {
                 d = this.form.dynamic_data_json || {};
             }
             this.form.dynamic_data_json = d;
+            await this.$nextTick();
+            await this.onServiceChange();
+            this.schedulePreviewDraft();
         },
-        setDyn() {
-            if (!this.dynKeys) {
+        async onServiceChange() {
+            const sid = parseInt(String(this.form.service_id || 0), 10);
+            this.serviceFields = [];
+            if (!sid) {
+                this.schedulePreviewDraft();
                 return;
             }
-            this.form.dynamic_data_json = Object.assign({}, this.form.dynamic_data_json || {}, { [this.dynKeys]: this.dynVal });
-            this.dynKeys = '';
-            this.dynVal = '';
+            try {
+                const fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
+                const list = Array.isArray(fields) ? fields.slice() : [];
+                list.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+                this.serviceFields = list;
+                const d = Object.assign({}, this.form.dynamic_data_json || {});
+                list.forEach((f) => {
+                    const sk = String(f.slug || '').trim();
+                    if (!sk) {
+                        return;
+                    }
+                    if (!(sk in d)) {
+                        d[sk] = '';
+                    }
+                });
+                this.form.dynamic_data_json = d;
+            } catch (e) {
+                this.serviceFields = [];
+            }
+            this.schedulePreviewDraft();
+        },
+        schedulePreviewDraft() {
+            clearTimeout(this.previewDraftTimer);
+            this.previewDraftTimer = setTimeout(() => {
+                this.refreshPreviewDraft();
+            }, 220);
+        },
+        async refreshPreviewDraft() {
+            const tid = parseInt(String(this.form.template_id || 0), 10);
+            if (!tid) {
+                this.previewSrcdoc = '';
+                return;
+            }
+            try {
+                const data = await window.ekoSampaApi('orders/render-draft', {
+                    method: 'POST',
+                    body: {
+                        template_id: tid,
+                        client_id: parseInt(String(this.form.client_id || 0), 10),
+                        id: parseInt(String(this.form.id || 0), 10),
+                        dynamic_data_json: this.form.dynamic_data_json || {},
+                    },
+                });
+                const inner =
+                    typeof data === 'object' && data && data.html
+                        ? String(data.html)
+                        : '<p>Invalid preview.</p>';
+                this.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
+            } catch (e) {
+                const msg = String(e.message || e)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                this.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
+            }
         },
         async save() {
             this.err = '';
@@ -669,28 +783,20 @@ document.addEventListener('alpine:init', () => {
             return p.replace(/\/?$/, '/') + sid + '/';
         },
         async fetchPreview(id) {
-            this.previewFrameSrc = 'about:blank';
+            this.previewSrcdoc = '';
             try {
                 const data = await window.ekoSampaApi('orders/' + id + '/render', { method: 'GET' });
                 const inner =
                     typeof data === 'object' && data && data.html
                         ? String(data.html)
                         : '<p>Invalid preview.</p>';
-                const doc =
-                    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#f8fafc">' +
-                    inner +
-                    '</body></html>';
-                this.previewFrameSrc = 'data:text/html;charset=utf-8,' + encodeURIComponent(doc);
+                this.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
             } catch (e) {
                 const msg = String(e.message || e)
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
-                const doc =
-                    '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:8px;font-family:sans-serif">' +
-                    msg +
-                    '</body></html>';
-                this.previewFrameSrc = 'data:text/html;charset=utf-8,' + encodeURIComponent(doc);
+                this.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
             }
         },
     }));

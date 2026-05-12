@@ -89,7 +89,7 @@ if (! defined('ABSPATH')) {
                         </label>
                     <?php endif; ?>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Client', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.client_id">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.client_id" @change="schedulePreviewDraft()">
                             <option value="">—</option>
                             <template x-for="c in clients" :key="c.id">
                                 <option :value="c.id" x-text="c.nome + ' (' + c.id + ')'"></option>
@@ -97,7 +97,7 @@ if (! defined('ABSPATH')) {
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Service', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.service_id">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.service_id" @change="onServiceChange()">
                             <option value="">—</option>
                             <template x-for="s in services" :key="s.id">
                                 <option :value="s.id" x-text="s.nome + ' (' + s.id + ')'"></option>
@@ -105,7 +105,7 @@ if (! defined('ABSPATH')) {
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Template', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.template_id">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.template_id" @change="schedulePreviewDraft()">
                             <option value="">—</option>
                             <template x-for="t in templates" :key="t.id">
                                 <option :value="t.id" x-text="t.nome + ' (' + t.id + ')'"></option>
@@ -128,14 +128,39 @@ if (! defined('ABSPATH')) {
                         <?php echo esc_html__('Print ready', 'eko-sampa'); ?>
                     </label>
                 </div>
-                <div class="mt-4 border-t border-slate-100 pt-3">
-                    <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Dynamic data (slug → value)', 'eko-sampa'); ?></p>
-                    <pre class="mt-1 max-h-24 overflow-auto rounded bg-slate-50 p-2 text-xs" x-text="JSON.stringify(form.dynamic_data_json || {}, null, 2)"></pre>
-                    <div class="mt-2 flex flex-wrap gap-2">
-                        <input class="rounded border border-slate-200 px-2 py-1 text-xs" type="text" x-model="dynKeys" placeholder="slug" />
-                        <input class="rounded border border-slate-200 px-2 py-1 text-xs" type="text" x-model="dynVal" placeholder="<?php echo esc_attr__('value', 'eko-sampa'); ?>" />
-                        <button type="button" class="rounded bg-slate-200 px-2 py-1 text-xs" @click="setDyn()"><?php echo esc_html__('Add', 'eko-sampa'); ?></button>
+                <div class="mt-4 border-t border-slate-100 pt-3" x-show="serviceFields.length">
+                    <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields (placeholders {{slug}})', 'eko-sampa'); ?></p>
+                    <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                        <template x-for="f in serviceFields" :key="f.id">
+                            <div class="min-w-0 sm:col-span-2">
+                                <label class="block text-xs font-medium text-slate-600">
+                                    <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
+                                    <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
+                                </label>
+                                <template x-if="f.type === 'textarea'">
+                                    <textarea class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" rows="2" x-model="form.dynamic_data_json[f.slug]"></textarea>
+                                </template>
+                                <template x-if="f.type === 'select'">
+                                    <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.dynamic_data_json[f.slug]">
+                                        <option value="">—</option>
+                                        <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="f.id + '-' + idx + '-' + opt.value">
+                                            <option :value="opt.value" x-text="opt.label"></option>
+                                        </template>
+                                    </select>
+                                </template>
+                                <template x-if="f.type !== 'textarea' && f.type !== 'select'">
+                                    <input
+                                        class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                        :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
+                                        x-model="form.dynamic_data_json[f.slug]"
+                                    />
+                                </template>
+                            </div>
+                        </template>
                     </div>
+                </div>
+                <div class="mt-3 border-t border-slate-100 pt-3" x-show="!serviceFields.length">
+                    <p class="text-xs text-slate-500"><?php echo esc_html__('Select a service to load dynamic fields.', 'eko-sampa'); ?></p>
                 </div>
                 <button type="button" class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="save()"><?php echo esc_html__('Save', 'eko-sampa'); ?></button>
             </div>
@@ -146,7 +171,8 @@ if (! defined('ABSPATH')) {
                     sandbox=""
                     referrerpolicy="no-referrer"
                     title="<?php echo esc_attr__('Order preview', 'eko-sampa'); ?>"
-                    :src="previewFrameSrc"
+                    src="about:blank"
+                    x-bind:srcdoc="previewSrcdoc"
                 ></iframe>
             </div>
         </div>
