@@ -102,6 +102,30 @@ document.addEventListener('alpine:init', () => {
             this.loadFromServer();
         },
 
+        destroy() {
+            clearTimeout(this.saveTimer);
+            clearTimeout(this.interactDebounceTimer);
+            this.saveTimer = null;
+            this.interactDebounceTimer = null;
+            if (this.layerSort) {
+                try {
+                    this.layerSort.destroy();
+                } catch (e) {
+                    void e;
+                }
+                this.layerSort = null;
+            }
+            if (typeof interact === 'function') {
+                document.querySelectorAll('.eko-sampa-editor__canvas .eko-sampa-editor__element').forEach((node) => {
+                    try {
+                        interact(node).unset();
+                    } catch (e) {
+                        void e;
+                    }
+                });
+            }
+        },
+
         api(path, opts) {
             if (typeof window.ekoSampaApi !== 'function') {
                 return Promise.reject(new Error('API unavailable'));
@@ -229,6 +253,7 @@ document.addEventListener('alpine:init', () => {
                 this.galleryItems = await this.api('gallery', { method: 'GET' });
             } catch (e) {
                 this.galleryItems = [];
+                this.saveState = String(e.message || e);
             } finally {
                 this.galleryLoading = false;
             }
@@ -291,6 +316,7 @@ document.addEventListener('alpine:init', () => {
                     throw new Error(msg);
                 }
                 await this.refreshGallery();
+                this.saveState = '';
             } catch (e) {
                 this.saveState = String(e.message || e);
             }
@@ -336,6 +362,7 @@ document.addEventListener('alpine:init', () => {
             if (!id) {
                 return;
             }
+            const runId = id;
             this.saveState = '…';
             try {
                 const body = {
@@ -352,9 +379,14 @@ document.addEventListener('alpine:init', () => {
                     method: 'PATCH',
                     body,
                 });
+                if (Number(this.cfg().templateId || 0) !== runId) {
+                    return;
+                }
                 this.saveState = 'OK';
             } catch (e) {
-                this.saveState = String(e.message || e);
+                if (Number(this.cfg().templateId || 0) === runId) {
+                    this.saveState = String(e.message || e);
+                }
             }
         },
 
@@ -406,84 +438,84 @@ document.addEventListener('alpine:init', () => {
             }
 
             nodes.forEach((node) => {
-                interact(node).draggable({
-                    ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-hit',
-                    inertia: false,
-                    modifiers: [
-                        interact.modifiers.restrict({
-                            restriction: 'parent',
-                            elementRect: { top: 0, left: 0, bottom: 1, right: 1 },
-                        }),
-                    ],
-                    listeners: {
-                        move(event) {
-                            event.target.style.transform = '';
-                            const scale = self.zoomPercent / 100 || 1;
-                            const id = event.target.getAttribute('data-element-id');
-                            const item = self.elements.find((e) => e.id === id);
-                            if (!item) {
-                                return;
-                            }
-                            item.x += event.dx / scale;
-                            item.y += event.dy / scale;
-                            self.clampPosition(item);
+                interact(node)
+                    .draggable({
+                        ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-hit',
+                        inertia: false,
+                        modifiers: [
+                            interact.modifiers.restrict({
+                                restriction: 'parent',
+                                elementRect: { top: 0, left: 0, bottom: 1, right: 1 },
+                            }),
+                        ],
+                        listeners: {
+                            move(event) {
+                                event.target.style.transform = '';
+                                const scale = self.zoomPercent / 100 || 1;
+                                const id = event.target.getAttribute('data-element-id');
+                                const item = self.elements.find((e) => e.id === id);
+                                if (!item) {
+                                    return;
+                                }
+                                item.x += event.dx / scale;
+                                item.y += event.dy / scale;
+                                self.clampPosition(item);
+                            },
+                            end(event) {
+                                event.target.style.transform = '';
+                                const id = event.target.getAttribute('data-element-id');
+                                const item = self.elements.find((e) => e.id === id);
+                                if (!item) {
+                                    return;
+                                }
+                                self.snapTranslate(item);
+                                self.clampPosition(item);
+                            },
                         },
-                        end(event) {
-                            event.target.style.transform = '';
-                            const id = event.target.getAttribute('data-element-id');
-                            const item = self.elements.find((e) => e.id === id);
-                            if (!item) {
-                                return;
-                            }
-                            self.snapTranslate(item);
-                            self.clampPosition(item);
+                    })
+                    .resizable({
+                        edges: { left: '.eko-resize-l', right: '.eko-resize-r', top: '.eko-resize-t', bottom: '.eko-resize-b' },
+                        inertia: false,
+                        modifiers: [
+                            interact.modifiers.restrictSize({
+                                min: { width: self.minElementWidth, height: self.minElementHeight },
+                            }),
+                        ],
+                        listeners: {
+                            move(event) {
+                                event.target.style.transform = '';
+                                const scale = self.zoomPercent / 100 || 1;
+                                const id = event.target.getAttribute('data-element-id');
+                                const item = self.elements.find((e) => e.id === id);
+                                if (!item) {
+                                    return;
+                                }
+                                const dl = event.deltaRect.left / scale;
+                                const dt = event.deltaRect.top / scale;
+                                const dr = event.deltaRect.right / scale;
+                                const db = event.deltaRect.bottom / scale;
+                                item.x += dl;
+                                item.y += dt;
+                                item.width += dr - dl;
+                                item.height += db - dt;
+                                item.width = Math.max(self.minElementWidth, item.width);
+                                item.height = Math.max(self.minElementHeight, item.height);
+                                self.clampPosition(item);
+                                self.clampSize(item);
+                            },
+                            end(event) {
+                                event.target.style.transform = '';
+                                const id = event.target.getAttribute('data-element-id');
+                                const item = self.elements.find((e) => e.id === id);
+                                if (!item) {
+                                    return;
+                                }
+                                self.snapBox(item);
+                                self.clampPosition(item);
+                                self.clampSize(item);
+                            },
                         },
-                    },
-                });
-
-                interact(node).resizable({
-                    edges: { left: '.eko-resize-l', right: '.eko-resize-r', top: '.eko-resize-t', bottom: '.eko-resize-b' },
-                    inertia: false,
-                    modifiers: [
-                        interact.modifiers.restrictSize({
-                            min: { width: self.minElementWidth, height: self.minElementHeight },
-                        }),
-                    ],
-                    listeners: {
-                        move(event) {
-                            event.target.style.transform = '';
-                            const scale = self.zoomPercent / 100 || 1;
-                            const id = event.target.getAttribute('data-element-id');
-                            const item = self.elements.find((e) => e.id === id);
-                            if (!item) {
-                                return;
-                            }
-                            const dl = event.deltaRect.left / scale;
-                            const dt = event.deltaRect.top / scale;
-                            const dr = event.deltaRect.right / scale;
-                            const db = event.deltaRect.bottom / scale;
-                            item.x += dl;
-                            item.y += dt;
-                            item.width += dr - dl;
-                            item.height += db - dt;
-                            item.width = Math.max(self.minElementWidth, item.width);
-                            item.height = Math.max(self.minElementHeight, item.height);
-                            self.clampPosition(item);
-                            self.clampSize(item);
-                        },
-                        end(event) {
-                            event.target.style.transform = '';
-                            const id = event.target.getAttribute('data-element-id');
-                            const item = self.elements.find((e) => e.id === id);
-                            if (!item) {
-                                return;
-                            }
-                            self.snapBox(item);
-                            self.clampPosition(item);
-                            self.clampSize(item);
-                        },
-                    },
-                });
+                    });
             });
         },
 

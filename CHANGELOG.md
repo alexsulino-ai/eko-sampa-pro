@@ -18,9 +18,13 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 - No **wp-admin**, suporte a **`template_id`** na query string ao localizar o script do editor (`ekoSampaEditor.templateId`).
 - Regra **`[x-cloak]`** em `assets/css/admin.css` para evitar flash de modais Alpine no admin.
 
-### Corrigido
+### Corrigido (validação QA — estabilidade JS)
 
-- **Editor em wp-admin:** quando `frontend-app.js` não está carregado, o canvas define um **`ekoSampaApi` mínimo** a partir de `ekoSampaEditor` (root + nonce), permitindo GET/PATCH de templates e galeria sem erros “API unavailable”.
+- **Editor em wp-admin:** quando `frontend-app.js` não está carregado, o canvas define um **`ekoSampaApi` mínimo** a partir de `ekoSampaEditor` (root + nonce).
+- **Editor (`editor-canvas.js`):** `interact` encadeia **`.draggable().resizable()`** no mesmo alvo (evita duplicação de listeners ao rebind).
+- **Editor:** `destroy()` limpa timers, **Sortable** e **interact.unset** nos elementos do canvas.
+- **Editor:** `persist()` ignora resultado se `templateId` mudar durante o `await`.
+- **Galeria:** falha em `refreshGallery` reporta-se em `saveState`; upload bem-sucedido limpa `saveState` após atualizar a lista.
 - Garantia de sintaxe JS verificável (`node --check`) nos bundles principais.
 
 ### Segurança / robustez (já integrados na linha 1.0.0)

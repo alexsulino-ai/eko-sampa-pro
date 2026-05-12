@@ -96,4 +96,18 @@ Marque após testar num site limpo (WP 6.x, PHP 8.x, permalinks ≠ “Simples�
 
 ---
 
+## Revisão técnica QA (código — 1.0.0)
+
+Itens já revistos no código (complementar com testes manuais no browser):
+
+| Área | Verificação |
+|------|-------------|
+| **Interact** | Rebind usa `unset` global + **cadeia única** `.draggable().resizable()` por elemento (evita listeners duplicados). |
+| **Timers** | `destroy()` no componente do editor limpa `saveTimer`, debounce do Interact e **Sortable**. |
+| **Corrida persist** | Após `PATCH`, só atualiza `saveState` se `templateId` for o mesmo que no início do pedido. |
+| **Galeria** | Erros de listagem não são silenciosos; upload OK limpa mensagem de erro anterior. |
+| **Alpine** | `Alpine.data` registado em `alpine:init`; `destroy()` é hook suportado no Alpine 3 para teardown. |
+
+---
+
 *Última revisão alinhada ao código do plugin (versão em `eko-sampa.php`).*
