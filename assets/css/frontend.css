@@ -1,0 +1,14 @@
+/**
+ * Eko Sampa frontend shell — design tokens (docs/frontend.md). Loaded only on app pages.
+ */
+
+:root {
+    --eko-primary-color: #4f46e5;
+    --eko-secondary-color: #10b981;
+    --eko-danger-color: #ef4444;
+    --eko-warning-color: #f59e0b;
+}
+
+[x-cloak] {
+    display: none !important;
+}
