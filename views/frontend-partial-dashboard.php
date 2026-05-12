@@ -33,12 +33,12 @@ if (class_exists('Eko_Sampa_Service')) {
 <div class="mx-auto max-w-6xl space-y-6">
     <div>
         <h2 class="text-lg font-semibold text-slate-900"><?php echo esc_html__('Overview', 'eko-sampa'); ?></h2>
-        <p class="text-sm text-slate-500"><?php echo esc_html__('Quick snapshot of your workspace.', 'eko-sampa'); ?></p>
+        <p class="text-sm text-slate-500"><?php echo esc_html__('Quick snapshot of your workspace xx.', 'eko-sampa'); ?></p>
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p class="text-sm font-medium text-slate-500"><?php echo esc_html__('Clients', 'eko-sampa'); ?></p>
+            <p class="text-sm font-medium text-slate-500"><?php echo esc_html__('Clientsxxxxxxx', 'eko-sampa'); ?></p>
             <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900"><?php echo esc_html((string) $count_clients); ?></p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
