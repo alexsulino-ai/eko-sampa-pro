@@ -21,7 +21,7 @@
             headers['Content-Type'] = 'application/json; charset=UTF-8';
             body = JSON.stringify(body);
         }
-        if (typeof window !== 'undefined' && window.__ekoSampaDebugRest) {
+        if (typeof window !== 'undefined' && window.ekoSampaRest && window.ekoSampaRest.debugRest) {
             console.log('[eko REST]', url, (opts && opts.method) || 'GET', opts && opts.body);
         }
         const res = await fetch(url, Object.assign({}, opts || {}, { headers, credentials: 'same-origin', body }));
@@ -712,7 +712,11 @@ document.addEventListener('alpine:init', () => {
             };
             let dbg = false;
             try {
-                dbg = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ekoSampaPreviewDebug') === '1';
+                dbg =
+                    (typeof window !== 'undefined' &&
+                        window.ekoSampaRest &&
+                        window.ekoSampaRest.debugRest) ||
+                    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('ekoSampaPreviewDebug') === '1');
             } catch (e) {
                 void e;
             }

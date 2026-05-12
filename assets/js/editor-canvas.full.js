@@ -119,11 +119,6 @@ function ekoEditorCanvasFactory() {
             return JSON.stringify({ elements: this.elements }, null, 2);
         },
 
-        get editorVersionLabel() {
-            const v = this.cfg().pluginVersion;
-            return v ? 'Eko Sampa v' + String(v) : 'Eko Sampa';
-        },
-
         /**
          * Updates canvasWidth / canvasHeight from widthMm / heightMm.
          * Uses a local clamp so this never depends on other prototype methods during Alpine init.

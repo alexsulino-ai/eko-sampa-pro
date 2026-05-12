@@ -16,9 +16,18 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Template_Renderer {
 
-    private const DESIGN_WIDTH = 800.0;
+    /** Logical px per mm (CSS 96dpi). Must match `MM_TO_PX` in `assets/js/editor-canvas.js`. */
+    private const MM_TO_CSS_PX = 96.0 / 25.4;
 
-    private const DESIGN_HEIGHT = 1131.0;
+    /**
+     * @return array{0: float, 1: float} Design canvas width/height in px (same basis as editor).
+     */
+    private function design_canvas_px(int $width_mm, int $height_mm): array {
+        $w = max(1, (int) round($width_mm * self::MM_TO_CSS_PX));
+        $h = max(1, (int) round($height_mm * self::MM_TO_CSS_PX));
+
+        return [ (float) $w, (float) $h ];
+    }
 
     /**
      * @param array<string, mixed> $template_row Row from wp_eko_sampa_templates.
@@ -52,12 +61,14 @@ final class Eko_Sampa_Template_Renderer {
             $height_mm
         );
 
+        [ $design_w, $design_h ] = $this->design_canvas_px($width_mm, $height_mm);
+
         $inner = '';
         foreach ($elements as $el) {
             if (! is_array($el)) {
                 continue;
             }
-            $inner .= $this->render_element($el, $context, $for_print);
+            $inner .= $this->render_element($el, $context, $for_print, $design_w, $design_h);
         }
 
         $wrap = $for_print ? 'eko-sampa-print-root' : 'eko-sampa-preview-root';
@@ -74,7 +85,7 @@ final class Eko_Sampa_Template_Renderer {
      * @param array<string, mixed> $el
      * @param array<string, string> $context
      */
-    private function render_element(array $el, array $context, bool $for_print): string {
+    private function render_element(array $el, array $context, bool $for_print, float $design_w, float $design_h): string {
         $x      = (float) ($el['x'] ?? 0);
         $y      = (float) ($el['y'] ?? 0);
         $w      = (float) ($el['width'] ?? 1);
@@ -82,10 +93,12 @@ final class Eko_Sampa_Template_Renderer {
         $type   = sanitize_key((string) ($el['type'] ?? 'text'));
         $styles = isset($el['styles']) && is_array($el['styles']) ? $el['styles'] : [];
 
-        $left   = max(0.0, min(100.0, ($x / self::DESIGN_WIDTH) * 100.0));
-        $top    = max(0.0, min(100.0, ($y / self::DESIGN_HEIGHT) * 100.0));
-        $width  = max(0.0, min(100.0, ($w / self::DESIGN_WIDTH) * 100.0));
-        $height = max(0.0, min(100.0, ($h / self::DESIGN_HEIGHT) * 100.0));
+        $dw     = $design_w > 0.0 ? $design_w : 1.0;
+        $dh     = $design_h > 0.0 ? $design_h : 1.0;
+        $left   = max(0.0, min(100.0, ($x / $dw) * 100.0));
+        $top    = max(0.0, min(100.0, ($y / $dh) * 100.0));
+        $width  = max(0.0, min(100.0, ($w / $dw) * 100.0));
+        $height = max(0.0, min(100.0, ($h / $dh) * 100.0));
 
         $base = sprintf(
             'position:absolute;left:%F%%;top:%F%%;width:%F%%;height:%F%%;box-sizing:border-box;',

@@ -25,8 +25,45 @@ if (! defined('ABSPATH')) {
  * `HANDLE_EDITOR_CANVAS` (and any future `alpine:init` modules) **before** `HANDLE_ALPINE`.
  * Never add Alpine as a dependency of those bundles; keep Alpine’s own deps empty unless
  * required otherwise.
+ *
+ * ## Asset URL audit (theme / broken tree)
+ *
+ * This class only registers **plugin** URLs (`EKO_SAMPA_PLUGIN_URL` + `*.js` / `*.css`) or
+ * full CDN URLs. It never calls `get_stylesheet_directory_uri()` / `get_template_directory_uri()`.
+ * A request such as `/wp-content/themes/storefront/?ver=…` (theme directory as script) comes
+ * from the **active theme** or **another plugin**, not from here.
+ *
+ * Optional debug (off unless explicitly enabled in `wp-config.php`):
+ *
+ *     define('EKO_SAMPA_DEBUG', true);
+ *     define('EKO_SAMPA_DEBUG_ENQUEUES', true); // requires EKO_SAMPA_DEBUG
+ *     define('EKO_SAMPA_DEBUG_ENQUEUES_DEEP', true); // huge log; requires both above
  */
 final class Eko_Sampa_Assets {
+
+    /**
+     * Public URL for a file under this plugin directory (robust vs filtered `plugin_dir_url`).
+     */
+    private function plugin_asset_url(string $relative_path): string {
+        $relative_path = ltrim(str_replace('\\', '/', $relative_path), '/');
+
+        return plugins_url($relative_path, EKO_SAMPA_PLUGIN_FILE);
+    }
+
+    /**
+     * Cache-bust string for plugin files (mtime when readable, else plugin version).
+     */
+    private function plugin_asset_version(string $relative_path): string {
+        $full = EKO_SAMPA_PLUGIN_DIR . ltrim(str_replace('\\', '/', $relative_path), '/');
+        if (is_readable($full)) {
+            $m = @filemtime($full);
+            if (is_int($m) && $m > 0) {
+                return (string) $m;
+            }
+        }
+
+        return EKO_SAMPA_VERSION;
+    }
 
     public const HANDLE_ADMIN_STYLE = 'eko-sampa-admin';
 
@@ -50,6 +87,19 @@ final class Eko_Sampa_Assets {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin']);
         add_action('wp_enqueue_scripts', [$this, 'enqueue_frontend'], 20);
         add_filter('body_class', [$this, 'filter_body_class']);
+        if ($this->debug_enqueue_audit_enabled()) {
+            add_action('wp_print_scripts', [$this, 'debug_log_registered_scripts'], 99);
+            add_action('wp_print_styles', [$this, 'debug_log_registered_styles'], 99);
+            add_action('admin_print_scripts', [$this, 'debug_log_registered_scripts'], 99);
+            add_action('admin_print_styles', [$this, 'debug_log_registered_styles'], 99);
+        }
+    }
+
+    private function debug_enqueue_audit_enabled(): bool {
+        return defined('EKO_SAMPA_DEBUG')
+            && EKO_SAMPA_DEBUG
+            && defined('EKO_SAMPA_DEBUG_ENQUEUES')
+            && EKO_SAMPA_DEBUG_ENQUEUES;
     }
 
     /**
@@ -85,9 +135,10 @@ final class Eko_Sampa_Assets {
                     self::HANDLE_EDITOR_CANVAS,
                     'ekoSampaEditor',
                     [
-                        'templateId' => isset($_GET['template_id']) ? absint((int) $_GET['template_id']) : 0,
-                        'root'       => esc_url_raw(rest_url('eko-sampa/v1/')),
-                        'nonce'      => wp_create_nonce('wp_rest'),
+                        'templateId'    => isset($_GET['template_id']) ? absint((int) $_GET['template_id']) : 0,
+                        'root'          => esc_url_raw(rest_url('eko-sampa/v1/')),
+                        'nonce'         => wp_create_nonce('wp_rest'),
+                        'pluginVersion' => EKO_SAMPA_VERSION,
                     ]
                 );
             }
@@ -124,18 +175,18 @@ final class Eko_Sampa_Assets {
         if (is_readable($css)) {
             wp_register_style(
                 self::HANDLE_ADMIN_STYLE,
-                EKO_SAMPA_PLUGIN_URL . $css_rel,
+                $this->plugin_asset_url($css_rel),
                 [],
-                EKO_SAMPA_VERSION
+                $this->plugin_asset_version($css_rel)
             );
         }
 
         if (is_readable($js)) {
             wp_register_script(
                 self::HANDLE_ADMIN_SCRIPT,
-                EKO_SAMPA_PLUGIN_URL . $js_rel,
+                $this->plugin_asset_url($js_rel),
                 [],
-                EKO_SAMPA_VERSION,
+                $this->plugin_asset_version($js_rel),
                 true
             );
         }
@@ -166,9 +217,9 @@ final class Eko_Sampa_Assets {
              */
             wp_register_script(
                 self::HANDLE_FRONTEND_APP,
-                EKO_SAMPA_PLUGIN_URL . $fe_app_rel,
+                $this->plugin_asset_url($fe_app_rel),
                 [],
-                EKO_SAMPA_VERSION,
+                $this->plugin_asset_version($fe_app_rel),
                 true
             );
         }
@@ -198,9 +249,9 @@ final class Eko_Sampa_Assets {
              */
             wp_register_script(
                 self::HANDLE_EDITOR_CANVAS,
-                EKO_SAMPA_PLUGIN_URL . $editor_js_rel,
+                $this->plugin_asset_url($editor_js_rel),
                 [self::HANDLE_INTERACT, self::HANDLE_SORTABLE],
-                EKO_SAMPA_VERSION,
+                $this->plugin_asset_version($editor_js_rel),
                 true
             );
         }
@@ -210,9 +261,9 @@ final class Eko_Sampa_Assets {
         if (is_readable($fe_css)) {
             wp_register_style(
                 self::HANDLE_FRONTEND_STYLE,
-                EKO_SAMPA_PLUGIN_URL . $fe_css_rel,
+                $this->plugin_asset_url($fe_css_rel),
                 [],
-                EKO_SAMPA_VERSION
+                $this->plugin_asset_version($fe_css_rel)
             );
         }
     }
@@ -239,16 +290,19 @@ final class Eko_Sampa_Assets {
         }
 
         if ($this->should_enqueue_frontend_rest_bundle()) {
-            if (wp_script_is(self::HANDLE_FRONTEND_APP, 'registered')) {
+            $fe_app_path = EKO_SAMPA_PLUGIN_DIR . 'assets/js/frontend-app.js';
+            if (wp_script_is(self::HANDLE_FRONTEND_APP, 'registered') && is_readable($fe_app_path)) {
                 wp_enqueue_script(self::HANDLE_FRONTEND_APP);
                 wp_localize_script(
                     self::HANDLE_FRONTEND_APP,
                     'ekoSampaRest',
                     [
-                        'root'    => esc_url_raw(rest_url('eko-sampa/v1/')),
-                        'nonce'   => wp_create_nonce('wp_rest'),
-                        'isAdmin' => current_user_can('manage_options'),
-                        'urls'    => [
+                        'root'           => esc_url_raw(rest_url('eko-sampa/v1/')),
+                        'nonce'          => wp_create_nonce('wp_rest'),
+                        'isAdmin'        => current_user_can('manage_options'),
+                        'pluginVersion'  => EKO_SAMPA_VERSION,
+                        'debugRest'      => (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG),
+                        'urls'           => [
                             'editor' => Eko_Sampa_Frontend_Router::get_url('editor'),
                             'print'  => Eko_Sampa_Frontend_Router::get_url('print'),
                         ],
@@ -271,9 +325,10 @@ final class Eko_Sampa_Assets {
                     self::HANDLE_EDITOR_CANVAS,
                     'ekoSampaEditor',
                     [
-                        'templateId' => $tid,
-                        'root'       => esc_url_raw(rest_url('eko-sampa/v1/')),
-                        'nonce'      => wp_create_nonce('wp_rest'),
+                        'templateId'     => $tid,
+                        'root'           => esc_url_raw(rest_url('eko-sampa/v1/')),
+                        'nonce'          => wp_create_nonce('wp_rest'),
+                        'pluginVersion'  => EKO_SAMPA_VERSION,
                     ]
                 );
             }
@@ -395,5 +450,62 @@ final class Eko_Sampa_Assets {
 
         return in_array($screen->base, ['post', 'post-new'], true)
             && current_user_can('edit_products');
+    }
+
+    /**
+     * Detects theme-directory URLs used as a script `src` (e.g. …/themes/storefront/?ver=6.9.4).
+     */
+    private static function dependency_src_looks_like_theme_directory_without_file(string $src): bool {
+        $src = trim($src);
+        if ($src === '') {
+            return false;
+        }
+
+        return preg_match('#/wp-content/themes/[^/]+/\?#', $src) === 1;
+    }
+
+    /**
+     * @param \WP_Scripts|\WP_Styles $registry
+     */
+    private function debug_log_dependency_registry(object $registry, string $label): void {
+        if (! $this->debug_enqueue_audit_enabled()) {
+            return;
+        }
+
+        if (defined('EKO_SAMPA_DEBUG_ENQUEUES_DEEP') && EKO_SAMPA_DEBUG_ENQUEUES_DEEP) {
+            error_log('eko_sampa: ' . $label . ' registered dump (DEEP) follows');
+            error_log(print_r($registry->registered, true));
+
+            return;
+        }
+
+        foreach ($registry->registered as $handle => $obj) {
+            if (! is_object($obj) || ! isset($obj->src)) {
+                continue;
+            }
+            $src = (string) $obj->src;
+            if ($src === '') {
+                continue;
+            }
+            if (self::dependency_src_looks_like_theme_directory_without_file($src)) {
+                error_log(sprintf('eko_sampa: [%s] suspicious src handle=%s src=%s', $label, (string) $handle, $src));
+            }
+        }
+    }
+
+    public function debug_log_registered_scripts(): void {
+        global $wp_scripts;
+        if (! $wp_scripts instanceof WP_Scripts) {
+            return;
+        }
+        $this->debug_log_dependency_registry($wp_scripts, 'scripts');
+    }
+
+    public function debug_log_registered_styles(): void {
+        global $wp_styles;
+        if (! $wp_styles instanceof WP_Styles) {
+            return;
+        }
+        $this->debug_log_dependency_registry($wp_styles, 'styles');
     }
 }

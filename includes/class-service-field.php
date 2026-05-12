@@ -16,6 +16,37 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
 
+    /** @var bool|null Lazily set: whether wp_{prefix}eko_sampa_fields exists. */
+    private static ?bool $fields_table_exists = null;
+
+    private function fields_table_available(): bool {
+        if (self::$fields_table_exists !== null) {
+            return self::$fields_table_exists;
+        }
+
+        $database = new Eko_Sampa_Database();
+        self::$fields_table_exists = $database->table_exists_for_suffix('eko_sampa_fields');
+        if (! self::$fields_table_exists) {
+            $this->log_fields_table_missing_once();
+        }
+
+        return self::$fields_table_exists;
+    }
+
+    private function log_fields_table_missing_once(): void {
+        static $logged = false;
+        if ($logged) {
+            return;
+        }
+        $logged = true;
+        $should_log = (defined('EKO_SAMPA_DEBUG_DB') && EKO_SAMPA_DEBUG_DB)
+            || (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG);
+        if ($should_log) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+            error_log('[eko-sampa] Table wp_eko_sampa_fields is missing — service field operations are skipped until DB migration runs.');
+        }
+    }
+
     /**
      * @return array<int, string>
      */
@@ -50,6 +81,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      * Whether `slug` is free for this service (optionally ignoring one field row).
      */
     public function slug_is_available(int $service_id, string $slug, ?int $except_field_id): bool {
+        if (! $this->fields_table_available()) {
+            return false;
+        }
         if ($service_id <= 0) {
             return false;
         }
@@ -77,6 +111,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      * @param array<string, mixed> $data
      */
     public function create(int $service_id, array $data): int|false {
+        if (! $this->fields_table_available()) {
+            return false;
+        }
         if (! $this->actor_may_touch_service($service_id)) {
             return false;
         }
@@ -97,6 +134,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     public function get(int $id): ?array {
+        if (! $this->fields_table_available()) {
+            return null;
+        }
         if ($id <= 0) {
             return null;
         }
@@ -120,6 +160,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      * @param array<string, mixed> $data
      */
     public function update(int $id, array $data): bool {
+        if (! $this->fields_table_available()) {
+            return false;
+        }
         $existing = $this->get($id);
         if (! is_array($existing)) {
             return false;
@@ -150,6 +193,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     public function delete(int $id): bool {
+        if (! $this->fields_table_available()) {
+            return false;
+        }
         $existing = $this->get($id);
         if (! is_array($existing)) {
             return false;
@@ -165,6 +211,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      * Remove all field rows for a service (used before deleting the service).
      */
     public function delete_all_for_service(int $service_id): bool {
+        if (! $this->fields_table_available()) {
+            return true;
+        }
         if ($service_id <= 0 || ! $this->actor_may_touch_service($service_id)) {
             return false;
         }
@@ -182,6 +231,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     public function list_for_service(int $service_id, array $args = []): array {
+        if (! $this->fields_table_available()) {
+            return [];
+        }
         if (! $this->actor_may_touch_service($service_id)) {
             return [];
         }

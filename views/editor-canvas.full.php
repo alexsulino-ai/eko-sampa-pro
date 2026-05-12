@@ -57,7 +57,6 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
             />
             <span class="w-10 text-right text-xs tabular-nums text-slate-700" x-text="zoomPercent + '%'"></span>
             <span class="min-w-0 truncate text-xs text-slate-500" :title="saveLine" x-text="saveLine"></span>
-            <span class="shrink-0 text-[10px] font-normal tabular-nums text-slate-400" x-text="editorVersionLabel" aria-hidden="true"></span>
         </div>
     </header>
 

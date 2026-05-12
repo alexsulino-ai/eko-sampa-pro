@@ -265,6 +265,15 @@ final class Eko_Sampa_Database {
     }
 
     /**
+     * Public check for models / REST when migrations have not run yet (avoids fatal SQL errors).
+     */
+    public function table_exists_for_suffix(string $suffix): bool {
+        global $wpdb;
+
+        return $this->table_exists($wpdb, $suffix);
+    }
+
+    /**
      * @param array<string, string> $definitions column => MySQL fragment after column name (e.g. "varchar(255) NOT NULL DEFAULT ''")
      */
     private function add_missing_columns(wpdb $wpdb, string $table, array $definitions): void {
