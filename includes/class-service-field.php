@@ -78,19 +78,42 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     /**
-     * Whether `slug` is free for this service (optionally ignoring one field row).
+     * Stable slug for DB + uniqueness checks. Matches {@see sanitize_title()} when non-empty;
+     * otherwise falls back to ASCII letters/digits/hyphens so numeric-only slugs (e.g. "666") are not
+     * treated as empty by {@see sanitize_title()} / filters and do not make {@see slug_is_available()}
+     * falsely return "taken".
      */
-    public function slug_is_available(int $service_id, string $slug, ?int $except_field_id): bool {
-        if (! $this->fields_table_available()) {
-            return false;
-        }
-        if ($service_id <= 0) {
-            return false;
+    public function normalize_field_slug(string $raw): string {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return '';
         }
 
-        $clean = sanitize_title($slug);
+        $core = sanitize_title($raw);
+        if ($core !== '') {
+            return $core;
+        }
+
+        $ascii = strtolower((string) preg_replace('/[^a-z0-9_-]+/i', '-', $raw));
+        $ascii = trim($ascii, '-');
+
+        return $ascii !== '' ? $ascii : '';
+    }
+
+    /**
+     * Whether `slug` is free for this service (optionally ignoring one field row).
+     *
+     * When the fields table is missing or `service_id` is invalid, returns true so callers do not
+     * mis-report {@see WP_Error} 409 "slug exists"; {@see create()} / {@see update()} still fail safely.
+     */
+    public function slug_is_available(int $service_id, string $slug, ?int $except_field_id): bool {
+        if (! $this->fields_table_available() || $service_id <= 0) {
+            return true;
+        }
+
+        $clean = $this->normalize_field_slug($slug);
         if ($clean === '') {
-            return false;
+            return true;
         }
 
         $sql  = 'SELECT id FROM ' . $this->table() . ' WHERE service_id = %d AND slug = %s';
@@ -102,9 +125,37 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         $sql .= ' LIMIT 1';
 
         $prep = $this->prepare($sql, $vals);
+        if (false === $prep) {
+            return true;
+        }
         $found = $this->db()->get_var($prep);
 
         return null === $found || '' === $found || 0 === (int) $found;
+    }
+
+    /**
+     * Existing field row id for this service + slug (after {@see sanitize_title()}), if any.
+     */
+    public function find_field_id_by_service_slug(int $service_id, string $slug): ?int {
+        if (! $this->fields_table_available() || $service_id <= 0) {
+            return null;
+        }
+        $clean = $this->normalize_field_slug($slug);
+        if ($clean === '') {
+            return null;
+        }
+        $sql  = 'SELECT id FROM ' . $this->table() . ' WHERE service_id = %d AND slug = %s LIMIT 1';
+        $prep = $this->prepare($sql, [$service_id, $clean]);
+        if (false === $prep) {
+            return null;
+        }
+        $found = $this->db()->get_var($prep);
+        if (null === $found || '' === $found) {
+            return null;
+        }
+        $id = (int) $found;
+
+        return $id > 0 ? $id : null;
     }
 
     /**
@@ -128,9 +179,18 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
             return false;
         }
 
-        $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
+        // wpdb::insert() is unreliable with literal NULL for %s columns on some stacks; omit nullable keys.
+        if (array_key_exists('options_json', $row) && $row['options_json'] === null) {
+            unset($row['options_json']);
+        }
 
-        return $inserted ? (int) $this->db()->insert_id : false;
+        $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
+        if (false === $inserted) {
+            return false;
+        }
+        $new_id = (int) $this->db()->insert_id;
+
+        return $new_id > 0 ? $new_id : false;
     }
 
     public function get(int $id): ?array {
@@ -170,7 +230,7 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
 
         $service_id = (int) ($existing['service_id'] ?? 0);
         if (array_key_exists('slug', $data)) {
-            $candidate = sanitize_title((string) $data['slug']);
+            $candidate = $this->normalize_field_slug((string) $data['slug']);
             if ($candidate !== '' && ! $this->slug_is_available($service_id, $candidate, $id)) {
                 return false;
             }
@@ -267,7 +327,7 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
             $out['label'] = isset($data['label']) ? sanitize_text_field((string) $data['label']) : '';
         }
         if (! $partial || array_key_exists('slug', $data)) {
-            $out['slug'] = isset($data['slug']) ? sanitize_title((string) $data['slug']) : '';
+            $out['slug'] = isset($data['slug']) ? $this->normalize_field_slug((string) $data['slug']) : '';
         }
         if (! $partial || array_key_exists('type', $data)) {
             $type = isset($data['type']) ? sanitize_key((string) $data['type']) : 'text';
@@ -293,6 +353,12 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
 
         if (is_array($value)) {
             return wp_json_encode($value, JSON_UNESCAPED_UNICODE) ?: null;
+        }
+
+        if (is_object($value)) {
+            $arr = json_decode(wp_json_encode($value, JSON_UNESCAPED_UNICODE) ?: '[]', true);
+
+            return is_array($arr) ? (wp_json_encode($arr, JSON_UNESCAPED_UNICODE) ?: null) : null;
         }
 
         if (is_string($value)) {

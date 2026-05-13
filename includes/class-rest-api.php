@@ -171,7 +171,7 @@ final class Eko_Sampa_Rest_Api {
                 [
                     'methods'             => \WP_REST_Server::READABLE,
                     'callback'            => [$this, 'route_fields_list'],
-                    'permission_callback' => [$this, 'require_services_cap'],
+                    'permission_callback' => [$this, 'require_service_fields_read_cap'],
                 ],
                 [
                     'methods'             => \WP_REST_Server::CREATABLE,
@@ -387,6 +387,13 @@ final class Eko_Sampa_Rest_Api {
     }
 
     /**
+     * Read service field definitions when editing orders (no manage_services required).
+     */
+    public function require_service_fields_read_cap(): bool {
+        return $this->require_services_cap() || $this->require_orders_cap();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function list_args(\WP_REST_Request $request): array {
@@ -585,12 +592,39 @@ final class Eko_Sampa_Rest_Api {
         $sid    = (int) $request['id'];
         $params = $this->json_params($request);
         $field  = new Eko_Sampa_Service_Field();
-        $slug   = sanitize_title((string) ($params['slug'] ?? ''));
-        if ($slug !== '' && ! $field->slug_is_available($sid, $slug, null)) {
+        if ($sid <= 0) {
+            return new \WP_Error(
+                'eko_sampa_bad_request',
+                __('Invalid service id.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+        $slug = $field->normalize_field_slug((string) ($params['slug'] ?? ''));
+        if ($slug === '') {
+            return new \WP_Error(
+                'eko_sampa_field_slug_required',
+                __('Provide a non-empty slug (letters, numbers, or hyphens).', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+        if (! $field->slug_is_available($sid, $slug, null)) {
+            $conflict_id = $field->find_field_id_by_service_slug($sid, $slug);
+            $data        = ['status' => 409];
+            if ($conflict_id !== null) {
+                $data['existing_field_id'] = $conflict_id;
+            }
+
             return new \WP_Error(
                 'eko_sampa_field_slug_exists',
-                __('This slug is already used for another field in this service.', 'eko-sampa'),
-                ['status' => 409]
+                $conflict_id !== null
+                    /* translators: 1: slug, 2: numeric field id */
+                    ? sprintf(
+                        __('The slug "%1$s" is already used by field #%2$d in this service. Remove or rename that field, or pick another slug.', 'eko-sampa'),
+                        $slug,
+                        $conflict_id
+                    )
+                    : __('This slug is already used for another field in this service.', 'eko-sampa'),
+                $data
             );
         }
 
@@ -626,12 +660,32 @@ final class Eko_Sampa_Rest_Api {
         }
         $sid = (int) ($row['service_id'] ?? 0);
         if (array_key_exists('slug', $params)) {
-            $slug = sanitize_title((string) $params['slug']);
-            if ($slug !== '' && ! $field->slug_is_available($sid, $slug, $fid)) {
+            $slug = $field->normalize_field_slug((string) $params['slug']);
+            if ($slug === '') {
+                return new \WP_Error(
+                    'eko_sampa_field_slug_required',
+                    __('Provide a non-empty slug (letters, numbers, or hyphens).', 'eko-sampa'),
+                    ['status' => 400]
+                );
+            }
+            if (! $field->slug_is_available($sid, $slug, $fid)) {
+                $conflict_id = $field->find_field_id_by_service_slug($sid, $slug);
+                $data        = ['status' => 409];
+                if ($conflict_id !== null && $conflict_id !== $fid) {
+                    $data['existing_field_id'] = $conflict_id;
+                }
+
                 return new \WP_Error(
                     'eko_sampa_field_slug_exists',
-                    __('This slug is already used for another field in this service.', 'eko-sampa'),
-                    ['status' => 409]
+                    $conflict_id !== null && $conflict_id !== $fid
+                        ? sprintf(
+                            /* translators: 1: slug, 2: numeric field id */
+                            __('The slug "%1$s" is already used by field #%2$d in this service. Remove or rename that field, or pick another slug.', 'eko-sampa'),
+                            $slug,
+                            $conflict_id
+                        )
+                        : __('This slug is already used for another field in this service.', 'eko-sampa'),
+                    $data
                 );
             }
         }
@@ -837,10 +891,7 @@ final class Eko_Sampa_Rest_Api {
 
         $ctx  = Eko_Sampa_Order::template_render_context($order);
         $rnd  = new Eko_Sampa_Template_Renderer();
-        $html = $rnd->render($tpl, $ctx, false);
-        if (isset($html['html']) && is_string($html['html'])) {
-            $html['html'] = wp_kses_post($html['html']);
-        }
+        $html = $rnd->render($tpl, $ctx, true);
 
         $els = $rnd->parse_elements_from_template_row($tpl);
         $html['editorPreview'] = [
@@ -877,10 +928,7 @@ final class Eko_Sampa_Rest_Api {
 
         $ctx  = Eko_Sampa_Order::template_render_context($order);
         $rnd  = new Eko_Sampa_Template_Renderer();
-        $html = $rnd->render($tpl, $ctx, false);
-        if (isset($html['html']) && is_string($html['html'])) {
-            $html['html'] = wp_kses_post($html['html']);
-        }
+        $html = $rnd->render($tpl, $ctx, true);
 
         $els = $rnd->parse_elements_from_template_row($tpl);
         $html['editorPreview'] = [

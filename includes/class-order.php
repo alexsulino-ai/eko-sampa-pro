@@ -401,6 +401,11 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             return false;
         }
 
+        // JSON `{}` decodes to `[]` in PHP, which is a list — treat as empty map (valid).
+        if ($value === []) {
+            return [];
+        }
+
         if (function_exists('array_is_list') && array_is_list($value)) {
             return false;
         }

@@ -11,42 +11,51 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
+require_once EKO_SAMPA_PLUGIN_DIR . 'views/partial-shell-nav-icon.php';
+
 $active = isset($GLOBALS['eko_sampa_active_view']) ? sanitize_key((string) $GLOBALS['eko_sampa_active_view']) : 'dashboard';
 
 $nav = [
     [
-        'view' => 'dashboard',
+        'view'   => 'dashboard',
         'label'  => __('Dashboard', 'eko-sampa'),
+        'icon'   => 'dashboard',
         'show'   => true,
     ],
     [
-        'view' => 'clients',
+        'view'   => 'clients',
         'label'  => __('Clients', 'eko-sampa'),
+        'icon'   => 'clients',
         'show'   => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
     ],
     [
-        'view' => 'services',
+        'view'   => 'services',
         'label'  => __('Services', 'eko-sampa'),
+        'icon'   => 'services',
         'show'   => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
     ],
     [
-        'view' => 'templates',
+        'view'   => 'templates',
         'label'  => __('Templates', 'eko-sampa'),
+        'icon'   => 'templates',
         'show'   => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
     ],
     [
-        'view' => 'editor',
+        'view'   => 'editor',
         'label'  => __('Editor', 'eko-sampa'),
+        'icon'   => 'editor',
         'show'   => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
     ],
     [
-        'view' => 'orders',
+        'view'   => 'orders',
         'label'  => __('Orders', 'eko-sampa'),
+        'icon'   => 'orders',
         'show'   => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
     ],
     [
-        'view' => 'profile',
+        'view'   => 'profile',
         'label'  => __('Profile', 'eko-sampa'),
+        'icon'   => 'profile',
         'show'   => true,
     ],
 ];
@@ -83,40 +92,67 @@ $page_title = $titles[ $active ] ?? __('Eko Sampa', 'eko-sampa');
     ></div>
 
     <aside
-        class="eko-sampa-sidebar fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0"
-        :class="{ '!translate-x-0': state.navOpen }"
+        class="eko-sampa-sidebar fixed inset-y-0 left-0 z-50 flex w-64 max-w-[85vw] -translate-x-full flex-col border-r border-slate-200 bg-white transition-[width,transform] duration-200 ease-out lg:static lg:max-w-none lg:translate-x-0"
+        :class="[
+            state.navOpen ? '!translate-x-0' : '',
+            state.sidebarCollapsed ? 'lg:!w-[4.5rem]' : 'lg:!w-64',
+        ]"
         aria-label="<?php echo esc_attr__('Main navigation', 'eko-sampa'); ?>"
     >
-        <div class="flex h-14 items-center border-b border-slate-100 px-4">
-            <span class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Eko Sampa', 'eko-sampa'); ?></span>
+        <div
+            class="flex h-14 shrink-0 items-center gap-2 border-b border-slate-100 px-2 lg:justify-between lg:px-3"
+            :class="(state.sidebarCollapsed && !state.navOpen) ? 'lg:justify-center' : ''"
+        >
+            <span
+                class="min-w-0 flex-1 truncate pl-1 text-sm font-semibold text-slate-900"
+                x-show="state.navOpen || !state.sidebarCollapsed"
+                x-cloak
+            ><?php echo esc_html__('Eko Sampa', 'eko-sampa'); ?></span>
+            <button
+                type="button"
+                class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 lg:inline-flex"
+                @click="toggleLeftSidebar()"
+                :aria-expanded="!state.sidebarCollapsed"
+                :title="state.sidebarCollapsed ? '<?php echo esc_attr__('Expand menu', 'eko-sampa'); ?>' : '<?php echo esc_attr__('Collapse menu', 'eko-sampa'); ?>'"
+            >
+                <svg x-show="!state.sidebarCollapsed" class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                <svg x-show="state.sidebarCollapsed" class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+            </button>
         </div>
-        <nav class="flex-1 space-y-0.5 overflow-y-auto p-3">
+        <nav class="flex flex-1 flex-col space-y-0.5 overflow-y-auto p-2 lg:p-3">
             <?php foreach ($nav as $item) : ?>
                 <?php if (empty($item['show'])) : ?>
                     <?php continue; ?>
                 <?php endif; ?>
                 <?php
-                $href = esc_url(Eko_Sampa_Frontend_Router::get_url($item['view']));
-                $is_active = $active === $item['view'];
-                $classes = $is_active
+                $href       = esc_url(Eko_Sampa_Frontend_Router::get_url($item['view']));
+                $is_active  = $active === $item['view'];
+                $classes    = $is_active
                     ? 'bg-indigo-50 text-indigo-700 font-medium'
                     : 'text-slate-600 hover:bg-slate-50';
+                $icon_key   = isset($item['icon']) ? sanitize_key((string) $item['icon']) : 'dashboard';
                 ?>
                 <a
-                    class="block rounded-lg px-3 py-2 text-sm <?php echo esc_attr($classes); ?>"
+                    class="flex items-center gap-3 rounded-lg py-2 text-sm <?php echo esc_attr($classes); ?>"
+                    :class="(state.sidebarCollapsed && !state.navOpen) ? 'lg:justify-center lg:gap-0 lg:px-2' : 'px-3'"
                     href="<?php echo $href; ?>"
+                    title="<?php echo esc_attr($item['label']); ?>"
                     @click="state.navOpen = false"
                 >
-                    <?php echo esc_html($item['label']); ?>
+                    <?php eko_sampa_shell_nav_icon($icon_key); ?>
+                    <span class="min-w-0 flex-1 truncate" x-show="state.navOpen || !state.sidebarCollapsed" x-cloak><?php echo esc_html($item['label']); ?></span>
                 </a>
             <?php endforeach; ?>
         </nav>
-        <div class="border-t border-slate-100 p-3">
+        <div class="border-t border-slate-100 p-2 lg:p-3">
             <a
-                class="block rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                class="flex items-center gap-3 rounded-lg py-2 text-sm text-slate-600 hover:bg-slate-50"
+                :class="(state.sidebarCollapsed && !state.navOpen) ? 'lg:justify-center lg:gap-0 lg:px-2' : 'px-3'"
                 href="<?php echo esc_url(Eko_Sampa_Frontend_Router::logout_url()); ?>"
+                title="<?php echo esc_attr__('Log out', 'eko-sampa'); ?>"
             >
-                <?php echo esc_html__('Log out', 'eko-sampa'); ?>
+                <?php eko_sampa_shell_nav_icon('logout'); ?>
+                <span class="min-w-0 flex-1 truncate" x-show="state.navOpen || !state.sidebarCollapsed" x-cloak><?php echo esc_html__('Log out', 'eko-sampa'); ?></span>
             </a>
         </div>
     </aside>

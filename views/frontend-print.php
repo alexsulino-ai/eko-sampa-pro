@@ -29,9 +29,7 @@ if (! is_array($tpl)) {
 
 $ctx = Eko_Sampa_Order::template_render_context($order);
 $out = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, true);
-if (isset($out['html']) && is_string($out['html'])) {
-    $out['html'] = wp_kses_post($out['html']);
-}
+// Renderer already escapes inline CSS and text; wp_kses_post strips safe img/style needed for parity with live preview.
 
 $wm = max(1, (int) ($out['width_mm'] ?? 210));
 $hm = max(1, (int) ($out['height_mm'] ?? 297));

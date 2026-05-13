@@ -94,10 +94,82 @@ function ekoEditorCanvasFactory() {
         snapFlash: false,
         /** Snapshot of `content` when opening inline editor (for cancel) */
         inlineSnapshot: '',
+        /** Right sidebar: layers + JSON — collapsed frees canvas width */
+        editorSidebarCollapsed: false,
+        /** Floating properties panel (px); positioned after mount */
+        propsPanelLeft: 16,
+        propsPanelTop: 88,
+        _propsPanelResizeBound: null,
+        /** Order live preview: scale canvas to fit viewport (no inner scroll). */
+        orderPreviewFit: 1,
+        _orderPreviewResizeObserver: null,
 
         get stageTransform() {
-            const s = this.zoomPercent / 100;
-            return `transform: scale(${s}); transform-origin: center center;`;
+            const z = this.zoomPercent / 100;
+            const fit = this.previewOnly ? this.orderPreviewFit : 1;
+            const s = z * fit;
+            return `transform: scale(${s}); transform-origin: top center;`;
+        },
+
+        propsPanelPositionStyle() {
+            if (this.previewOnly) {
+                return {};
+            }
+            return {
+                left: `${Math.round(this.propsPanelLeft)}px`,
+                top: `${Math.round(this.propsPanelTop)}px`,
+            };
+        },
+
+        layoutPropsPanelDefault() {
+            if (this.previewOnly) {
+                return;
+            }
+            const panelW = 288;
+            const margin = 16;
+            const top = 88;
+            const w = typeof window !== 'undefined' ? window.innerWidth : 1200;
+            this.propsPanelLeft = Math.max(margin, w - panelW - margin);
+            this.propsPanelTop = top;
+            this.clampPropsPanelIntoViewport();
+        },
+
+        clampPropsPanelIntoViewport() {
+            if (typeof window === 'undefined') {
+                return;
+            }
+            const panelW = 288;
+            const panelH = 420;
+            const pad = 8;
+            const maxL = Math.max(pad, window.innerWidth - panelW - pad);
+            const maxT = Math.max(pad, window.innerHeight - panelH - pad);
+            this.propsPanelLeft = Math.min(Math.max(pad, this.propsPanelLeft), maxL);
+            this.propsPanelTop = Math.min(Math.max(pad, this.propsPanelTop), maxT);
+        },
+
+        startPropsPanelDrag(ev) {
+            if (this.previewOnly) {
+                return;
+            }
+            if (ev.button !== 0) {
+                return;
+            }
+            ev.preventDefault();
+            const startX = ev.clientX;
+            const startY = ev.clientY;
+            const origL = this.propsPanelLeft;
+            const origT = this.propsPanelTop;
+            const move = (e) => {
+                this.propsPanelLeft = origL + (e.clientX - startX);
+                this.propsPanelTop = origT + (e.clientY - startY);
+                this.clampPropsPanelIntoViewport();
+            };
+            const up = () => {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+            };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
         },
 
         /** Toolbar line: pending / saving / result (preview: hidden to avoid layout flicker) */
@@ -164,6 +236,29 @@ function ekoEditorCanvasFactory() {
             );
         },
 
+        updateOrderPreviewFit() {
+            if (!this.previewOnly) {
+                return;
+            }
+            const el = this.$refs.orderPreviewViewport;
+            if (!el || el.clientWidth < 8 || el.clientHeight < 8) {
+                this.orderPreviewFit = 1;
+                return;
+            }
+            const z = (Number(this.zoomPercent) || 100) / 100;
+            if (z <= 0) {
+                this.orderPreviewFit = 1;
+                return;
+            }
+            const dw = Math.max(1, Number(this.canvasWidth) || 1) * z;
+            const dh = Math.max(1, Number(this.canvasHeight) || 1) * z;
+            const pad = 12;
+            const fw = Math.max(8, el.clientWidth - pad);
+            const fh = Math.max(8, el.clientHeight - pad);
+            const fit = Math.min(1, fw / dw, fh / dh);
+            this.orderPreviewFit = Number.isFinite(fit) && fit > 0 ? fit : 1;
+        },
+
         init() {
             this.previewOnly =
                 !!(this.$el && this.$el.getAttribute && this.$el.getAttribute('data-eko-order-preview') === '1');
@@ -175,11 +270,40 @@ function ekoEditorCanvasFactory() {
                 };
                 window.addEventListener('eko-sampa:order-preview', this._orderPreviewListener);
                 this.$watch('zoomPercent', () => {
-                    this.$nextTick(() => {});
+                    this.$nextTick(() => this.updateOrderPreviewFit());
+                });
+                this.$watch('canvasWidth', () => {
+                    this.$nextTick(() => this.updateOrderPreviewFit());
+                });
+                this.$watch('canvasHeight', () => {
+                    this.$nextTick(() => this.updateOrderPreviewFit());
+                });
+                this._orderPreviewResizeObserver =
+                    typeof ResizeObserver !== 'undefined'
+                        ? new ResizeObserver(() => {
+                              this.updateOrderPreviewFit();
+                          })
+                        : null;
+                this.$nextTick(() => {
+                    this.$nextTick(() => {
+                        const el = this.$refs.orderPreviewViewport;
+                        if (el && this._orderPreviewResizeObserver) {
+                            this._orderPreviewResizeObserver.observe(el);
+                        }
+                        this.updateOrderPreviewFit();
+                    });
                 });
                 return;
             }
             this.syncLogicalCanvasSizeFromMm();
+            this.layoutPropsPanelDefault();
+            this._propsPanelResizeBound = () => {
+                this.clampPropsPanelIntoViewport();
+            };
+            window.addEventListener('resize', this._propsPanelResizeBound);
+            this.$nextTick(() => {
+                this.layoutPropsPanelDefault();
+            });
             this.$nextTick(() => {
                 this.$nextTick(() => this.bindInteract());
             });
@@ -233,6 +357,7 @@ function ekoEditorCanvasFactory() {
             }
             if (!detail || !Array.isArray(detail.elements)) {
                 this.elements = [];
+                this.$nextTick(() => this.updateOrderPreviewFit());
                 return;
             }
             this.widthMm = Number(detail.width_mm) || 210;
@@ -246,9 +371,22 @@ function ekoEditorCanvasFactory() {
             }
             this.normalizeElements();
             this.selectedId = null;
+            this.$nextTick(() => this.updateOrderPreviewFit());
         },
 
         destroy() {
+            if (this._orderPreviewResizeObserver) {
+                try {
+                    this._orderPreviewResizeObserver.disconnect();
+                } catch (e) {
+                    void e;
+                }
+                this._orderPreviewResizeObserver = null;
+            }
+            if (this._propsPanelResizeBound) {
+                window.removeEventListener('resize', this._propsPanelResizeBound);
+                this._propsPanelResizeBound = null;
+            }
             if (this._orderPreviewListener) {
                 window.removeEventListener('eko-sampa:order-preview', this._orderPreviewListener);
                 this._orderPreviewListener = null;

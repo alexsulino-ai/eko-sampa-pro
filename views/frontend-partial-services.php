@@ -100,7 +100,7 @@ if (! defined('ABSPATH')) {
                 <div class="mt-3 grid gap-2 sm:grid-cols-2">
                     <input class="rounded border border-slate-200 px-2 py-1 text-sm" type="text" placeholder="<?php echo esc_attr__('Label', 'eko-sampa'); ?>" x-model="state.fieldForm.label" />
                     <input class="rounded border border-slate-200 px-2 py-1 text-sm" type="text" placeholder="<?php echo esc_attr__('Slug', 'eko-sampa'); ?>" x-model="state.fieldForm.slug" />
-                    <select class="rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.fieldForm.type">
+                    <select class="rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.fieldForm.type" @change="if (state.fieldForm.type === 'select' && (state.fieldForm.options_json == null || state.fieldForm.options_json === '')) { state.fieldForm.options_json = '[]'; }">
                         <option value="text">text</option>
                         <option value="textarea">textarea</option>
                         <option value="number">number</option>
@@ -109,6 +109,15 @@ if (! defined('ABSPATH')) {
                     </select>
                     <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="state.fieldForm.required" :true-value="1" :false-value="0" /> <?php echo esc_html__('Required', 'eko-sampa'); ?></label>
                 </div>
+                <label class="mt-2 block text-xs font-medium text-slate-600" x-show="state.fieldForm.type === 'select'">
+                    <?php echo esc_html__('Select options (JSON array)', 'eko-sampa'); ?>
+                    <textarea
+                        class="mt-1 w-full rounded border border-slate-200 px-2 py-1 font-mono text-xs"
+                        rows="3"
+                        placeholder='["Option A","Option B"]'
+                        x-model="state.fieldForm.options_json"
+                    ></textarea>
+                </label>
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                     <button type="button" class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50" @click="saveField()" x-text="state.fieldForm.id ? '<?php echo esc_js(__('Save field', 'eko-sampa')); ?>' : '<?php echo esc_js(__('Add field', 'eko-sampa')); ?>'"></button>
                     <button type="button" class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:underline" x-show="state.fieldForm.id" @click="newField()"><?php echo esc_html__('Cancel edit', 'eko-sampa'); ?></button>

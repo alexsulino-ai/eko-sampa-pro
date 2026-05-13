@@ -41,7 +41,7 @@ if (! defined('ABSPATH')) {
     </div>
     <p class="text-sm text-red-600" x-show="error" x-text="error || ''"></p>
     <p class="text-xs text-slate-500" x-show="loading" x-cloak><?php echo esc_html__('Loading…', 'eko-sampa'); ?></p>
-    <div class="grid gap-6 lg:grid-cols-2">
+    <div class="grid min-h-0 gap-6 lg:grid-cols-2 lg:items-stretch">
         <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
@@ -79,7 +79,7 @@ if (! defined('ABSPATH')) {
                 </div>
             </div>
         </div>
-        <div class="space-y-4">
+        <div class="flex min-h-0 flex-col space-y-4">
             <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Order', 'eko-sampa'); ?></h3>
                 <div class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -90,7 +90,7 @@ if (! defined('ABSPATH')) {
                     <?php endif; ?>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Client', 'eko-sampa'); ?>
                         <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.client_id" @change="schedulePreviewDraft()">
-                            <option value="">—</option>
+                            <option value="0"><?php echo esc_html__('Anonymous client', 'eko-sampa'); ?></option>
                             <template x-for="c in state.clients" :key="c.id">
                                 <option :value="c.id" x-text="c.nome + ' (' + c.id + ')'"></option>
                             </template>
@@ -128,43 +128,47 @@ if (! defined('ABSPATH')) {
                         <?php echo esc_html__('Print ready', 'eko-sampa'); ?>
                     </label>
                 </div>
-                <div class="mt-4 border-t border-slate-100 pt-3" x-show="state.serviceFields.length">
+                <div class="mt-4 border-t border-slate-100 pt-3" x-show="state.serviceFields && state.serviceFields.length > 0">
                     <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields (placeholders {{slug}})', 'eko-sampa'); ?></p>
                     <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                        <template x-for="f in state.serviceFields" :key="f.id">
+                        <template x-for="f in state.serviceFields" :key="'sf-' + (f.id != null ? f.id : '') + '-' + (f.slug || '')">
                             <div class="min-w-0 sm:col-span-2">
                                 <label class="block text-xs font-medium text-slate-600">
                                     <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
                                     <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
                                 </label>
-                                <template x-if="f.type === 'textarea'">
-                                    <textarea class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" rows="2" x-model="state.form.dynamic_data_json[f.slug]"></textarea>
-                                </template>
-                                <template x-if="f.type === 'select'">
-                                    <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.dynamic_data_json[f.slug]">
-                                        <option value="">—</option>
-                                        <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="f.id + '-' + idx + '-' + opt.value">
-                                            <option :value="opt.value" x-text="opt.label"></option>
-                                        </template>
-                                    </select>
-                                </template>
-                                <template x-if="f.type !== 'textarea' && f.type !== 'select'">
-                                    <input
-                                        class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
-                                        :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
-                                        x-model="state.form.dynamic_data_json[f.slug]"
-                                    />
-                                </template>
+                                <textarea
+                                    x-show="f.type === 'textarea'"
+                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                    rows="2"
+                                    x-model="state.form.dynamic_data_json[f.slug]"
+                                ></textarea>
+                                <select
+                                    x-show="f.type === 'select'"
+                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                    x-model="state.form.dynamic_data_json[f.slug]"
+                                >
+                                    <option value="">—</option>
+                                    <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="(f.slug || '') + '-opt-' + idx + '-' + opt.value">
+                                        <option :value="opt.value" x-text="opt.label"></option>
+                                    </template>
+                                </select>
+                                <input
+                                    x-show="f.type !== 'textarea' && f.type !== 'select'"
+                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                    :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
+                                    x-model="state.form.dynamic_data_json[f.slug]"
+                                />
                             </div>
                         </template>
                     </div>
                 </div>
-                <div class="mt-3 border-t border-slate-100 pt-3" x-show="!state.serviceFields.length">
+                <div class="mt-3 border-t border-slate-100 pt-3" x-show="!state.serviceFields || state.serviceFields.length === 0">
                     <p class="text-xs text-slate-500"><?php echo esc_html__('Select a service to load dynamic fields.', 'eko-sampa'); ?></p>
                 </div>
                 <button type="button" class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="save()"><?php echo esc_html__('Save', 'eko-sampa'); ?></button>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <?php require EKO_SAMPA_PLUGIN_DIR . 'views/editor-canvas-order-preview.php'; ?>
                 <iframe
                     class="mt-2 h-[min(24rem,50vh)] w-full min-h-[8rem] rounded border border-slate-100 bg-white"

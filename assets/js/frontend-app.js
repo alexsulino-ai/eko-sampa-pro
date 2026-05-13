@@ -59,10 +59,26 @@ window.EkoModules = Object.assign(window.EkoModules || {}, {
 
 function ekoShellFactory() {
     return {
-        state: { navOpen: false },
+        state: { navOpen: false, sidebarCollapsed: false },
         loading: false,
         error: null,
-        init() {},
+        init() {
+            try {
+                if (localStorage.getItem('eko_sampa_sidebar_collapsed') === '1') {
+                    this.state.sidebarCollapsed = true;
+                }
+            } catch (e) {
+                void e;
+            }
+        },
+        toggleLeftSidebar() {
+            this.state.sidebarCollapsed = !this.state.sidebarCollapsed;
+            try {
+                localStorage.setItem('eko_sampa_sidebar_collapsed', this.state.sidebarCollapsed ? '1' : '0');
+            } catch (e) {
+                void e;
+            }
+        },
     };
 }
 
@@ -235,11 +251,15 @@ function ekoServicesFactory() {
             this.state.page++;
             this.load();
         },
-        async loadFields(sid) {
+        async loadFields(sid, opts) {
+            const silent = opts && opts.silent;
             try {
                 this.state.fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
             } catch (e) {
                 this.state.fields = [];
+                if (!silent) {
+                    this.error = String(e.message || e);
+                }
             }
         },
         edit(row) {
@@ -252,6 +272,16 @@ function ekoServicesFactory() {
                 return;
             }
             const req = f.required == null ? 0 : parseInt(String(f.required), 10) ? 1 : 0;
+            let opt = f.options_json;
+            if (opt != null && opt !== '' && typeof opt === 'object') {
+                try {
+                    opt = JSON.stringify(opt);
+                } catch (e) {
+                    opt = '';
+                }
+            } else if (opt != null && typeof opt !== 'string') {
+                opt = String(opt);
+            }
             this.state.fieldForm = {
                 id: f.id,
                 service_id: this.state.form.id,
@@ -259,7 +289,7 @@ function ekoServicesFactory() {
                 slug: f.slug != null ? String(f.slug) : '',
                 type: f.type != null ? String(f.type) : 'text',
                 required: req,
-                options_json: f.options_json != null ? f.options_json : null,
+                options_json: opt != null && opt !== '' ? opt : f.type === 'select' ? '[]' : null,
                 sort_order: f.sort_order != null ? Number(f.sort_order) : 0,
             };
         },
@@ -354,9 +384,33 @@ function ekoServicesFactory() {
                 return;
             }
             this.error = null;
-            const body = { ...this.state.fieldForm, slug: cand };
-            delete body.id;
-            delete body.service_id;
+            let optionsPayload = this.state.fieldForm.options_json;
+            if (this.state.fieldForm.type === 'select') {
+                const raw = typeof optionsPayload === 'string' ? optionsPayload.trim() : '';
+                if (raw === '') {
+                    optionsPayload = [];
+                } else {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        optionsPayload = Array.isArray(parsed) ? parsed : [String(parsed)];
+                    } catch (e) {
+                        this.error = 'Select options must be valid JSON (e.g. ["A","B"] or [{"value":"a","label":"A"}]).';
+                        return;
+                    }
+                }
+            } else {
+                optionsPayload = null;
+            }
+            const body = JSON.parse(
+                JSON.stringify({
+                    label: this.state.fieldForm.label,
+                    slug: cand,
+                    type: this.state.fieldForm.type,
+                    required: parseInt(String(this.state.fieldForm.required), 10) ? 1 : 0,
+                    options_json: optionsPayload,
+                    sort_order: Number(this.state.fieldForm.sort_order) || 0,
+                })
+            );
             try {
                 if (this.state.fieldForm.id) {
                     await window.ekoSampaApi('services/' + sid + '/fields/' + this.state.fieldForm.id, { method: 'PATCH', body });
@@ -367,6 +421,7 @@ function ekoServicesFactory() {
                 this.newField();
             } catch (e) {
                 this.error = String(e.message || e);
+                await this.loadFields(sid, { silent: true });
             }
         },
         async deleteField(fid) {
@@ -571,7 +626,7 @@ function ekoOrdersFactory() {
             previewDraftTimer: null,
             form: {
                 id: 0,
-                client_id: '',
+                client_id: 0,
                 service_id: '',
                 template_id: '',
                 status: 'pending',
@@ -702,7 +757,7 @@ function ekoOrdersFactory() {
         reset() {
             this.state.form = {
                 id: 0,
-                client_id: '',
+                client_id: 0,
                 service_id: '',
                 template_id: '',
                 status: 'pending',
@@ -723,6 +778,7 @@ function ekoOrdersFactory() {
             const r = Object.assign({}, row);
             r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
             r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
+            r.client_id = r.client_id != null && String(r.client_id) !== '' ? parseInt(String(r.client_id), 10) : 0;
             this.state.form = r;
             let d = {};
             if (typeof this.state.form.dynamic_data_json === 'string' && this.state.form.dynamic_data_json) {
@@ -788,7 +844,13 @@ function ekoOrdersFactory() {
                 template_id: tid,
                 client_id: parseInt(String(this.state.form.client_id || 0), 10),
                 id: parseInt(String(this.state.form.id || 0), 10),
-                dynamic_data_json: this.state.form.dynamic_data_json || {},
+                dynamic_data_json: JSON.parse(
+                    JSON.stringify(
+                        this.state.form.dynamic_data_json && typeof this.state.form.dynamic_data_json === 'object'
+                            ? this.state.form.dynamic_data_json
+                            : {}
+                    )
+                ),
             };
             let dbg = false;
             try {
@@ -840,12 +902,13 @@ function ekoOrdersFactory() {
         },
         async save() {
             this.error = null;
+            const dyn = JSON.parse(JSON.stringify(this.state.form.dynamic_data_json && typeof this.state.form.dynamic_data_json === 'object' ? this.state.form.dynamic_data_json : {}));
             const payload = {
-                client_id: parseInt(String(this.state.form.client_id || 0), 10),
+                client_id: parseInt(String(this.state.form.client_id != null && this.state.form.client_id !== '' ? this.state.form.client_id : 0), 10),
                 service_id: parseInt(String(this.state.form.service_id || 0), 10),
                 template_id: parseInt(String(this.state.form.template_id || 0), 10),
                 status: this.state.form.status,
-                dynamic_data_json: this.state.form.dynamic_data_json,
+                dynamic_data_json: dyn,
                 woo_order_id: parseInt(String(this.state.form.woo_order_id || 0), 10),
                 print_ready: parseInt(String(this.state.form.print_ready != null ? this.state.form.print_ready : 0), 10) ? 1 : 0,
             };

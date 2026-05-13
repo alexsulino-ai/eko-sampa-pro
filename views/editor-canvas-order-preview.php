@@ -13,35 +13,39 @@ if (! defined('ABSPATH')) {
 
 ?>
 <div
-    class="eko-sampa-editor eko-sampa-order-live-preview flex min-h-[14rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-slate-900"
+    class="eko-sampa-editor eko-sampa-order-live-preview flex min-h-0 w-full min-w-0 max-h-[min(65vh,36rem)] flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-slate-900"
     x-data="window.ekoEditorCanvasFactory()"
     data-eko-order-preview="1"
     @keydown.window.stop
 >
     <header class="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <h2 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Live preview', 'eko-sampa'); ?></h2>
-        <p class="text-[10px] text-slate-500"><?php echo esc_html__('Same canvas as the visual editor.', 'eko-sampa'); ?></p>
-        <div class="ml-auto flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <label class="inline-flex items-center gap-1" for="eko-order-preview-zoom">
-                <span><?php echo esc_html__('Zoom', 'eko-sampa'); ?></span>
+        <p class="hidden text-[10px] text-slate-500 sm:inline"><?php echo esc_html__('Same canvas as the visual editor.', 'eko-sampa'); ?></p>
+        <div class="ml-auto flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-600">
+            <label class="inline-flex min-w-0 items-center gap-1" for="eko-order-preview-zoom">
+                <span class="hidden sm:inline"><?php echo esc_html__('Zoom', 'eko-sampa'); ?></span>
             </label>
             <input
                 id="eko-order-preview-zoom"
-                class="h-2 w-24 cursor-pointer accent-slate-700"
+                class="h-2 w-20 min-w-0 max-w-full shrink cursor-pointer accent-slate-700 sm:w-24"
                 type="range"
                 x-model.number="zoomPercent"
                 :min="minZoom"
                 :max="maxZoom"
                 step="1"
             />
-            <span class="w-10 text-right text-xs tabular-nums text-slate-700" x-text="zoomPercent + '%'"></span>
+            <span class="w-9 shrink-0 text-right text-xs tabular-nums text-slate-700" x-text="zoomPercent + '%'"></span>
         </div>
     </header>
-    <div class="flex min-h-0 flex-1 flex-col">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
         <section class="eko-sampa-editor__workspace flex min-h-0 min-w-0 flex-1 flex-col" aria-label="<?php echo esc_attr__('Order preview canvas', 'eko-sampa'); ?>">
-            <div class="eko-sampa-editor__viewport min-h-0 flex-1 overflow-auto bg-slate-200/90" role="region">
-                <div class="eko-sampa-editor__viewport-frame flex min-h-full min-w-full items-center justify-center p-3" @mousedown.self="clearSelectionIfCanvas($event)">
-                    <div class="eko-sampa-editor__stage" :style="stageTransform">
+            <div
+                class="eko-sampa-editor__viewport min-h-0 min-w-0 flex-1 overflow-hidden bg-slate-200/90"
+                x-ref="orderPreviewViewport"
+                role="region"
+            >
+                <div class="eko-sampa-editor__viewport-frame flex h-full min-h-0 w-full min-w-0 items-start justify-center overflow-hidden p-2 sm:p-3" @mousedown.self="clearSelectionIfCanvas($event)">
+                    <div class="eko-sampa-editor__stage max-h-full max-w-full shrink-0" :style="stageTransform">
                         <div
                             class="eko-sampa-editor__canvas relative shrink-0 bg-white shadow-lg ring-1 ring-slate-900/10 transition-shadow duration-150"
                             :class="{ 'ring-2 ring-emerald-400/60 shadow-md': snapFlash }"
