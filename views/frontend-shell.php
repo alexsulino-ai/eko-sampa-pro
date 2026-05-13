@@ -69,21 +69,22 @@ $page_title = $titles[ $active ] ?? __('Eko Sampa', 'eko-sampa');
 <div
     id="eko-sampa-app"
     class="eko-sampa-app flex min-h-screen"
-    x-data="{ navOpen: false }"
-    @keydown.escape.window="navOpen = false"
+    x-data="window.ekoShellFactory()"
+    x-init="init()"
+    @keydown.escape.window="state.navOpen = false"
 >
     <div
         class="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
-        x-show="navOpen"
+        x-show="state.navOpen"
         x-transition.opacity
         x-cloak
-        @click="navOpen = false"
+        @click="state.navOpen = false"
         aria-hidden="true"
     ></div>
 
     <aside
         class="eko-sampa-sidebar fixed inset-y-0 left-0 z-50 flex w-64 -translate-x-full flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0"
-        :class="{ '!translate-x-0': navOpen }"
+        :class="{ '!translate-x-0': state.navOpen }"
         aria-label="<?php echo esc_attr__('Main navigation', 'eko-sampa'); ?>"
     >
         <div class="flex h-14 items-center border-b border-slate-100 px-4">
@@ -104,7 +105,7 @@ $page_title = $titles[ $active ] ?? __('Eko Sampa', 'eko-sampa');
                 <a
                     class="block rounded-lg px-3 py-2 text-sm <?php echo esc_attr($classes); ?>"
                     href="<?php echo $href; ?>"
-                    @click="navOpen = false"
+                    @click="state.navOpen = false"
                 >
                     <?php echo esc_html($item['label']); ?>
                 </a>
@@ -125,9 +126,9 @@ $page_title = $titles[ $active ] ?? __('Eko Sampa', 'eko-sampa');
             <button
                 type="button"
                 class="inline-flex rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
-                @click="navOpen = true"
+                @click="state.navOpen = true"
                 aria-expanded="false"
-                :aria-expanded="navOpen"
+                :aria-expanded="state.navOpen"
                 aria-controls="eko-sampa-app"
             >
                 <span class="sr-only"><?php echo esc_html__('Open menu', 'eko-sampa'); ?></span>

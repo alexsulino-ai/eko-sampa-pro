@@ -12,7 +12,7 @@ if (! defined('ABSPATH')) {
 }
 
 ?>
-<div class="mx-auto max-w-6xl space-y-6" x-data="ekoClients" x-init="init()">
+<div class="mx-auto max-w-6xl space-y-6" x-data="window.ekoClientsFactory()" x-init="init()">
     <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
             <h2 class="text-lg font-semibold text-slate-900"><?php echo esc_html__('Clients', 'eko-sampa'); ?></h2>
@@ -20,19 +20,19 @@ if (! defined('ABSPATH')) {
         </div>
         <div class="flex flex-wrap gap-2">
             <?php if (current_user_can('manage_options')) : ?>
-                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="filterUserId" @change="page=1; load()">
+                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.filterUserId" @change="state.page=1; load()">
                     <option value=""><?php echo esc_html__('All users', 'eko-sampa'); ?></option>
-                    <template x-for="u in users" :key="u.id">
+                    <template x-for="u in state.users" :key="u.id">
                         <option :value="u.id" x-text="u.display_name + ' (' + u.id + ')'"></option>
                     </template>
                 </select>
             <?php endif; ?>
-            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="q" @keydown.enter.prevent="page=1; load()" placeholder="<?php echo esc_attr__('Search…', 'eko-sampa'); ?>" />
-            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="page=1; load()"><?php echo esc_html__('Search', 'eko-sampa'); ?></button>
+            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Search…', 'eko-sampa'); ?>" />
+            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="state.page=1; load()"><?php echo esc_html__('Search', 'eko-sampa'); ?></button>
             <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" @click="reset()"><?php echo esc_html__('New', 'eko-sampa'); ?></button>
         </div>
     </div>
-    <p class="text-sm text-red-600" x-show="err" x-text="err"></p>
+    <p class="text-sm text-red-600" x-show="error" x-text="error || ''"></p>
     <p class="text-xs text-slate-500" x-show="loading" x-cloak><?php echo esc_html__('Loading…', 'eko-sampa'); ?></p>
     <div class="grid gap-6 lg:grid-cols-2">
         <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -45,7 +45,7 @@ if (! defined('ABSPATH')) {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="r in rows" :key="r.id">
+                    <template x-for="r in state.rows" :key="r.id">
                         <tr class="hover:bg-slate-50/80">
                             <td class="px-4 py-2 font-medium text-slate-900" x-text="r.nome"></td>
                             <td class="px-4 py-2 text-slate-600" x-text="r.email"></td>
@@ -58,10 +58,10 @@ if (! defined('ABSPATH')) {
                 </tbody>
             </table>
             <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
-                <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="page"></span></span>
+                <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="state.page"></span></span>
                 <div class="flex gap-2">
-                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
-                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="state.page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!state.hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
                 </div>
             </div>
         </div>
@@ -70,26 +70,26 @@ if (! defined('ABSPATH')) {
             <div class="mt-4 grid gap-3 sm:grid-cols-2">
                 <?php if (current_user_can('manage_options')) : ?>
                     <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Owner user ID (new only)', 'eko-sampa'); ?>
-                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model="form.user_id" :disabled="!!form.id" />
+                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model="state.form.user_id" :disabled="!!state.form.id" />
                     </label>
                 <?php endif; ?>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Name', 'eko-sampa'); ?> *
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="form.nome" required />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.nome" required />
                 </label>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Email', 'eko-sampa'); ?>
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="email" x-model="form.email" />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="email" x-model="state.form.email" />
                 </label>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Phone', 'eko-sampa'); ?>
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="form.telefone" />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.telefone" />
                 </label>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Document', 'eko-sampa'); ?>
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="form.documento" />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.documento" />
                 </label>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('City', 'eko-sampa'); ?>
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="form.cidade" />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.cidade" />
                 </label>
                 <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('State', 'eko-sampa'); ?>
-                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="form.estado" />
+                    <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.estado" />
                 </label>
             </div>
             <div class="mt-4 flex justify-end gap-2">

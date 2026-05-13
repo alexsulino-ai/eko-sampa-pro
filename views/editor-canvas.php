@@ -27,23 +27,27 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
         <h1 class="text-sm font-semibold text-slate-900 md:text-base">
             <?php echo esc_html__('Visual editor', 'eko-sampa'); ?>
         </h1>
-        <div class="flex flex-wrap items-center gap-2">
-            <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addText()"><?php echo esc_html__('Text', 'eko-sampa'); ?></button>
-            <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addPlaceholder()"><?php echo esc_html__('Placeholder', 'eko-sampa'); ?></button>
-            <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addRectangle()"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></button>
-            <button type="button" class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-800 hover:bg-indigo-100" @click="openGallery()"><?php echo esc_html__('Gallery', 'eko-sampa'); ?></button>
-            <button type="button" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100" @click="deleteSelected()"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
-        </div>
-        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <label class="inline-flex items-center gap-1">
-                <span><?php echo esc_html__('W mm', 'eko-sampa'); ?></span>
-                <input class="w-16 rounded border border-slate-200 px-1 py-0.5" type="number" x-model.number="widthMm" min="10" max="2000" />
-            </label>
-            <label class="inline-flex items-center gap-1">
-                <span><?php echo esc_html__('H mm', 'eko-sampa'); ?></span>
-                <input class="w-16 rounded border border-slate-200 px-1 py-0.5" type="number" x-model.number="heightMm" min="10" max="2000" />
-            </label>
-        </div>
+        <template x-if="!previewOnly">
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addText()"><?php echo esc_html__('Text', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addPlaceholder()"><?php echo esc_html__('Placeholder', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addRectangle()"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-800 hover:bg-indigo-100" @click="openGallery()"><?php echo esc_html__('Gallery', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100" @click="deleteSelected()"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
+            </div>
+        </template>
+        <template x-if="!previewOnly">
+            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label class="inline-flex items-center gap-1">
+                    <span><?php echo esc_html__('W mm', 'eko-sampa'); ?></span>
+                    <input class="w-16 rounded border border-slate-200 px-1 py-0.5" type="number" x-model.number="widthMm" min="10" max="2000" />
+                </label>
+                <label class="inline-flex items-center gap-1">
+                    <span><?php echo esc_html__('H mm', 'eko-sampa'); ?></span>
+                    <input class="w-16 rounded border border-slate-200 px-1 py-0.5" type="number" x-model.number="heightMm" min="10" max="2000" />
+                </label>
+            </div>
+        </template>
         <div class="eko-sampa-editor__zoom ml-auto flex min-w-0 flex-wrap items-center gap-2">
             <label class="text-xs text-slate-600" for="eko-sampa-editor-zoom"><?php echo esc_html__('Zoom', 'eko-sampa'); ?></label>
             <input
@@ -56,7 +60,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 step="1"
             />
             <span class="w-10 text-right text-xs tabular-nums text-slate-700" x-text="zoomPercent + '%'"></span>
-            <span class="min-w-0 truncate text-xs text-slate-500" :title="saveLine" x-text="saveLine"></span>
+            <span class="inline-block w-[11rem] shrink-0 text-right text-xs tabular-nums text-slate-500" :title="saveLine"><span x-show="saveLine" x-text="saveLine"></span></span>
             <span class="shrink-0 text-[10px] font-normal tabular-nums text-slate-400" x-text="editorVersionLabel" aria-hidden="true"></span>
         </div>
     </header>
@@ -89,8 +93,12 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                     @dblclick.prevent="(item.type === 'text' || item.type === 'placeholder') && openInlineEdit(item)"
                                 >
                                     <template x-if="item.type === 'image'">
-                                        <div class="pointer-events-none absolute inset-0" :style="elementFrameCss(item)">
-                                            <img class="pointer-events-none" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
+                                        <div
+                                            class="absolute inset-0 cursor-pointer"
+                                            :style="elementFrameCss(item)"
+                                            @click.stop="selectedId === item.id ? toggleImageFit(item) : select(item.id)"
+                                        >
+                                            <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'text' || item.type === 'placeholder'">
@@ -120,7 +128,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                         <div class="pointer-events-none absolute inset-0" :style="elementFrameCss(item)"></div>
                                     </template>
 
-                                    <template x-if="selectedId === item.id && !(inlineOpen && inlineTargetId === item.id)">
+                                    <template x-if="selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && !previewOnly">
                                         <div>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-t pointer-events-auto absolute left-0 top-0 z-[60] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-t pointer-events-auto absolute left-1/2 top-0 z-[60] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
@@ -140,7 +148,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
             </div>
         </section>
 
-        <aside class="flex w-full shrink-0 flex-col border-t border-slate-200 bg-white lg:w-[22rem] lg:border-l lg:border-t-0">
+        <aside class="flex w-full shrink-0 flex-col border-t border-slate-200 bg-white lg:w-[22rem] lg:border-l lg:border-t-0" x-show="!previewOnly" x-cloak>
             <div class="border-b border-slate-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500">
                 <?php echo esc_html__('Layers', 'eko-sampa'); ?>
             </div>
@@ -275,6 +283,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <template x-if="selectedElement && selectedElement.type === 'image'">
                     <div class="space-y-3">
                         <p class="text-[11px] font-medium text-slate-600"><?php echo esc_html__('Image', 'eko-sampa'); ?></p>
+                        <p class="text-[10px] leading-snug text-slate-500"><?php echo esc_html__('Tip: with the image selected, click it again to switch between cover (default) and contain.', 'eko-sampa'); ?></p>
                         <label class="flex items-center gap-2">
                             <span class="text-slate-500"><?php echo esc_html__('Opacity', 'eko-sampa'); ?></span>
                             <input class="flex-1 accent-indigo-600" type="range" min="0.1" max="1" step="0.05" x-model.number="selectedElement.styles.opacity" />

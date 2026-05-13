@@ -1,8 +1,9 @@
 /**
  * REST helper for Eko Sampa frontend (cookie auth + wp_rest nonce).
  *
- * Load order: this file must run before Alpine (see `Eko_Sampa_Assets`). It registers
- * `Alpine.data` inside `alpine:init`; do not add Alpine as a wp_enqueue_script dependency.
+ * Contract: every module exposes `window.eko*Factory()` returning
+ * `{ state, loading, error, init, ...methods }`. Domain data lives in `state` only.
+ * Assignments to `window.*Factory` run before `alpine:init` so Alpine never runs first.
  */
 (function () {
     /**
@@ -50,92 +51,108 @@
     window.ekoSampaApi = api;
 })();
 
-// Listener must exist before Alpine starts — enforced in PHP enqueue order, not script deps on Alpine.
-document.addEventListener('alpine:init', () => {
-    Alpine.data('ekoClients', () => ({
-        rows: [],
-        page: 1,
-        pageSize: 30,
-        hasNext: false,
-        q: '',
-        filterUserId: '',
-        users: [],
-        form: { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' },
-        err: '',
+/** Runtime probe: if this never appears, frontend-app.js did not execute (404, blocked, or parse error). */
+window.EkoModules = Object.assign(window.EkoModules || {}, {
+    frontendAppJsStart: true,
+    startAtMs: Date.now(),
+});
+
+function ekoShellFactory() {
+    return {
+        state: { navOpen: false },
         loading: false,
+        error: null,
+        init() {},
+    };
+}
+
+function ekoClientsFactory() {
+    return {
+        state: {
+            rows: [],
+            page: 1,
+            pageSize: 30,
+            hasNext: false,
+            q: '',
+            filterUserId: '',
+            users: [],
+            form: { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' },
+        },
+        loading: false,
+        error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
                 try {
-                    this.users = await window.ekoSampaApi('users', { method: 'GET' });
+                    this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
                 } catch (e) {
-                    this.users = [];
+                    this.state.users = [];
                 }
             }
             await this.load();
         },
         async load() {
             this.loading = true;
-            this.err = '';
-            const ps = this.pageSize;
+            this.error = null;
+            const ps = this.state.pageSize;
             const qs = new URLSearchParams({
                 limit: String(ps + 1),
-                offset: String((this.page - 1) * ps),
+                offset: String((this.state.page - 1) * ps),
             });
-            if (this.q) {
-                qs.set('s', this.q);
+            if (this.state.q) {
+                qs.set('s', this.state.q);
             }
-            if (this.isAdmin && this.filterUserId) {
-                qs.set('filter_user_id', this.filterUserId);
+            if (this.isAdmin && this.state.filterUserId) {
+                qs.set('filter_user_id', this.state.filterUserId);
             }
             try {
                 const arr = await window.ekoSampaApi('clients?' + qs.toString(), { method: 'GET' });
                 const list = Array.isArray(arr) ? arr : [];
-                this.hasNext = list.length > ps;
-                this.rows = list.slice(0, ps);
+                this.state.hasNext = list.length > ps;
+                this.state.rows = list.slice(0, ps);
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             } finally {
                 this.loading = false;
             }
         },
         prevPage() {
-            if (this.page <= 1) {
+            if (this.state.page <= 1) {
                 return;
             }
-            this.page--;
+            this.state.page--;
             this.load();
         },
         nextPage() {
-            if (!this.hasNext) {
+            if (!this.state.hasNext) {
                 return;
             }
-            this.page++;
+            this.state.page++;
             this.load();
         },
         edit(row) {
-            this.form = Object.assign({ user_id: '' }, row);
+            this.state.form = Object.assign({ user_id: '' }, row);
         },
         reset() {
-            this.form = { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' };
+            this.state.form = { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' };
         },
         async save() {
-            this.err = '';
-            const payload = { ...this.form };
+            this.error = null;
+            const payload = { ...this.state.form };
             delete payload.id;
             try {
-                if (this.form.id) {
-                    await window.ekoSampaApi('clients/' + this.form.id, { method: 'PATCH', body: payload });
+                if (this.state.form.id) {
+                    await window.ekoSampaApi('clients/' + this.state.form.id, { method: 'PATCH', body: payload });
                 } else {
-                    if (this.isAdmin && this.form.user_id) {
-                        payload.user_id = parseInt(String(this.form.user_id), 10);
+                    if (this.isAdmin && this.state.form.user_id) {
+                        payload.user_id = parseInt(String(this.state.form.user_id), 10);
                     }
                     await window.ekoSampaApi('clients', { method: 'POST', body: payload });
                 }
                 this.reset();
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async remove(id) {
@@ -146,94 +163,98 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('clients/' + id, { method: 'DELETE' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
-    }));
+    };
+}
 
-    Alpine.data('ekoServices', () => ({
-        rows: [],
-        fields: [],
-        page: 1,
-        pageSize: 30,
-        hasNext: false,
-        q: '',
-        filterUserId: '',
-        users: [],
-        form: { id: 0, nome: '', descricao: '', is_global: 0 },
-        fieldForm: { id: 0, service_id: 0, label: '', slug: '', type: 'text', required: 0, options_json: null, sort_order: 0 },
-        err: '',
+function ekoServicesFactory() {
+    return {
+        state: {
+            rows: [],
+            fields: [],
+            page: 1,
+            pageSize: 30,
+            hasNext: false,
+            q: '',
+            filterUserId: '',
+            users: [],
+            form: { id: 0, nome: '', descricao: '', is_global: 0 },
+            fieldForm: { id: 0, service_id: 0, label: '', slug: '', type: 'text', required: 0, options_json: null, sort_order: 0 },
+        },
         loading: false,
+        error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
                 try {
-                    this.users = await window.ekoSampaApi('users', { method: 'GET' });
+                    this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
                 } catch (e) {
-                    this.users = [];
+                    this.state.users = [];
                 }
             }
             await this.load();
         },
         async load() {
             this.loading = true;
-            this.err = '';
-            const ps = this.pageSize;
+            this.error = null;
+            const ps = this.state.pageSize;
             const qs = new URLSearchParams({
                 limit: String(ps + 1),
-                offset: String((this.page - 1) * ps),
+                offset: String((this.state.page - 1) * ps),
             });
-            if (this.q) {
-                qs.set('s', this.q);
+            if (this.state.q) {
+                qs.set('s', this.state.q);
             }
-            if (this.isAdmin && this.filterUserId) {
-                qs.set('filter_user_id', this.filterUserId);
+            if (this.isAdmin && this.state.filterUserId) {
+                qs.set('filter_user_id', this.state.filterUserId);
             }
             try {
                 const arr = await window.ekoSampaApi('services?' + qs.toString(), { method: 'GET' });
                 const list = Array.isArray(arr) ? arr : [];
-                this.hasNext = list.length > ps;
-                this.rows = list.slice(0, ps);
+                this.state.hasNext = list.length > ps;
+                this.state.rows = list.slice(0, ps);
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             } finally {
                 this.loading = false;
             }
         },
         prevPage() {
-            if (this.page <= 1) {
+            if (this.state.page <= 1) {
                 return;
             }
-            this.page--;
+            this.state.page--;
             this.load();
         },
         nextPage() {
-            if (!this.hasNext) {
+            if (!this.state.hasNext) {
                 return;
             }
-            this.page++;
+            this.state.page++;
             this.load();
         },
         async loadFields(sid) {
             try {
-                this.fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
+                this.state.fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
             } catch (e) {
-                this.fields = [];
+                this.state.fields = [];
             }
         },
         edit(row) {
-            this.form = Object.assign({ is_global: 0 }, row);
+            this.state.form = Object.assign({ is_global: 0 }, row);
             this.loadFields(row.id);
             this.newField();
         },
         editField(f) {
-            if (!f || !this.form.id) {
+            if (!f || !this.state.form.id) {
                 return;
             }
             const req = f.required == null ? 0 : parseInt(String(f.required), 10) ? 1 : 0;
-            this.fieldForm = {
+            this.state.fieldForm = {
                 id: f.id,
-                service_id: this.form.id,
+                service_id: this.state.form.id,
                 label: f.label != null ? String(f.label) : '',
                 slug: f.slug != null ? String(f.slug) : '',
                 type: f.type != null ? String(f.type) : 'text',
@@ -243,25 +264,25 @@ document.addEventListener('alpine:init', () => {
             };
         },
         reset() {
-            this.form = { id: 0, nome: '', descricao: '', is_global: 0 };
-            this.fields = [];
+            this.state.form = { id: 0, nome: '', descricao: '', is_global: 0 };
+            this.state.fields = [];
         },
         async save() {
-            this.err = '';
-            const payload = { nome: this.form.nome, descricao: this.form.descricao };
+            this.error = null;
+            const payload = { nome: this.state.form.nome, descricao: this.state.form.descricao };
             if (this.isAdmin) {
-                payload.is_global = parseInt(String(this.form.is_global), 10) ? 1 : 0;
+                payload.is_global = parseInt(String(this.state.form.is_global), 10) ? 1 : 0;
             }
             try {
-                if (this.form.id) {
-                    await window.ekoSampaApi('services/' + this.form.id, { method: 'PATCH', body: payload });
+                if (this.state.form.id) {
+                    await window.ekoSampaApi('services/' + this.state.form.id, { method: 'PATCH', body: payload });
                 } else {
                     await window.ekoSampaApi('services', { method: 'POST', body: payload });
                 }
                 this.reset();
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async remove(id) {
@@ -272,127 +293,173 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('services/' + id, { method: 'DELETE' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         newField() {
-            if (!this.form.id) {
+            if (!this.state.form.id) {
                 return;
             }
-            this.fieldForm = { id: 0, service_id: this.form.id, label: '', slug: '', type: 'text', required: 0, options_json: null, sort_order: this.fields.length };
+            this.state.fieldForm = {
+                id: 0,
+                service_id: this.state.form.id,
+                label: '',
+                slug: '',
+                type: 'text',
+                required: 0,
+                options_json: null,
+                sort_order: this.state.fields.length,
+            };
+        },
+        /**
+         * Approximates WordPress {@see sanitize_title()} for duplicate checks (ASCII + Latin-1).
+         */
+        slugifyFieldSlug(raw) {
+            let s = String(raw == null ? '' : raw).trim();
+            try {
+                s = s.normalize('NFD').replace(/\p{M}+/gu, '');
+            } catch (e) {
+                s = s.replace(/[\u0300-\u036f]/g, '');
+            }
+            return s
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
         },
         async saveField() {
-            const sid = this.form.id;
+            const sid = this.state.form.id;
             if (!sid) {
                 return;
             }
-            if (!this.fieldForm.label || !this.fieldForm.slug) {
-                this.err = 'Label and slug are required.';
+            if (!this.state.fieldForm.label || !this.state.fieldForm.slug) {
+                this.error = 'Label and slug are required.';
                 return;
             }
-            this.err = '';
-            const body = { ...this.fieldForm };
+            const cand = this.slugifyFieldSlug(this.state.fieldForm.slug);
+            if (!cand) {
+                this.error = 'Use a slug with letters or numbers (hyphens allowed).';
+                return;
+            }
+            const fid = Number(this.state.fieldForm.id) || 0;
+            const dup = (this.state.fields || []).some((f) => {
+                if (!f || Number(f.id) === fid) {
+                    return false;
+                }
+                const existing = String(f.slug || '').toLowerCase();
+                return existing === cand || this.slugifyFieldSlug(f.slug) === cand;
+            });
+            if (dup) {
+                this.error =
+                    'This slug is already used for another field in this service. Pick a different slug or edit the existing field.';
+                return;
+            }
+            this.error = null;
+            const body = { ...this.state.fieldForm, slug: cand };
             delete body.id;
             delete body.service_id;
             try {
-                if (this.fieldForm.id) {
-                    await window.ekoSampaApi('services/' + sid + '/fields/' + this.fieldForm.id, { method: 'PATCH', body });
+                if (this.state.fieldForm.id) {
+                    await window.ekoSampaApi('services/' + sid + '/fields/' + this.state.fieldForm.id, { method: 'PATCH', body });
                 } else {
                     await window.ekoSampaApi('services/' + sid + '/fields', { method: 'POST', body });
                 }
                 await this.loadFields(sid);
                 this.newField();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async deleteField(fid) {
-            if (!this.form.id || !window.confirm('OK?')) {
+            if (!this.state.form.id || !window.confirm('OK?')) {
                 return;
             }
             try {
-                await window.ekoSampaApi('services/' + this.form.id + '/fields/' + fid, { method: 'DELETE' });
-                await this.loadFields(this.form.id);
+                await window.ekoSampaApi('services/' + this.state.form.id + '/fields/' + fid, { method: 'DELETE' });
+                await this.loadFields(this.state.form.id);
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
-    }));
+    };
+}
 
-    Alpine.data('ekoTemplates', () => ({
-        rows: [],
-        page: 1,
-        pageSize: 30,
-        hasNext: false,
-        q: '',
-        cat: '',
-        filterUserId: '',
-        users: [],
-        form: {
-            id: 0,
-            nome: '',
-            categoria: '',
-            descricao: '',
-            width_mm: 210,
-            height_mm: 297,
-            service_id: 0,
-            product_id: 0,
-            preview_image: '',
-            user_id: '',
+function ekoTemplatesFactory() {
+    return {
+        state: {
+            rows: [],
+            page: 1,
+            pageSize: 30,
+            hasNext: false,
+            q: '',
+            cat: '',
+            filterUserId: '',
+            users: [],
+            form: {
+                id: 0,
+                nome: '',
+                categoria: '',
+                descricao: '',
+                width_mm: 210,
+                height_mm: 297,
+                service_id: 0,
+                product_id: 0,
+                preview_image: '',
+                user_id: '',
+            },
         },
-        err: '',
         loading: false,
+        error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             if (this.isAdmin) {
                 try {
-                    this.users = await window.ekoSampaApi('users', { method: 'GET' });
+                    this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
                 } catch (e) {
-                    this.users = [];
+                    this.state.users = [];
                 }
             }
             await this.load();
         },
         async load() {
             this.loading = true;
-            this.err = '';
-            const ps = this.pageSize;
+            this.error = null;
+            const ps = this.state.pageSize;
             const qs = new URLSearchParams({
                 limit: String(ps + 1),
-                offset: String((this.page - 1) * ps),
+                offset: String((this.state.page - 1) * ps),
             });
-            if (this.q) {
-                qs.set('s', this.q);
+            if (this.state.q) {
+                qs.set('s', this.state.q);
             }
-            if (this.cat) {
-                qs.set('categoria', this.cat);
+            if (this.state.cat) {
+                qs.set('categoria', this.state.cat);
             }
-            if (this.isAdmin && this.filterUserId) {
-                qs.set('filter_user_id', this.filterUserId);
+            if (this.isAdmin && this.state.filterUserId) {
+                qs.set('filter_user_id', this.state.filterUserId);
             }
             try {
                 const arr = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
                 const list = Array.isArray(arr) ? arr : [];
-                this.hasNext = list.length > ps;
-                this.rows = list.slice(0, ps);
+                this.state.hasNext = list.length > ps;
+                this.state.rows = list.slice(0, ps);
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             } finally {
                 this.loading = false;
             }
         },
         prevPage() {
-            if (this.page <= 1) {
+            if (this.state.page <= 1) {
                 return;
             }
-            this.page--;
+            this.state.page--;
             this.load();
         },
         nextPage() {
-            if (!this.hasNext) {
+            if (!this.state.hasNext) {
                 return;
             }
-            this.page++;
+            this.state.page++;
             this.load();
         },
         editorUrl(id) {
@@ -418,14 +485,14 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('templates/' + id + '/duplicate', { method: 'POST' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async preview(id) {
             window.open(this.editorUrl(id), '_blank');
         },
         reset() {
-            this.form = {
+            this.state.form = {
                 id: 0,
                 nome: '',
                 categoria: '',
@@ -439,8 +506,8 @@ document.addEventListener('alpine:init', () => {
             };
         },
         async save() {
-            this.err = '';
-            const payload = { ...this.form };
+            this.error = null;
+            const payload = { ...this.state.form };
             delete payload.id;
             delete payload.json_data;
             delete payload.created_at;
@@ -448,18 +515,18 @@ document.addEventListener('alpine:init', () => {
             payload.product_id = parseInt(String(payload.product_id || 0), 10);
             payload.preview_image = payload.preview_image != null ? String(payload.preview_image) : '';
             try {
-                if (this.form.id) {
-                    await window.ekoSampaApi('templates/' + this.form.id, { method: 'PATCH', body: payload });
+                if (this.state.form.id) {
+                    await window.ekoSampaApi('templates/' + this.state.form.id, { method: 'PATCH', body: payload });
                 } else {
-                    if (this.isAdmin && this.form.user_id) {
-                        payload.user_id = parseInt(String(this.form.user_id), 10);
+                    if (this.isAdmin && this.state.form.user_id) {
+                        payload.user_id = parseInt(String(this.state.form.user_id), 10);
                     }
                     await window.ekoSampaApi('templates', { method: 'POST', body: Object.assign({ json_data: { elements: [] } }, payload) });
                 }
                 this.reset();
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         edit(row) {
@@ -469,7 +536,7 @@ document.addEventListener('alpine:init', () => {
             r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
             r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
             r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
-            this.form = r;
+            this.state.form = r;
         },
         async remove(id) {
             if (!window.confirm('OK?')) {
@@ -479,43 +546,46 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('templates/' + id, { method: 'DELETE' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
-    }));
+    };
+}
 
-    Alpine.data('ekoOrders', () => ({
-        rows: [],
-        page: 1,
-        pageSize: 30,
-        hasNext: false,
-        clients: [],
-        services: [],
-        templates: [],
-        serviceFields: [],
-        q: '',
-        status: '',
-        filterUserId: '',
-        users: [],
-        previewSrcdoc: '',
-        previewDraftTimer: null,
-        form: {
-            id: 0,
-            client_id: '',
-            service_id: '',
-            template_id: '',
-            status: 'pending',
-            dynamic_data_json: {},
-            user_id: '',
-            woo_order_id: 0,
-            print_ready: 0,
+function ekoOrdersFactory() {
+    return {
+        state: {
+            rows: [],
+            page: 1,
+            pageSize: 30,
+            hasNext: false,
+            clients: [],
+            services: [],
+            templates: [],
+            serviceFields: [],
+            q: '',
+            status: '',
+            filterUserId: '',
+            users: [],
+            previewSrcdoc: '',
+            previewDraftTimer: null,
+            form: {
+                id: 0,
+                client_id: '',
+                service_id: '',
+                template_id: '',
+                status: 'pending',
+                dynamic_data_json: {},
+                user_id: '',
+                woo_order_id: 0,
+                print_ready: 0,
+            },
         },
-        err: '',
         loading: false,
+        error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         wrapPreviewSrcdoc(inner) {
             const body = String(inner || '');
-            /** srcdoc must receive real HTML; escaping " broke all attributes (preview blank / broken). */
             return (
                 '<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#f8fafc}</style></head><body>' +
                 body +
@@ -547,24 +617,24 @@ document.addEventListener('alpine:init', () => {
         async init() {
             if (this.isAdmin) {
                 try {
-                    this.users = await window.ekoSampaApi('users', { method: 'GET' });
+                    this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
                 } catch (e) {
-                    this.users = [];
+                    this.state.users = [];
                 }
             }
             await this.loadLookups();
             await this.load();
-            this.$watch('form.service_id', () => {
+            this.$watch('state.form.service_id', () => {
                 this.onServiceChange();
             });
-            this.$watch('form.template_id', () => {
+            this.$watch('state.form.template_id', () => {
                 this.schedulePreviewDraft();
             });
-            this.$watch('form.client_id', () => {
+            this.$watch('state.form.client_id', () => {
                 this.schedulePreviewDraft();
             });
             this.$watch(
-                'form.dynamic_data_json',
+                'state.form.dynamic_data_json',
                 () => {
                     this.schedulePreviewDraft();
                 },
@@ -574,63 +644,63 @@ document.addEventListener('alpine:init', () => {
         async loadLookups() {
             try {
                 const qs = new URLSearchParams({ limit: '500' });
-                if (this.isAdmin && this.filterUserId) {
-                    qs.set('filter_user_id', this.filterUserId);
+                if (this.isAdmin && this.state.filterUserId) {
+                    qs.set('filter_user_id', this.state.filterUserId);
                 }
                 const b = await window.ekoSampaApi('lookups/order-form?' + qs.toString(), { method: 'GET' });
-                this.clients = Array.isArray(b.clients) ? b.clients : [];
-                this.services = Array.isArray(b.services) ? b.services : [];
-                this.templates = Array.isArray(b.templates) ? b.templates : [];
+                this.state.clients = Array.isArray(b.clients) ? b.clients : [];
+                this.state.services = Array.isArray(b.services) ? b.services : [];
+                this.state.templates = Array.isArray(b.templates) ? b.templates : [];
             } catch (e) {
-                this.clients = [];
-                this.services = [];
-                this.templates = [];
+                this.state.clients = [];
+                this.state.services = [];
+                this.state.templates = [];
             }
         },
         async load() {
             this.loading = true;
-            this.err = '';
-            const ps = this.pageSize;
+            this.error = null;
+            const ps = this.state.pageSize;
             const qs = new URLSearchParams({
                 limit: String(ps + 1),
-                offset: String((this.page - 1) * ps),
+                offset: String((this.state.page - 1) * ps),
             });
-            if (this.q) {
-                qs.set('s', this.q);
+            if (this.state.q) {
+                qs.set('s', this.state.q);
             }
-            if (this.status) {
-                qs.set('status', this.status);
+            if (this.state.status) {
+                qs.set('status', this.state.status);
             }
-            if (this.isAdmin && this.filterUserId) {
-                qs.set('filter_user_id', this.filterUserId);
+            if (this.isAdmin && this.state.filterUserId) {
+                qs.set('filter_user_id', this.state.filterUserId);
             }
             try {
                 const arr = await window.ekoSampaApi('orders?' + qs.toString(), { method: 'GET' });
                 const list = Array.isArray(arr) ? arr : [];
-                this.hasNext = list.length > ps;
-                this.rows = list.slice(0, ps);
+                this.state.hasNext = list.length > ps;
+                this.state.rows = list.slice(0, ps);
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             } finally {
                 this.loading = false;
             }
         },
         prevPage() {
-            if (this.page <= 1) {
+            if (this.state.page <= 1) {
                 return;
             }
-            this.page--;
+            this.state.page--;
             this.load();
         },
         nextPage() {
-            if (!this.hasNext) {
+            if (!this.state.hasNext) {
                 return;
             }
-            this.page++;
+            this.state.page++;
             this.load();
         },
         reset() {
-            this.form = {
+            this.state.form = {
                 id: 0,
                 client_id: '',
                 service_id: '',
@@ -641,32 +711,37 @@ document.addEventListener('alpine:init', () => {
                 woo_order_id: 0,
                 print_ready: 0,
             };
-            this.serviceFields = [];
-            this.previewSrcdoc = '';
+            this.state.serviceFields = [];
+            this.state.previewSrcdoc = '';
+            try {
+                window.dispatchEvent(new CustomEvent('eko-sampa:order-preview', { detail: null }));
+            } catch (e) {
+                void e;
+            }
         },
         async edit(row) {
             const r = Object.assign({}, row);
             r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
             r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
-            this.form = r;
+            this.state.form = r;
             let d = {};
-            if (typeof this.form.dynamic_data_json === 'string' && this.form.dynamic_data_json) {
+            if (typeof this.state.form.dynamic_data_json === 'string' && this.state.form.dynamic_data_json) {
                 try {
-                    d = JSON.parse(this.form.dynamic_data_json);
+                    d = JSON.parse(this.state.form.dynamic_data_json);
                 } catch (e) {
                     d = {};
                 }
-            } else if (typeof this.form.dynamic_data_json === 'object') {
-                d = this.form.dynamic_data_json || {};
+            } else if (typeof this.state.form.dynamic_data_json === 'object') {
+                d = this.state.form.dynamic_data_json || {};
             }
-            this.form.dynamic_data_json = d;
+            this.state.form.dynamic_data_json = d;
             await this.$nextTick();
             await this.onServiceChange();
             this.schedulePreviewDraft();
         },
         async onServiceChange() {
-            const sid = parseInt(String(this.form.service_id || 0), 10);
-            this.serviceFields = [];
+            const sid = parseInt(String(this.state.form.service_id || 0), 10);
+            this.state.serviceFields = [];
             if (!sid) {
                 this.schedulePreviewDraft();
                 return;
@@ -675,8 +750,8 @@ document.addEventListener('alpine:init', () => {
                 const fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
                 const list = Array.isArray(fields) ? fields.slice() : [];
                 list.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
-                this.serviceFields = list;
-                const d = Object.assign({}, this.form.dynamic_data_json || {});
+                this.state.serviceFields = list;
+                const d = Object.assign({}, this.state.form.dynamic_data_json || {});
                 list.forEach((f) => {
                     const sk = String(f.slug || '').trim();
                     if (!sk) {
@@ -686,29 +761,34 @@ document.addEventListener('alpine:init', () => {
                         d[sk] = '';
                     }
                 });
-                this.form.dynamic_data_json = d;
+                this.state.form.dynamic_data_json = d;
             } catch (e) {
-                this.serviceFields = [];
+                this.state.serviceFields = [];
             }
             this.schedulePreviewDraft();
         },
         schedulePreviewDraft() {
-            clearTimeout(this.previewDraftTimer);
-            this.previewDraftTimer = setTimeout(() => {
+            clearTimeout(this.state.previewDraftTimer);
+            this.state.previewDraftTimer = setTimeout(() => {
                 this.refreshPreviewDraft();
             }, 220);
         },
         async refreshPreviewDraft() {
-            const tid = parseInt(String(this.form.template_id || 0), 10);
+            const tid = parseInt(String(this.state.form.template_id || 0), 10);
             if (!tid) {
-                this.previewSrcdoc = '';
+                this.state.previewSrcdoc = '';
+                try {
+                    window.dispatchEvent(new CustomEvent('eko-sampa:order-preview', { detail: null }));
+                } catch (e) {
+                    void e;
+                }
                 return;
             }
             const payload = {
                 template_id: tid,
-                client_id: parseInt(String(this.form.client_id || 0), 10),
-                id: parseInt(String(this.form.id || 0), 10),
-                dynamic_data_json: this.form.dynamic_data_json || {},
+                client_id: parseInt(String(this.state.form.client_id || 0), 10),
+                id: parseInt(String(this.state.form.id || 0), 10),
+                dynamic_data_json: this.state.form.dynamic_data_json || {},
             };
             let dbg = false;
             try {
@@ -728,6 +808,17 @@ document.addEventListener('alpine:init', () => {
                     method: 'POST',
                     body: payload,
                 });
+                if (data && typeof data === 'object' && data.editorPreview && Array.isArray(data.editorPreview.elements)) {
+                    try {
+                        window.dispatchEvent(
+                            new CustomEvent('eko-sampa:order-preview', { detail: data.editorPreview })
+                        );
+                    } catch (e) {
+                        void e;
+                    }
+                    this.state.previewSrcdoc = '';
+                    return;
+                }
                 const inner =
                     typeof data === 'object' && data && data.html
                         ? String(data.html)
@@ -735,7 +826,7 @@ document.addEventListener('alpine:init', () => {
                 if (dbg) {
                     console.warn('[eko-sampa preview] render-draft html length', inner.length);
                 }
-                this.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
+                this.state.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
             } catch (e) {
                 if (dbg) {
                     console.warn('[eko-sampa preview] render-draft error', e);
@@ -744,33 +835,33 @@ document.addEventListener('alpine:init', () => {
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
-                this.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
+                this.state.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
             }
         },
         async save() {
-            this.err = '';
+            this.error = null;
             const payload = {
-                client_id: parseInt(String(this.form.client_id || 0), 10),
-                service_id: parseInt(String(this.form.service_id || 0), 10),
-                template_id: parseInt(String(this.form.template_id || 0), 10),
-                status: this.form.status,
-                dynamic_data_json: this.form.dynamic_data_json,
-                woo_order_id: parseInt(String(this.form.woo_order_id || 0), 10),
-                print_ready: parseInt(String(this.form.print_ready != null ? this.form.print_ready : 0), 10) ? 1 : 0,
+                client_id: parseInt(String(this.state.form.client_id || 0), 10),
+                service_id: parseInt(String(this.state.form.service_id || 0), 10),
+                template_id: parseInt(String(this.state.form.template_id || 0), 10),
+                status: this.state.form.status,
+                dynamic_data_json: this.state.form.dynamic_data_json,
+                woo_order_id: parseInt(String(this.state.form.woo_order_id || 0), 10),
+                print_ready: parseInt(String(this.state.form.print_ready != null ? this.state.form.print_ready : 0), 10) ? 1 : 0,
             };
-            if (this.isAdmin && this.form.user_id) {
-                payload.user_id = parseInt(String(this.form.user_id), 10);
+            if (this.isAdmin && this.state.form.user_id) {
+                payload.user_id = parseInt(String(this.state.form.user_id), 10);
             }
             try {
-                if (this.form.id) {
-                    await window.ekoSampaApi('orders/' + this.form.id, { method: 'PATCH', body: payload });
+                if (this.state.form.id) {
+                    await window.ekoSampaApi('orders/' + this.state.form.id, { method: 'PATCH', body: payload });
                 } else {
                     await window.ekoSampaApi('orders', { method: 'POST', body: payload });
                 }
                 this.reset();
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async remove(id) {
@@ -781,7 +872,7 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('orders/' + id, { method: 'DELETE' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         async dup(id) {
@@ -789,7 +880,7 @@ document.addEventListener('alpine:init', () => {
                 await window.ekoSampaApi('orders/' + id + '/duplicate', { method: 'POST' });
                 await this.load();
             } catch (e) {
-                this.err = String(e.message || e);
+                this.error = String(e.message || e);
             }
         },
         printUrl(id) {
@@ -804,21 +895,67 @@ document.addEventListener('alpine:init', () => {
             return p.replace(/\/?$/, '/') + sid + '/';
         },
         async fetchPreview(id) {
-            this.previewSrcdoc = '';
+            this.state.previewSrcdoc = '';
             try {
                 const data = await window.ekoSampaApi('orders/' + id + '/render', { method: 'GET' });
+                if (data && typeof data === 'object' && data.editorPreview && Array.isArray(data.editorPreview.elements)) {
+                    try {
+                        window.dispatchEvent(
+                            new CustomEvent('eko-sampa:order-preview', { detail: data.editorPreview })
+                        );
+                    } catch (e) {
+                        void e;
+                    }
+                    this.state.previewSrcdoc = '';
+                    return;
+                }
                 const inner =
                     typeof data === 'object' && data && data.html
                         ? String(data.html)
                         : '<p>Invalid preview.</p>';
-                this.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
+                this.state.previewSrcdoc = this.wrapPreviewSrcdoc(inner);
             } catch (e) {
                 const msg = String(e.message || e)
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
-                this.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
+                this.state.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
             }
         },
-    }));
+    };
+}
+
+window.ekoShellFactory = ekoShellFactory;
+window.ekoClientsFactory = ekoClientsFactory;
+window.ekoServicesFactory = ekoServicesFactory;
+window.ekoTemplatesFactory = ekoTemplatesFactory;
+window.ekoOrdersFactory = ekoOrdersFactory;
+
+(function registerEkoModulesProbe() {
+    var keys = ['ekoShellFactory', 'ekoClientsFactory', 'ekoServicesFactory', 'ekoTemplatesFactory', 'ekoOrdersFactory'];
+    window.EkoModules = Object.assign(window.EkoModules || {}, {
+        frontendAppJsFinished: true,
+        finishedAtMs: Date.now(),
+        factories: keys.filter(function (k) {
+            return typeof window[k] === 'function';
+        }),
+        factoriesMissing: keys.filter(function (k) {
+            return typeof window[k] !== 'function';
+        }),
+    });
+})();
+
+document.addEventListener('alpine:init', () => {
+    window.EkoModules = Object.assign(window.EkoModules || {}, { alpineInitFired: true });
+    Alpine.data('ekoShell', ekoShellFactory);
+    Alpine.data('ekoClients', ekoClientsFactory);
+    Alpine.data('ekoServices', ekoServicesFactory);
+    Alpine.data('ekoTemplates', ekoTemplatesFactory);
+    Alpine.data('ekoOrders', ekoOrdersFactory);
+});
+
+window.addEventListener('load', function () {
+    window.EkoModules = Object.assign(window.EkoModules || {}, {
+        alpineReady: typeof window.Alpine !== 'undefined',
+    });
 });

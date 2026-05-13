@@ -12,7 +12,7 @@ if (! defined('ABSPATH')) {
 }
 
 ?>
-<div class="mx-auto max-w-6xl space-y-6" x-data="ekoOrders" x-init="init()">
+<div class="mx-auto max-w-6xl space-y-6" x-data="window.ekoOrdersFactory()" x-init="init()">
     <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
             <h2 class="text-lg font-semibold text-slate-900"><?php echo esc_html__('Orders', 'eko-sampa'); ?></h2>
@@ -20,26 +20,26 @@ if (! defined('ABSPATH')) {
         </div>
         <div class="flex flex-wrap gap-2">
             <?php if (current_user_can('manage_options')) : ?>
-                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="filterUserId" @change="page=1; loadLookups(); load()">
+                <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.filterUserId" @change="state.page=1; loadLookups(); load()">
                     <option value=""><?php echo esc_html__('All users', 'eko-sampa'); ?></option>
-                    <template x-for="u in users" :key="u.id">
+                    <template x-for="u in state.users" :key="u.id">
                         <option :value="u.id" x-text="u.display_name + ' (' + u.id + ')'"></option>
                     </template>
                 </select>
             <?php endif; ?>
-            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="q" @keydown.enter.prevent="page=1; load()" placeholder="<?php echo esc_attr__('Order ID…', 'eko-sampa'); ?>" />
-            <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="status" @change="page=1; load()">
+            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Order ID…', 'eko-sampa'); ?>" />
+            <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.status" @change="state.page=1; load()">
                 <option value=""><?php echo esc_html__('All statuses', 'eko-sampa'); ?></option>
                 <option value="pending">pending</option>
                 <option value="in_progress">in_progress</option>
                 <option value="print_queue">print_queue</option>
                 <option value="completed">completed</option>
             </select>
-            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
+            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="state.page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
             <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" @click="reset()"><?php echo esc_html__('New', 'eko-sampa'); ?></button>
         </div>
     </div>
-    <p class="text-sm text-red-600" x-show="err" x-text="err"></p>
+    <p class="text-sm text-red-600" x-show="error" x-text="error || ''"></p>
     <p class="text-xs text-slate-500" x-show="loading" x-cloak><?php echo esc_html__('Loading…', 'eko-sampa'); ?></p>
     <div class="grid gap-6 lg:grid-cols-2">
         <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -54,7 +54,7 @@ if (! defined('ABSPATH')) {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="r in rows" :key="r.id">
+                    <template x-for="r in state.rows" :key="r.id">
                         <tr class="hover:bg-slate-50/80">
                             <td class="px-4 py-2 font-mono text-slate-900" x-text="r.id"></td>
                             <td class="px-4 py-2 text-slate-600" x-text="r.status"></td>
@@ -72,10 +72,10 @@ if (! defined('ABSPATH')) {
                 </tbody>
             </table>
             <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
-                <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="page"></span></span>
+                <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="state.page"></span></span>
                 <div class="flex gap-2">
-                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
-                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="state.page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
+                    <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!state.hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
                 </div>
             </div>
         </div>
@@ -85,35 +85,35 @@ if (! defined('ABSPATH')) {
                 <div class="mt-3 grid gap-3 sm:grid-cols-2">
                     <?php if (current_user_can('manage_options')) : ?>
                         <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Owner user ID (new only)', 'eko-sampa'); ?>
-                            <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model="form.user_id" :disabled="!!form.id" />
+                            <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model="state.form.user_id" :disabled="!!state.form.id" />
                         </label>
                     <?php endif; ?>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Client', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.client_id" @change="schedulePreviewDraft()">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.client_id" @change="schedulePreviewDraft()">
                             <option value="">—</option>
-                            <template x-for="c in clients" :key="c.id">
+                            <template x-for="c in state.clients" :key="c.id">
                                 <option :value="c.id" x-text="c.nome + ' (' + c.id + ')'"></option>
                             </template>
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Service', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.service_id" @change="onServiceChange()">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.service_id" @change="onServiceChange()">
                             <option value="">—</option>
-                            <template x-for="s in services" :key="s.id">
+                            <template x-for="s in state.services" :key="s.id">
                                 <option :value="s.id" x-text="s.nome + ' (' + s.id + ')'"></option>
                             </template>
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Template', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.template_id" @change="schedulePreviewDraft()">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.template_id" @change="schedulePreviewDraft()">
                             <option value="">—</option>
-                            <template x-for="t in templates" :key="t.id">
+                            <template x-for="t in state.templates" :key="t.id">
                                 <option :value="t.id" x-text="t.nome + ' (' + t.id + ')'"></option>
                             </template>
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Status', 'eko-sampa'); ?>
-                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.status">
+                        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.status">
                             <option value="pending">pending</option>
                             <option value="in_progress">in_progress</option>
                             <option value="print_queue">print_queue</option>
@@ -121,27 +121,27 @@ if (! defined('ABSPATH')) {
                         </select>
                     </label>
                     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('WooCommerce order ID', 'eko-sampa'); ?>
-                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" min="0" x-model.number="form.woo_order_id" placeholder="<?php echo esc_attr__('Optional link', 'eko-sampa'); ?>" />
+                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" min="0" x-model.number="state.form.woo_order_id" placeholder="<?php echo esc_attr__('Optional link', 'eko-sampa'); ?>" />
                     </label>
                     <label class="flex items-center gap-2 text-sm text-slate-700 sm:col-span-2">
-                        <input type="checkbox" x-model="form.print_ready" :true-value="1" :false-value="0" />
+                        <input type="checkbox" x-model="state.form.print_ready" :true-value="1" :false-value="0" />
                         <?php echo esc_html__('Print ready', 'eko-sampa'); ?>
                     </label>
                 </div>
-                <div class="mt-4 border-t border-slate-100 pt-3" x-show="serviceFields.length">
+                <div class="mt-4 border-t border-slate-100 pt-3" x-show="state.serviceFields.length">
                     <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields (placeholders {{slug}})', 'eko-sampa'); ?></p>
                     <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                        <template x-for="f in serviceFields" :key="f.id">
+                        <template x-for="f in state.serviceFields" :key="f.id">
                             <div class="min-w-0 sm:col-span-2">
                                 <label class="block text-xs font-medium text-slate-600">
                                     <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
                                     <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
                                 </label>
                                 <template x-if="f.type === 'textarea'">
-                                    <textarea class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" rows="2" x-model="form.dynamic_data_json[f.slug]"></textarea>
+                                    <textarea class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" rows="2" x-model="state.form.dynamic_data_json[f.slug]"></textarea>
                                 </template>
                                 <template x-if="f.type === 'select'">
-                                    <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="form.dynamic_data_json[f.slug]">
+                                    <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.dynamic_data_json[f.slug]">
                                         <option value="">—</option>
                                         <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="f.id + '-' + idx + '-' + opt.value">
                                             <option :value="opt.value" x-text="opt.label"></option>
@@ -152,26 +152,28 @@ if (! defined('ABSPATH')) {
                                     <input
                                         class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
                                         :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
-                                        x-model="form.dynamic_data_json[f.slug]"
+                                        x-model="state.form.dynamic_data_json[f.slug]"
                                     />
                                 </template>
                             </div>
                         </template>
                     </div>
                 </div>
-                <div class="mt-3 border-t border-slate-100 pt-3" x-show="!serviceFields.length">
+                <div class="mt-3 border-t border-slate-100 pt-3" x-show="!state.serviceFields.length">
                     <p class="text-xs text-slate-500"><?php echo esc_html__('Select a service to load dynamic fields.', 'eko-sampa'); ?></p>
                 </div>
                 <button type="button" class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="save()"><?php echo esc_html__('Save', 'eko-sampa'); ?></button>
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Live preview', 'eko-sampa'); ?></h3>
+                <?php require EKO_SAMPA_PLUGIN_DIR . 'views/editor-canvas-order-preview.php'; ?>
                 <iframe
                     class="mt-2 h-[min(24rem,50vh)] w-full min-h-[8rem] rounded border border-slate-100 bg-white"
+                    x-show="state.previewSrcdoc"
+                    x-cloak
                     sandbox="allow-same-origin"
                     referrerpolicy="no-referrer"
-                    title="<?php echo esc_attr__('Order preview', 'eko-sampa'); ?>"
-                    x-bind:srcdoc="previewSrcdoc"
+                    title="<?php echo esc_attr__('Order preview (HTML fallback)', 'eko-sampa'); ?>"
+                    x-bind:srcdoc="state.previewSrcdoc"
                 ></iframe>
             </div>
         </div>

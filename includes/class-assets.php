@@ -287,6 +287,14 @@ final class Eko_Sampa_Assets {
 
         if (wp_script_is(self::HANDLE_TAILWIND, 'registered')) {
             wp_enqueue_script(self::HANDLE_TAILWIND);
+            $boot = $this->eko_modules_boot_payload_for_inline();
+            wp_add_inline_script(
+                self::HANDLE_TAILWIND,
+                'window.EkoModules=Object.assign(window.EkoModules||{},'
+                    . wp_json_encode($boot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                    . ');',
+                'after'
+            );
         }
 
         if ($this->should_enqueue_frontend_rest_bundle()) {
@@ -332,6 +340,16 @@ final class Eko_Sampa_Assets {
                     ]
                 );
             }
+        } elseif ($this->is_frontend_orders_view()) {
+            if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_SORTABLE);
+            }
+            if (wp_script_is(self::HANDLE_INTERACT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_INTERACT);
+            }
+            if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
+            }
         }
 
         // Alpine last: alpine:init listeners must already be attached (class docblock).
@@ -359,6 +377,61 @@ final class Eko_Sampa_Assets {
 
     private function should_enqueue_frontend_assets(): bool {
         return $this->is_frontend_virtual_route() || $this->singular_has_eko_shortcode();
+    }
+
+    /**
+     * JSON payload for inline boot script: explains whether WordPress will enqueue frontend-app.js.
+     * If the browser never merges this into window.EkoModules, this enqueue path did not run.
+     *
+     * @return array<string, mixed>
+     */
+    private function eko_modules_boot_payload_for_inline(): array {
+        $fe_rel = 'assets/js/frontend-app.js';
+        $fe_full = EKO_SAMPA_PLUGIN_DIR . $fe_rel;
+        $readable = is_readable($fe_full);
+        $registered = wp_script_is(self::HANDLE_FRONTEND_APP, 'registered');
+        $want = $this->should_enqueue_frontend_rest_bundle();
+        $will = $want && $readable && $registered;
+        $src = ($readable && $registered) ? $this->plugin_asset_url($fe_rel) : '';
+
+        $skip = '';
+        if (! $want) {
+            if ($this->is_frontend_virtual_route()) {
+                $v = sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW));
+                if ($v === 'login' || $v === 'print') {
+                    $skip = 'virtual_route_' . $v . '_skips_rest_bundle';
+                } elseif ($v === '') {
+                    $skip = 'virtual_route_empty_view';
+                } else {
+                    $skip = 'virtual_route_rest_bundle_false';
+                }
+            } elseif ($this->singular_has_eko_shortcode() && ! is_user_logged_in()) {
+                $skip = 'shortcode_requires_login_for_rest_bundle';
+            } else {
+                $skip = 'no_virtual_route_and_no_logged_shortcode';
+            }
+        } elseif (! $readable) {
+            $skip = 'frontend_app_js_not_readable_on_server';
+        } elseif (! $registered) {
+            $skip = 'frontend_app_handle_not_registered';
+        }
+
+        $view = '';
+        if ($this->is_frontend_virtual_route()) {
+            $view = sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW));
+        }
+
+        return [
+            'fromPhp' => true,
+            'expectFrontendAppEnqueue' => $will,
+            'frontendAppReadable' => $readable,
+            'frontendAppRegistered' => $registered,
+            'wantRestBundle' => $want,
+            'frontendAppSrc' => $src,
+            'skipReason' => $skip,
+            'view' => $view,
+            'ts' => (int) round(microtime(true) * 1000),
+        ];
     }
 
     private function should_enqueue_frontend_rest_bundle(): bool {
@@ -404,6 +477,14 @@ final class Eko_Sampa_Assets {
         }
 
         return (bool) preg_match('/\\[eko_sampa_shell[^\\]]*view=[\\"\']?editor[\\"\']?/i', (string) $post->post_content);
+    }
+
+    private function is_frontend_orders_view(): bool {
+        if (! $this->is_frontend_virtual_route()) {
+            return false;
+        }
+
+        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'orders';
     }
 
     private function should_enqueue_admin(string $hook_suffix): bool {

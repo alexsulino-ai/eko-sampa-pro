@@ -33,8 +33,11 @@ if (isset($out['html']) && is_string($out['html'])) {
     $out['html'] = wp_kses_post($out['html']);
 }
 
+$wm = max(1, (int) ($out['width_mm'] ?? 210));
+$hm = max(1, (int) ($out['height_mm'] ?? 297));
+
 ?>
-<div class="eko-sampa-print-page mx-auto max-w-5xl p-6">
+<div class="eko-sampa-print-outer mx-auto max-w-none p-6 print:p-0">
     <div class="mb-4 flex flex-wrap items-center gap-3 print:hidden">
         <button
             type="button"
@@ -47,7 +50,7 @@ if (isset($out['html']) && is_string($out['html'])) {
             <?php echo esc_html__('Back to orders', 'eko-sampa'); ?>
         </a>
     </div>
-    <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm print:border-0 print:shadow-none">
+    <div class="eko-sampa-print-card rounded-lg border border-slate-200 bg-white p-4 shadow-sm print:border-0 print:bg-transparent print:p-0 print:shadow-none">
         <?php
         // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- renderer returns escaped inline styles and escaped text nodes.
         echo $out['html'];
@@ -55,8 +58,51 @@ if (isset($out['html']) && is_string($out['html'])) {
     </div>
 </div>
 <style>
+/* Screen: let the canvas use true mm width without max-width clipping. */
+.eko-sampa-print-outer {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+.eko-sampa-print-card {
+    display: flow-root;
+}
 @media print {
-  body { background: #fff !important; }
-  .eko-sampa-print-page .print\:hidden { display: none !important; }
+    @page {
+        size: <?php echo (int) $wm; ?>mm <?php echo (int) $hm; ?>mm;
+        margin: 0;
+    }
+    html,
+    body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+    }
+    body.eko-sampa-frontend {
+        background: #fff !important;
+    }
+    .eko-sampa-print-outer {
+        display: block;
+        width: auto !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .eko-sampa-print-card {
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    .eko-sampa-print-page .print\:hidden,
+    .eko-sampa-print-outer .print\:hidden {
+        display: none !important;
+    }
+    .eko-sampa-print-root {
+        box-shadow: none !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
 }
 </style>

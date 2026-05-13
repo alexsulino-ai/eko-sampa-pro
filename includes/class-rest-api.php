@@ -836,10 +836,18 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $ctx  = Eko_Sampa_Order::template_render_context($order);
-        $html = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, false);
+        $rnd  = new Eko_Sampa_Template_Renderer();
+        $html = $rnd->render($tpl, $ctx, false);
         if (isset($html['html']) && is_string($html['html'])) {
             $html['html'] = wp_kses_post($html['html']);
         }
+
+        $els = $rnd->parse_elements_from_template_row($tpl);
+        $html['editorPreview'] = [
+            'width_mm'  => (int) ($tpl['width_mm'] ?? 210),
+            'height_mm' => (int) ($tpl['height_mm'] ?? 297),
+            'elements'  => $rnd->apply_context_to_elements($els, $ctx),
+        ];
 
         return new \WP_REST_Response($html);
     }
@@ -868,10 +876,18 @@ final class Eko_Sampa_Rest_Api {
         ];
 
         $ctx  = Eko_Sampa_Order::template_render_context($order);
-        $html = (new Eko_Sampa_Template_Renderer())->render($tpl, $ctx, false);
+        $rnd  = new Eko_Sampa_Template_Renderer();
+        $html = $rnd->render($tpl, $ctx, false);
         if (isset($html['html']) && is_string($html['html'])) {
             $html['html'] = wp_kses_post($html['html']);
         }
+
+        $els = $rnd->parse_elements_from_template_row($tpl);
+        $html['editorPreview'] = [
+            'width_mm'  => (int) ($tpl['width_mm'] ?? 210),
+            'height_mm' => (int) ($tpl['height_mm'] ?? 297),
+            'elements'  => $rnd->apply_context_to_elements($els, $ctx),
+        ];
 
         if (defined('WP_DEBUG') && WP_DEBUG) {
             $h = isset($html['html']) && is_string($html['html']) ? $html['html'] : '';

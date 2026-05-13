@@ -56,9 +56,10 @@ final class Eko_Sampa_Template_Renderer {
         }
 
         $frame_style = sprintf(
-            'position:relative;width:%dmm;height:%dmm;background:#fff;overflow:hidden;box-sizing:border-box;',
+            'position:relative;width:%dmm;height:%dmm;background:#fff;overflow:hidden;box-sizing:border-box;%s',
             $width_mm,
-            $height_mm
+            $height_mm,
+            $for_print ? '-webkit-print-color-adjust:exact;print-color-adjust:exact;' : ''
         );
 
         [ $design_w, $design_h ] = $this->design_canvas_px($width_mm, $height_mm);
@@ -79,6 +80,64 @@ final class Eko_Sampa_Template_Renderer {
             'height_mm' => $height_mm,
             'html'      => $html,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $template_row
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function parse_elements_from_template_row(array $template_row): array {
+        $raw = $template_row['json_data'] ?? null;
+        $doc = [];
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
+                $doc = $decoded;
+            }
+        }
+
+        if (isset($doc['elements']) && is_array($doc['elements'])) {
+            return $doc['elements'];
+        }
+        if (isset($doc[0]) && is_array($doc[0])) {
+            return $doc;
+        }
+
+        return [];
+    }
+
+    /**
+     * Deep-merge placeholder tokens into text/placeholder elements (same rules as {@see render()}).
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @param array<string, string>            $context
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function apply_context_to_elements(array $elements, array $context): array {
+        $out = [];
+        foreach ($elements as $el) {
+            if (! is_array($el)) {
+                continue;
+            }
+            $json = wp_json_encode($el);
+            if (! is_string($json)) {
+                continue;
+            }
+            $copy = json_decode($json, true);
+            if (! is_array($copy)) {
+                continue;
+            }
+            $type = sanitize_key((string) ($copy['type'] ?? ''));
+            if ($type === 'text' || $type === 'placeholder') {
+                $raw            = (string) ($copy['content'] ?? '');
+                $copy['content'] = $this->replace_tokens($raw, $context);
+            }
+            $out[] = $copy;
+        }
+
+        return $out;
     }
 
     /**
@@ -109,14 +168,15 @@ final class Eko_Sampa_Template_Renderer {
         );
 
         $frame_css = $this->build_frame_css($styles);
-        $inner_css = $this->build_text_inner_css($styles);
+        $inner_css = $this->build_text_inner_css($styles, $for_print);
 
         switch ($type) {
             case 'image':
-                $src = isset($el['src']) ? esc_url((string) $el['src']) : '';
-                if ($src === '') {
-                    $src = isset($el['content']) ? esc_url((string) $el['content']) : '';
+                $raw_src = isset($el['src']) ? (string) $el['src'] : '';
+                if ($raw_src === '') {
+                    $raw_src = isset($el['content']) ? (string) $el['content'] : '';
                 }
+                $src = $this->resolve_public_url($raw_src);
                 if ($src === '') {
                     return '<div style="' . esc_attr($base . 'background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>';
                 }
@@ -195,7 +255,7 @@ final class Eko_Sampa_Template_Renderer {
     /**
      * @param array<string, mixed> $styles
      */
-    private function build_text_inner_css(array $styles): string {
+    private function build_text_inner_css(array $styles, bool $for_print = false): string {
         $ff = $this->sanitize_font_family($styles['fontFamily'] ?? 'system-ui, sans-serif');
         $fs = isset($styles['fontSize']) ? max(6, min(200, (int) $styles['fontSize'])) : 16;
         $fw = isset($styles['fontWeight']) ? (string) $styles['fontWeight'] : '400';
@@ -222,8 +282,10 @@ final class Eko_Sampa_Template_Renderer {
             $tt = 'none';
         }
 
+        $overflow = $for_print ? 'hidden' : 'auto';
+
         return sprintf(
-            'width:100%%;height:100%%;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;background-color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:auto;padding:4px 6px;display:block;',
+            'width:100%%;height:100%%;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;background-color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;padding:4px 6px;display:block;',
             $ff,
             $fs,
             $fw,
@@ -234,7 +296,8 @@ final class Eko_Sampa_Template_Renderer {
             $bg,
             $lh,
             $ls,
-            $tt
+            $tt,
+            $overflow
         );
     }
 
@@ -242,12 +305,38 @@ final class Eko_Sampa_Template_Renderer {
      * @param array<string, mixed> $styles
      */
     private function build_image_img_css(array $styles): string {
-        $fit = isset($styles['objectFit']) ? strtolower((string) $styles['objectFit']) : 'contain';
+        $fit = isset($styles['objectFit']) ? strtolower((string) $styles['objectFit']) : 'cover';
         if (! in_array($fit, [ 'contain', 'cover', 'fill', 'none', 'scale-down' ], true)) {
-            $fit = 'contain';
+            $fit = 'cover';
         }
 
         return sprintf('width:100%%;height:100%%;display:block;object-fit:%s;', $fit);
+    }
+
+    /**
+     * Turn editor-stored paths into absolute URLs so print/preview pass esc_url + wp_kses and browsers load images.
+     */
+    private function resolve_public_url(string $raw): string {
+        $s = trim($raw);
+        if ($s === '') {
+            return '';
+        }
+        if (preg_match('#^(blob:|data:|javascript:)#i', $s)) {
+            return '';
+        }
+        if (preg_match('#^https?://#i', $s)) {
+            return esc_url($s);
+        }
+        if (str_starts_with($s, '//')) {
+            $prefix = is_ssl() ? 'https:' : 'http:';
+
+            return esc_url($prefix . $s);
+        }
+        if (str_starts_with($s, '/')) {
+            return esc_url(home_url($s));
+        }
+
+        return esc_url(home_url('/' . ltrim($s, '/')));
     }
 
     private function sanitize_font_family(string $raw): string {

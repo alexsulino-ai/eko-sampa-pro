@@ -83,6 +83,9 @@ function ekoEditorCanvasFactory() {
         persistToken: 0,
         _persistRunning: false,
         _persistQueued: false,
+        /** Embedded orders live preview: same canvas, no REST save / no interact */
+        previewOnly: false,
+        _orderPreviewListener: null,
         /** Last JSON string of elements array that was saved successfully (for revert) */
         lastOkElementsJson: null,
         maxElements: 400,
@@ -97,8 +100,11 @@ function ekoEditorCanvasFactory() {
             return `transform: scale(${s}); transform-origin: center center;`;
         },
 
-        /** Toolbar line: pending / saving / result */
+        /** Toolbar line: pending / saving / result (preview: hidden to avoid layout flicker) */
         get saveLine() {
+            if (this.previewOnly) {
+                return '';
+            }
             if (this._persistRunning) {
                 return 'A gravar…';
             }
@@ -159,6 +165,20 @@ function ekoEditorCanvasFactory() {
         },
 
         init() {
+            this.previewOnly =
+                !!(this.$el && this.$el.getAttribute && this.$el.getAttribute('data-eko-order-preview') === '1');
+            if (this.previewOnly) {
+                this.syncLogicalCanvasSizeFromMm();
+                this.elements = [];
+                this._orderPreviewListener = (ev) => {
+                    this.applyOrderLivePreview(ev && ev.detail ? ev.detail : null);
+                };
+                window.addEventListener('eko-sampa:order-preview', this._orderPreviewListener);
+                this.$watch('zoomPercent', () => {
+                    this.$nextTick(() => {});
+                });
+                return;
+            }
             this.syncLogicalCanvasSizeFromMm();
             this.$nextTick(() => {
                 this.$nextTick(() => this.bindInteract());
@@ -169,9 +189,15 @@ function ekoEditorCanvasFactory() {
             this.$watch(
                 'elements',
                 () => {
+                    if (this.previewOnly) {
+                        return;
+                    }
                     clearTimeout(this.interactDebounceTimer);
                     this.interactDebounceTimer = setTimeout(() => {
                         this.$nextTick(() => {
+                            if (this.draggingId) {
+                                return;
+                            }
                             this.bindInteract();
                             this.bindLayersSort();
                         });
@@ -201,7 +227,32 @@ function ekoEditorCanvasFactory() {
             this.loadFromServer();
         },
 
+        applyOrderLivePreview(detail) {
+            if (!this.previewOnly) {
+                return;
+            }
+            if (!detail || !Array.isArray(detail.elements)) {
+                this.elements = [];
+                return;
+            }
+            this.widthMm = Number(detail.width_mm) || 210;
+            this.heightMm = Number(detail.height_mm) || 297;
+            this.syncLogicalCanvasSizeFromMm();
+            try {
+                this.elements = JSON.parse(JSON.stringify(detail.elements));
+            } catch (e) {
+                this.elements = [];
+                return;
+            }
+            this.normalizeElements();
+            this.selectedId = null;
+        },
+
         destroy() {
+            if (this._orderPreviewListener) {
+                window.removeEventListener('eko-sampa:order-preview', this._orderPreviewListener);
+                this._orderPreviewListener = null;
+            }
             clearTimeout(this.saveTimer);
             clearTimeout(this.interactDebounceTimer);
             clearTimeout(this._snapFlashTimer);
@@ -347,7 +398,7 @@ function ekoEditorCanvasFactory() {
                 borderColor: '#cbd5e1',
                 rotate: 0,
                 boxShadow: 'none',
-                objectFit: 'contain',
+                objectFit: 'cover',
             };
         },
 
@@ -407,7 +458,7 @@ function ekoEditorCanvasFactory() {
             if (type === 'image') {
                 const d = this.defaultImageStyles();
                 const fit = String(r.objectFit || d.objectFit).toLowerCase();
-                d.objectFit = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'contain';
+                d.objectFit = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'cover';
                 d.opacity = this._clampNum(r.opacity, 0, 1, d.opacity);
                 d.borderRadius = this._clampNum(r.borderRadius, 0, 400, d.borderRadius);
                 d.borderWidth = this._clampNum(r.borderWidth, 0, 40, d.borderWidth);
@@ -547,9 +598,24 @@ function ekoEditorCanvasFactory() {
 
         imageImgCss(item) {
             const st = item.styles || {};
-            const fit = String(st.objectFit || 'contain').toLowerCase();
-            const f = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'contain';
+            const fit = String(st.objectFit || 'cover').toLowerCase();
+            const f = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'cover';
             return `width:100%;height:100%;display:block;object-fit:${f}`;
+        },
+
+        /** Toggle cover (default) ↔ contain on image click */
+        toggleImageFit(item) {
+            if (this.previewOnly) {
+                return;
+            }
+            if (!item || item.type !== 'image') {
+                return;
+            }
+            if (!item.styles || typeof item.styles !== 'object') {
+                item.styles = this.sanitizedElementStyles('image', {});
+            }
+            const cur = String(item.styles.objectFit || 'cover').toLowerCase();
+            item.styles.objectFit = cur === 'cover' ? 'contain' : 'cover';
         },
 
         triggerSnapFlash() {
@@ -763,6 +829,9 @@ function ekoEditorCanvasFactory() {
         },
 
         editorWindowKeydown(ev) {
+            if (this.previewOnly) {
+                return;
+            }
             if (ev.key === 'Escape' && this.inlineOpen && !this.galleryOpen) {
                 ev.preventDefault();
                 this.cancelInlineEdit();
@@ -916,6 +985,9 @@ function ekoEditorCanvasFactory() {
         },
 
         deleteSelected() {
+            if (this.previewOnly) {
+                return;
+            }
             if (!this.selectedId) {
                 return;
             }
@@ -924,6 +996,9 @@ function ekoEditorCanvasFactory() {
         },
 
         openInlineEdit(item) {
+            if (this.previewOnly) {
+                return;
+            }
             if (item.type !== 'text' && item.type !== 'placeholder') {
                 return;
             }
@@ -946,6 +1021,9 @@ function ekoEditorCanvasFactory() {
         },
 
         scheduleSave() {
+            if (this.previewOnly) {
+                return;
+            }
             const id = Number(this.cfg().templateId || 0);
             if (!id) {
                 return;
@@ -975,7 +1053,6 @@ function ekoEditorCanvasFactory() {
                 return;
             }
             this._persistRunning = true;
-            this.saveResult = '';
             const templateIdAtStart = id;
             try {
                 const v = this.validateElementsForSave(this.elements);
@@ -1047,6 +1124,9 @@ function ekoEditorCanvasFactory() {
         },
 
         bindLayersSort() {
+            if (this.previewOnly) {
+                return;
+            }
             if (typeof Sortable === 'undefined') {
                 return;
             }
@@ -1076,6 +1156,9 @@ function ekoEditorCanvasFactory() {
         },
 
         bindInteract() {
+            if (this.previewOnly) {
+                return;
+            }
             if (typeof interact !== 'function') {
                 return;
             }
@@ -1097,8 +1180,6 @@ function ekoEditorCanvasFactory() {
                 interact(node)
                     .draggable({
                         ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-field',
-                        /** Reduz conflito com duplo clique para editar */
-                        hold: 160,
                         inertia: false,
                         /** Sem restrict: o canvas está dentro de um stage com transform:scale; o restrict do Interact calculava mal e prendia tudo no canto. O clamp em JS mantém o layout dentro do canvas. */
                         listeners: {
@@ -1129,6 +1210,10 @@ function ekoEditorCanvasFactory() {
                                 self.snapTranslate(item);
                                 self.clampElementInCanvas(item);
                                 self.triggerSnapFlash();
+                                self.$nextTick(() => {
+                                    self.bindInteract();
+                                    self.bindLayersSort();
+                                });
                             },
                         },
                     })
@@ -1177,6 +1262,10 @@ function ekoEditorCanvasFactory() {
                                 self.snapBox(item);
                                 self.clampElementInCanvas(item);
                                 self.triggerSnapFlash();
+                                self.$nextTick(() => {
+                                    self.bindInteract();
+                                    self.bindLayersSort();
+                                });
                             },
                         },
                     });
@@ -1209,6 +1298,9 @@ function ekoEditorCanvasFactory() {
             this.deleteSelected();
         },
         duplicateElement() {
+            if (this.previewOnly) {
+                return;
+            }
             if (!this.selectedId) {
                 return;
             }
