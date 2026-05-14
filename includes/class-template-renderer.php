@@ -132,7 +132,7 @@ final class Eko_Sampa_Template_Renderer {
             $type = sanitize_key((string) ($copy['type'] ?? ''));
             if ($type === 'text' || $type === 'placeholder') {
                 $raw            = (string) ($copy['content'] ?? '');
-                $copy['content'] = $this->replace_tokens($raw, $context);
+                $copy['content'] = Eko_Sampa_Placeholder_Tokens::replace_in_text($raw, $context);
             }
             $out[] = $copy;
         }
@@ -196,7 +196,7 @@ final class Eko_Sampa_Template_Renderer {
             case 'text':
             default:
                 $raw_content = (string) ($el['content'] ?? '');
-                $text        = $this->replace_tokens($raw_content, $context);
+                $text        = Eko_Sampa_Placeholder_Tokens::replace_in_text($raw_content, $context);
                 $inner       = $base . $frame_css . 'box-sizing:border-box;';
 
                 return '<div style="' . esc_attr($inner) . '">'
@@ -376,29 +376,4 @@ final class Eko_Sampa_Template_Renderer {
         return $t;
     }
 
-    /**
-     * @param array<string, string> $context
-     */
-    private function replace_tokens(string $text, array $context): string {
-        return (string) preg_replace_callback(
-            '/\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/',
-            static function (array $m) use ($context): string {
-                $raw = trim((string) ($m[1] ?? ''));
-                if ($raw === '') {
-                    return '';
-                }
-                $a = strtolower($raw);
-                $b = strtolower(sanitize_title($raw));
-                if (isset($context[ $a ])) {
-                    return $context[ $a ];
-                }
-                if ($b !== '' && isset($context[ $b ])) {
-                    return $context[ $b ];
-                }
-
-                return $m[0];
-            },
-            $text
-        );
-    }
 }

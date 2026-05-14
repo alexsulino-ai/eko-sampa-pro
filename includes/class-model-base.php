@@ -118,4 +118,71 @@ abstract class Eko_Sampa_Model_Base {
 
         return ['', []];
     }
+
+    /**
+     * @var array<string, array<string, string>>
+     */
+    private static array $eko_sampa_table_column_map_cache = [];
+
+    /**
+     * Map lowercase column name => actual column name from SHOW COLUMNS (stable INSERT keys).
+     *
+     * @return array<string, string>
+     */
+    protected function table_column_name_map(): array {
+        $t = $this->table();
+        if (isset(self::$eko_sampa_table_column_map_cache[ $t ])) {
+            return self::$eko_sampa_table_column_map_cache[ $t ];
+        }
+
+        $safe = preg_replace('/[^a-z0-9_]/i', '', $t);
+        if ($safe === '' || $safe !== $t) {
+            return [];
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name sanitized to [a-z0-9_]+ above.
+        $rows = $this->db()->get_results('SHOW COLUMNS FROM `' . $safe . '`', ARRAY_A);
+        if (! is_array($rows) || $rows === []) {
+            return [];
+        }
+
+        $map = [];
+        foreach ($rows as $row) {
+            if (! isset($row['Field']) || ! is_string($row['Field']) || $row['Field'] === '') {
+                continue;
+            }
+            $field                = $row['Field'];
+            $map[ strtolower($field) ] = $field;
+        }
+
+        self::$eko_sampa_table_column_map_cache[ $t ] = $map;
+
+        return $map;
+    }
+
+    /**
+     * Remove keys that are not real table columns so INSERT/UPDATE survives when DB migrations lag behind plugin code.
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    protected function filter_row_to_existing_columns(array $row): array {
+        $map = $this->table_column_name_map();
+        if ($map === []) {
+            return $row;
+        }
+
+        $out = [];
+        foreach ($row as $key => $val) {
+            $lk = strtolower((string) $key);
+            if (! isset($map[ $lk ])) {
+                continue;
+            }
+            $actual         = $map[ $lk ];
+            $out[ $actual ] = $val;
+        }
+
+        return $out;
+    }
 }

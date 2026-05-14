@@ -183,6 +183,11 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         if (array_key_exists('options_json', $row) && $row['options_json'] === null) {
             unset($row['options_json']);
         }
+        if (array_key_exists('validation_rules_json', $row) && $row['validation_rules_json'] === null) {
+            unset($row['validation_rules_json']);
+        }
+
+        $row = $this->filter_row_to_existing_columns($row);
 
         $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
         if (false === $inserted) {
@@ -237,6 +242,11 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         }
 
         $row        = $this->sanitize_row($data, true, $service_id);
+        if ($row === []) {
+            return true;
+        }
+
+        $row = $this->filter_row_to_existing_columns($row);
         if ($row === []) {
             return true;
         }
@@ -312,6 +322,62 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Persist display order for all fields of a service (full ordered id list required).
+     *
+     * @param array<int, int> $ordered_field_ids
+     */
+    public function reorder_for_service(int $service_id, array $ordered_field_ids): bool {
+        if (! $this->fields_table_available() || $service_id <= 0 || ! $this->actor_may_touch_service($service_id)) {
+            return false;
+        }
+
+        $ids = [];
+        foreach ($ordered_field_ids as $id) {
+            $n = (int) $id;
+            if ($n > 0) {
+                $ids[] = $n;
+            }
+        }
+
+        $existing = $this->list_for_service($service_id, ['limit' => 500, 'offset' => 0]);
+        $have      = [];
+        foreach ($existing as $row) {
+            if (is_array($row) && isset($row['id'])) {
+                $have[ (int) $row['id'] ] = true;
+            }
+        }
+
+        if ($have === [] || count($ids) !== count($have)) {
+            return false;
+        }
+
+        foreach ($ids as $fid) {
+            if (! isset($have[ $fid ])) {
+                return false;
+            }
+        }
+
+        $seen = [];
+        foreach ($ids as $fid) {
+            if (isset($seen[ $fid ])) {
+                return false;
+            }
+            $seen[ $fid ] = true;
+        }
+
+        $pos = 0;
+        foreach ($ids as $fid) {
+            $ok = $this->update($fid, ['sort_order' => $pos]);
+            if (! $ok) {
+                return false;
+            }
+            ++$pos;
+        }
+
+        return true;
+    }
+
+    /**
      * @param array<string, mixed> $data
      *
      * @return array<string, mixed>
@@ -342,8 +408,52 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         if (! $partial || array_key_exists('sort_order', $data)) {
             $out['sort_order'] = isset($data['sort_order']) ? (int) $data['sort_order'] : 0;
         }
+        if (! $partial || array_key_exists('default_value', $data)) {
+            $dv = isset($data['default_value']) ? (string) $data['default_value'] : '';
+            $out['default_value'] = strlen($dv) > 500 ? sanitize_textarea_field(substr($dv, 0, 500)) : sanitize_text_field($dv);
+        }
+        if (! $partial || array_key_exists('placeholder', $data)) {
+            $out['placeholder'] = isset($data['placeholder'])
+                ? sanitize_text_field((string) $data['placeholder'])
+                : '';
+        }
+        if (! $partial || array_key_exists('show_in_template', $data)) {
+            $out['show_in_template'] = isset($data['show_in_template'])
+                ? (int) (bool) absint((int) $data['show_in_template'])
+                : 1;
+        }
+        if (! $partial || array_key_exists('validation_rules_json', $data)) {
+            $out['validation_rules_json'] = $this->normalize_rules($data['validation_rules_json'] ?? null);
+        }
 
         return $out;
+    }
+
+    private function normalize_rules(mixed $value): ?string {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_array($value)) {
+            return wp_json_encode($value, JSON_UNESCAPED_UNICODE) ?: null;
+        }
+
+        if (is_object($value)) {
+            $arr = json_decode(wp_json_encode($value, JSON_UNESCAPED_UNICODE) ?: '[]', true);
+
+            return is_array($arr) ? (wp_json_encode($arr, JSON_UNESCAPED_UNICODE) ?: null) : null;
+        }
+
+        if (is_string($value)) {
+            $decoded = json_decode(wp_unslash($value), true);
+            if (JSON_ERROR_NONE !== json_last_error()) {
+                return null;
+            }
+
+            return is_array($decoded) ? (wp_json_encode($decoded, JSON_UNESCAPED_UNICODE) ?: null) : null;
+        }
+
+        return null;
     }
 
     private function normalize_options(mixed $value): ?string {
@@ -380,13 +490,17 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      */
     private function insert_formats(array $row): array {
         $map = [
-            'service_id'   => '%d',
-            'label'        => '%s',
-            'slug'         => '%s',
-            'type'         => '%s',
-            'required'     => '%d',
-            'options_json' => '%s',
-            'sort_order'   => '%d',
+            'service_id'              => '%d',
+            'label'                   => '%s',
+            'slug'                    => '%s',
+            'type'                    => '%s',
+            'required'                => '%d',
+            'options_json'            => '%s',
+            'sort_order'              => '%d',
+            'default_value'           => '%s',
+            'placeholder'             => '%s',
+            'show_in_template'        => '%d',
+            'validation_rules_json'   => '%s',
         ];
         $out = [];
         foreach (array_keys($row) as $key) {

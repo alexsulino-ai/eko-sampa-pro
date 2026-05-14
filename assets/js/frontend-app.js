@@ -51,6 +51,25 @@
     window.ekoSampaApi = api;
 })();
 
+/**
+ * Aligns with PHP {@see sanitize_title()} + lowercase for dynamic_data / template placeholder keys.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function ekoSampaNormalizeDynamicKey(raw) {
+    let s = String(raw == null ? '' : raw).trim();
+    try {
+        s = s.normalize('NFD').replace(/\p{M}+/gu, '');
+    } catch (e) {
+        s = s.replace(/[\u0300-\u036f]/g, '');
+    }
+    return s
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
 /** Runtime probe: if this never appears, frontend-app.js did not execute (404, blocked, or parse error). */
 window.EkoModules = Object.assign(window.EkoModules || {}, {
     frontendAppJsStart: true,
@@ -197,7 +216,21 @@ function ekoServicesFactory() {
             filterUserId: '',
             users: [],
             form: { id: 0, nome: '', descricao: '', is_global: 0 },
-            fieldForm: { id: 0, service_id: 0, label: '', slug: '', type: 'text', required: 0, options_json: null, sort_order: 0 },
+            fieldForm: {
+                id: 0,
+                service_id: 0,
+                label: '',
+                slug: '',
+                type: 'text',
+                required: 0,
+                options_json: null,
+                sort_order: 0,
+                default_value: '',
+                placeholder: '',
+                show_in_template: 1,
+                validation_rules_json: null,
+            },
+            _fieldSortable: null,
         },
         loading: false,
         error: null,
@@ -261,8 +294,60 @@ function ekoServicesFactory() {
                     this.error = String(e.message || e);
                 }
             }
+            this.state.fields = Array.isArray(this.state.fields)
+                ? this.state.fields.slice().sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+                : [];
+            this.$nextTick(() => this.mountFieldSortable());
+        },
+        destroyFieldSortable() {
+            if (this._fieldSortable && typeof this._fieldSortable.destroy === 'function') {
+                try {
+                    this._fieldSortable.destroy();
+                } catch (e) {
+                    void e;
+                }
+            }
+            this._fieldSortable = null;
+        },
+        mountFieldSortable() {
+            this.destroyFieldSortable();
+            if (typeof Sortable === 'undefined' || !this.state.form.id) {
+                return;
+            }
+            const root = this.$refs.fieldSortRoot;
+            if (!root) {
+                return;
+            }
+            const self = this;
+            this._fieldSortable = Sortable.create(root, {
+                handle: '[data-eko-field-drag]',
+                animation: 150,
+                async onEnd() {
+                    const sid = self.state.form.id;
+                    if (!sid) {
+                        return;
+                    }
+                    const ids = Array.from(root.querySelectorAll('[data-field-id]'))
+                        .map((el) => parseInt(String(el.getAttribute('data-field-id') || '0'), 10))
+                        .filter((n) => n > 0);
+                    if (!ids.length) {
+                        return;
+                    }
+                    try {
+                        await window.ekoSampaApi('services/' + sid + '/fields/reorder', {
+                            method: 'POST',
+                            body: { order: ids },
+                        });
+                        await self.loadFields(sid, { silent: true });
+                    } catch (e) {
+                        self.error = String(e.message || e);
+                        await self.loadFields(sid, { silent: true });
+                    }
+                },
+            });
         },
         edit(row) {
+            this.destroyFieldSortable();
             this.state.form = Object.assign({ is_global: 0 }, row);
             this.loadFields(row.id);
             this.newField();
@@ -272,6 +357,7 @@ function ekoServicesFactory() {
                 return;
             }
             const req = f.required == null ? 0 : parseInt(String(f.required), 10) ? 1 : 0;
+            const sit = f.show_in_template == null ? 1 : parseInt(String(f.show_in_template), 10) ? 1 : 0;
             let opt = f.options_json;
             if (opt != null && opt !== '' && typeof opt === 'object') {
                 try {
@@ -291,9 +377,19 @@ function ekoServicesFactory() {
                 required: req,
                 options_json: opt != null && opt !== '' ? opt : f.type === 'select' ? '[]' : null,
                 sort_order: f.sort_order != null ? Number(f.sort_order) : 0,
+                default_value: f.default_value != null ? String(f.default_value) : '',
+                placeholder: f.placeholder != null ? String(f.placeholder) : '',
+                show_in_template: sit,
+                validation_rules_json:
+                    f.validation_rules_json != null && f.validation_rules_json !== ''
+                        ? typeof f.validation_rules_json === 'string'
+                            ? f.validation_rules_json
+                            : JSON.stringify(f.validation_rules_json)
+                        : null,
             };
         },
         reset() {
+            this.destroyFieldSortable();
             this.state.form = { id: 0, nome: '', descricao: '', is_global: 0 };
             this.state.fields = [];
         },
@@ -339,6 +435,10 @@ function ekoServicesFactory() {
                 required: 0,
                 options_json: null,
                 sort_order: this.state.fields.length,
+                default_value: '',
+                placeholder: '',
+                show_in_template: 1,
+                validation_rules_json: null,
             };
         },
         /**
@@ -409,8 +509,24 @@ function ekoServicesFactory() {
                     required: parseInt(String(this.state.fieldForm.required), 10) ? 1 : 0,
                     options_json: optionsPayload,
                     sort_order: Number(this.state.fieldForm.sort_order) || 0,
+                    default_value: this.state.fieldForm.default_value != null ? String(this.state.fieldForm.default_value) : '',
+                    placeholder: this.state.fieldForm.placeholder != null ? String(this.state.fieldForm.placeholder) : '',
+                    show_in_template: parseInt(String(this.state.fieldForm.show_in_template), 10) ? 1 : 0,
                 })
             );
+            let rulesPayload = this.state.fieldForm.validation_rules_json;
+            if (rulesPayload != null && rulesPayload !== '') {
+                if (typeof rulesPayload === 'string') {
+                    try {
+                        body.validation_rules_json = JSON.parse(rulesPayload.trim() || 'null');
+                    } catch (e) {
+                        this.error = 'Validation rules must be valid JSON object or empty.';
+                        return;
+                    }
+                } else {
+                    body.validation_rules_json = rulesPayload;
+                }
+            }
             try {
                 if (this.state.fieldForm.id) {
                     await window.ekoSampaApi('services/' + sid + '/fields/' + this.state.fieldForm.id, { method: 'PATCH', body });
@@ -618,6 +734,7 @@ function ekoOrdersFactory() {
             services: [],
             templates: [],
             serviceFields: [],
+            templatePlaceholderSet: {},
             q: '',
             status: '',
             filterUserId: '',
@@ -646,6 +763,37 @@ function ekoOrdersFactory() {
                 body +
                 '</body></html>'
             );
+        },
+        fieldAffectsPreview(f) {
+            const slug = f && f.slug != null ? String(f.slug) : '';
+            const k = ekoSampaNormalizeDynamicKey(slug);
+            if (!k) {
+                return false;
+            }
+            const set = this.state.templatePlaceholderSet || {};
+            return !!set[k];
+        },
+        printServiceFields() {
+            const list = Array.isArray(this.state.serviceFields) ? this.state.serviceFields : [];
+            return list.filter((f) => parseInt(String(f && f.show_in_template != null ? f.show_in_template : 1), 10) !== 0);
+        },
+        operationalServiceFields() {
+            const list = Array.isArray(this.state.serviceFields) ? this.state.serviceFields : [];
+            return list.filter((f) => parseInt(String(f && f.show_in_template != null ? f.show_in_template : 1), 10) === 0);
+        },
+        applyTemplatePlaceholdersFromResponse(data) {
+            if (data && typeof data === 'object' && Array.isArray(data.template_placeholders)) {
+                const o = {};
+                data.template_placeholders.forEach((k) => {
+                    const key = String(k || '').trim();
+                    if (key) {
+                        o[key] = true;
+                    }
+                });
+                this.state.templatePlaceholderSet = o;
+            } else if (data && typeof data === 'object') {
+                this.state.templatePlaceholderSet = {};
+            }
         },
         fieldSelectOptions(f) {
             try {
@@ -768,6 +916,7 @@ function ekoOrdersFactory() {
             };
             this.state.serviceFields = [];
             this.state.previewSrcdoc = '';
+            this.state.templatePlaceholderSet = {};
             try {
                 window.dispatchEvent(new CustomEvent('eko-sampa:order-preview', { detail: null }));
             } catch (e) {
@@ -813,8 +962,11 @@ function ekoOrdersFactory() {
                     if (!sk) {
                         return;
                     }
+                    const def = f.default_value != null ? String(f.default_value) : '';
                     if (!(sk in d)) {
-                        d[sk] = '';
+                        d[sk] = def !== '' ? def : '';
+                    } else if ((d[sk] === '' || d[sk] == null) && def !== '') {
+                        d[sk] = def;
                     }
                 });
                 this.state.form.dynamic_data_json = d;
@@ -833,6 +985,7 @@ function ekoOrdersFactory() {
             const tid = parseInt(String(this.state.form.template_id || 0), 10);
             if (!tid) {
                 this.state.previewSrcdoc = '';
+                this.state.templatePlaceholderSet = {};
                 try {
                     window.dispatchEvent(new CustomEvent('eko-sampa:order-preview', { detail: null }));
                 } catch (e) {
@@ -870,6 +1023,7 @@ function ekoOrdersFactory() {
                     method: 'POST',
                     body: payload,
                 });
+                this.applyTemplatePlaceholdersFromResponse(data);
                 if (data && typeof data === 'object' && data.editorPreview && Array.isArray(data.editorPreview.elements)) {
                     try {
                         window.dispatchEvent(
@@ -961,6 +1115,7 @@ function ekoOrdersFactory() {
             this.state.previewSrcdoc = '';
             try {
                 const data = await window.ekoSampaApi('orders/' + id + '/render', { method: 'GET' });
+                this.applyTemplatePlaceholdersFromResponse(data);
                 if (data && typeof data === 'object' && data.editorPreview && Array.isArray(data.editorPreview.elements)) {
                     try {
                         window.dispatchEvent(

@@ -86,17 +86,27 @@ if (! defined('ABSPATH')) {
             </div>
             <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" x-show="state.form.id">
                 <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Dynamic fields', 'eko-sampa'); ?></h3>
-                <ul class="mt-2 divide-y divide-slate-100 text-sm">
+                <ul class="mt-2 divide-y divide-slate-100 text-sm" x-ref="fieldSortRoot" x-show="state.fields.length">
                     <template x-for="f in state.fields" :key="f.id">
-                        <li class="flex items-center justify-between py-2">
-                            <span><span class="font-medium" x-text="f.label"></span> <span class="text-slate-500" x-text="'(' + f.slug + ')'"></span></span>
-                            <span class="space-x-2">
+                        <li class="flex items-center gap-2 py-2" :data-field-id="f.id">
+                            <button
+                                type="button"
+                                class="cursor-grab rounded border border-transparent px-1 text-slate-400 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-600"
+                                data-eko-field-drag="1"
+                                title="<?php echo esc_attr__('Drag to reorder', 'eko-sampa'); ?>"
+                            >⠿</button>
+                            <div class="min-w-0 flex-1">
+                                <span class="font-medium" x-text="f.label"></span>
+                                <span class="text-slate-500" x-text="'(' + f.slug + ')'"></span>
+                            </div>
+                            <span class="shrink-0 space-x-2">
                                 <button type="button" class="text-indigo-600 hover:underline" @click="editField(f)"><?php echo esc_html__('Edit', 'eko-sampa'); ?></button>
                                 <button type="button" class="text-red-600 hover:underline" @click="deleteField(f.id)"><?php echo esc_html__('Remove', 'eko-sampa'); ?></button>
                             </span>
                         </li>
                     </template>
                 </ul>
+                <p class="mt-2 text-xs text-slate-500" x-show="!state.fields.length"><?php echo esc_html__('No fields yet.', 'eko-sampa'); ?></p>
                 <div class="mt-3 grid gap-2 sm:grid-cols-2">
                     <input class="rounded border border-slate-200 px-2 py-1 text-sm" type="text" placeholder="<?php echo esc_attr__('Label', 'eko-sampa'); ?>" x-model="state.fieldForm.label" />
                     <input class="rounded border border-slate-200 px-2 py-1 text-sm" type="text" placeholder="<?php echo esc_attr__('Slug', 'eko-sampa'); ?>" x-model="state.fieldForm.slug" />
@@ -108,6 +118,18 @@ if (! defined('ABSPATH')) {
                         <option value="date">date</option>
                     </select>
                     <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="state.fieldForm.required" :true-value="1" :false-value="0" /> <?php echo esc_html__('Required', 'eko-sampa'); ?></label>
+                    <label class="flex items-center gap-2 text-sm sm:col-span-2">
+                        <input type="checkbox" x-model="state.fieldForm.show_in_template" :true-value="1" :false-value="0" />
+                        <?php echo esc_html__('Print / template field (uncheck for operational-only)', 'eko-sampa'); ?>
+                    </label>
+                </div>
+                <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Default value', 'eko-sampa'); ?>
+                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.fieldForm.default_value" />
+                    </label>
+                    <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Placeholder (form hint)', 'eko-sampa'); ?>
+                        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.fieldForm.placeholder" />
+                    </label>
                 </div>
                 <label class="mt-2 block text-xs font-medium text-slate-600" x-show="state.fieldForm.type === 'select'">
                     <?php echo esc_html__('Select options (JSON array)', 'eko-sampa'); ?>
@@ -116,6 +138,15 @@ if (! defined('ABSPATH')) {
                         rows="3"
                         placeholder='["Option A","Option B"]'
                         x-model="state.fieldForm.options_json"
+                    ></textarea>
+                </label>
+                <label class="mt-2 block text-xs font-medium text-slate-600">
+                    <?php echo esc_html__('Validation rules (JSON, optional; reserved for future checks)', 'eko-sampa'); ?>
+                    <textarea
+                        class="mt-1 w-full rounded border border-slate-200 px-2 py-1 font-mono text-xs"
+                        rows="2"
+                        placeholder="{}"
+                        x-model="state.fieldForm.validation_rules_json"
                     ></textarea>
                 </label>
                 <div class="mt-2 flex flex-wrap items-center gap-2">

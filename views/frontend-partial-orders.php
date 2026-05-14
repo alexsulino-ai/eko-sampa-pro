@@ -129,38 +129,85 @@ if (! defined('ABSPATH')) {
                     </label>
                 </div>
                 <div class="mt-4 border-t border-slate-100 pt-3" x-show="state.serviceFields && state.serviceFields.length > 0">
-                    <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields (placeholders {{slug}})', 'eko-sampa'); ?></p>
-                    <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                        <template x-for="f in state.serviceFields" :key="'sf-' + (f.id != null ? f.id : '') + '-' + (f.slug || '')">
-                            <div class="min-w-0 sm:col-span-2">
-                                <label class="block text-xs font-medium text-slate-600">
-                                    <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
-                                    <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
-                                </label>
-                                <textarea
-                                    x-show="f.type === 'textarea'"
-                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
-                                    rows="2"
-                                    x-model="state.form.dynamic_data_json[f.slug]"
-                                ></textarea>
-                                <select
-                                    x-show="f.type === 'select'"
-                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
-                                    x-model="state.form.dynamic_data_json[f.slug]"
-                                >
-                                    <option value="">—</option>
-                                    <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="(f.slug || '') + '-opt-' + idx + '-' + opt.value">
-                                        <option :value="opt.value" x-text="opt.label"></option>
-                                    </template>
-                                </select>
-                                <input
-                                    x-show="f.type !== 'textarea' && f.type !== 'select'"
-                                    class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
-                                    :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
-                                    x-model="state.form.dynamic_data_json[f.slug]"
-                                />
+                    <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields', 'eko-sampa'); ?></p>
+                    <p class="mt-1 text-[11px] leading-snug text-slate-500"><?php echo esc_html__('Only tokens present in the template (e.g. {{slug}}) update the live preview. Other values are stored for production.', 'eko-sampa'); ?></p>
+                    <div class="mt-3 space-y-4">
+                        <div x-show="printServiceFields().length > 0">
+                            <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500"><?php echo esc_html__('Print / template', 'eko-sampa'); ?></p>
+                            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                                <template x-for="f in printServiceFields()" :key="'sf-print-' + (f.id != null ? f.id : '') + '-' + (f.slug || '')">
+                                    <div class="min-w-0 sm:col-span-2">
+                                        <label class="block text-xs font-medium text-slate-600">
+                                            <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
+                                            <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
+                                            <span class="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800" x-show="fieldAffectsPreview(f)" x-cloak><?php echo esc_html__('In template', 'eko-sampa'); ?></span>
+                                        </label>
+                                        <textarea
+                                            x-show="f.type === 'textarea'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            rows="2"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                            x-bind:placeholder="f.placeholder || ''"
+                                        ></textarea>
+                                        <select
+                                            x-show="f.type === 'select'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                        >
+                                            <option value="">—</option>
+                                            <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="(f.slug || '') + '-opt-' + idx + '-' + opt.value">
+                                                <option :value="opt.value" x-text="opt.label"></option>
+                                            </template>
+                                        </select>
+                                        <input
+                                            x-show="f.type !== 'textarea' && f.type !== 'select'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                            x-bind:placeholder="f.placeholder || ''"
+                                        />
+                                    </div>
+                                </template>
                             </div>
-                        </template>
+                        </div>
+                        <div x-show="operationalServiceFields().length > 0">
+                            <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500"><?php echo esc_html__('Operational / internal', 'eko-sampa'); ?></p>
+                            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+                                <template x-for="f in operationalServiceFields()" :key="'sf-ops-' + (f.id != null ? f.id : '') + '-' + (f.slug || '')">
+                                    <div class="min-w-0 sm:col-span-2">
+                                        <label class="block text-xs font-medium text-slate-600">
+                                            <span x-text="f.label + (parseInt(String(f.required), 10) ? ' *' : '')"></span>
+                                            <span class="ml-1 font-mono text-slate-400" x-text="'{{' + f.slug + '}}'"></span>
+                                            <span class="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600" x-show="fieldAffectsPreview(f)" x-cloak><?php echo esc_html__('Also in template', 'eko-sampa'); ?></span>
+                                        </label>
+                                        <textarea
+                                            x-show="f.type === 'textarea'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            rows="2"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                            x-bind:placeholder="f.placeholder || ''"
+                                        ></textarea>
+                                        <select
+                                            x-show="f.type === 'select'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                        >
+                                            <option value="">—</option>
+                                            <template x-for="(opt, idx) in fieldSelectOptions(f)" :key="(f.slug || '') + '-opt-' + idx + '-' + opt.value">
+                                                <option :value="opt.value" x-text="opt.label"></option>
+                                            </template>
+                                        </select>
+                                        <input
+                                            x-show="f.type !== 'textarea' && f.type !== 'select'"
+                                            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+                                            :type="f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')"
+                                            x-model="state.form.dynamic_data_json[f.slug]"
+                                            x-bind:placeholder="f.placeholder || ''"
+                                        />
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="mt-3 border-t border-slate-100 pt-3" x-show="!state.serviceFields || state.serviceFields.length === 0">

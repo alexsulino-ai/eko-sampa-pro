@@ -183,6 +183,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/services/(?P<id>\d+)/fields/reorder',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_fields_reorder'],
+                'permission_callback' => [$this, 'require_services_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/services/(?P<sid>\d+)/fields/(?P<fid>\d+)',
             [
                 [
@@ -248,6 +258,16 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
                 'callback'            => [$this, 'route_templates_duplicate'],
+                'permission_callback' => [$this, 'require_templates_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/templates/(?P<id>\d+)/placeholders',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_templates_placeholders'],
                 'permission_callback' => [$this, 'require_templates_cap'],
             ]
         );
@@ -630,11 +650,24 @@ final class Eko_Sampa_Rest_Api {
 
         $id = $field->create($sid, $params);
         if (! $id) {
-            return new \WP_Error(
-                'eko_sampa_create_failed',
-                __('Could not create field.', 'eko-sampa'),
-                array_merge(['status' => 400], $this->wpdb_debug_data())
+            global $wpdb;
+            $err = isset($wpdb) && is_object($wpdb) ? trim((string) $wpdb->last_error) : '';
+            $data = array_merge(
+                ['status' => 400],
+                $this->wpdb_debug_data(),
+                $err !== '' ? ['db_last_error' => $err] : []
             );
+            $code = 'eko_sampa_create_failed';
+            $msg  = __('Could not create field.', 'eko-sampa');
+            if ($err !== '' && (stripos($err, 'unknown column') !== false || stripos($err, "doesn't exist") !== false)) {
+                $code = 'eko_sampa_db_schema_outdated';
+                $msg  = __(
+                    'Could not create field: the database is missing recent Eko Sampa columns. Load the WordPress admin once so the plugin can finish upgrading, then try again.',
+                    'eko-sampa'
+                );
+            }
+
+            return new \WP_Error($code, $msg, $data);
         }
 
         return new \WP_REST_Response($field->get((int) $id), 201);
@@ -700,6 +733,35 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_REST_Response($field->get($fid));
+    }
+
+    public function route_fields_reorder(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $sid    = (int) $request['id'];
+        $params = $this->json_params($request);
+        $order  = $params['order'] ?? null;
+        if (! is_array($order)) {
+            return new \WP_Error(
+                'eko_sampa_bad_request',
+                __('Provide an "order" array of field ids.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $ids = [];
+        foreach ($order as $v) {
+            $ids[] = (int) $v;
+        }
+
+        $ok = (new Eko_Sampa_Service_Field())->reorder_for_service($sid, $ids);
+        if (! $ok) {
+            return new \WP_Error(
+                'eko_sampa_reorder_failed',
+                __('Could not reorder fields (ids must match all fields of this service exactly once).', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        return new \WP_REST_Response((new Eko_Sampa_Service_Field())->list_for_service($sid));
     }
 
     public function route_fields_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -795,6 +857,23 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_REST_Response((new Eko_Sampa_Template())->get((int) $new), 201);
+    }
+
+    public function route_templates_placeholders(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id  = (int) $request['id'];
+        $row = (new Eko_Sampa_Template())->get($id);
+        if (! is_array($row)) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $tokens = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($row);
+
+        return new \WP_REST_Response(
+            [
+                'template_id'   => $id,
+                'placeholders'  => $tokens,
+            ]
+        );
     }
 
     public function route_orders_list(\WP_REST_Request $request): \WP_REST_Response {
@@ -899,6 +978,7 @@ final class Eko_Sampa_Rest_Api {
             'height_mm' => (int) ($tpl['height_mm'] ?? 297),
             'elements'  => $rnd->apply_context_to_elements($els, $ctx),
         ];
+        $html['template_placeholders'] = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
 
         return new \WP_REST_Response($html);
     }
@@ -936,6 +1016,7 @@ final class Eko_Sampa_Rest_Api {
             'height_mm' => (int) ($tpl['height_mm'] ?? 297),
             'elements'  => $rnd->apply_context_to_elements($els, $ctx),
         ];
+        $html['template_placeholders'] = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
 
         if (defined('WP_DEBUG') && WP_DEBUG) {
             $h = isset($html['html']) && is_string($html['html']) ? $html['html'] : '';

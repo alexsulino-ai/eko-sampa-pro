@@ -58,6 +58,7 @@ final class Eko_Sampa_Database {
             '1.0.0' => [$this, 'migrate_to_1_0_0'],
             '1.0.1' => [$this, 'migrate_to_1_0_1'],
             '1.0.2' => [$this, 'migrate_to_1_0_2'],
+            '1.0.3' => [$this, 'migrate_to_1_0_3'],
         ];
     }
 
@@ -538,5 +539,39 @@ final class Eko_Sampa_Database {
         $this->drop_column_if_exists($wpdb, $table, 'cliente_id');
         $this->drop_column_if_exists($wpdb, $table, 'servico_id');
         $this->drop_column_if_exists($wpdb, $table, 'modelo_id');
+    }
+
+    /**
+     * Dynamic field metadata (defaults, placeholders, template visibility hint) + immutable order field snapshot.
+     */
+    private function migrate_to_1_0_3(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        if ($this->table_exists($wpdb, 'eko_sampa_fields')) {
+            $table = $wpdb->prefix . 'eko_sampa_fields';
+            $this->add_missing_columns(
+                $wpdb,
+                $table,
+                [
+                    'default_value'         => "varchar(500) NOT NULL DEFAULT ''",
+                    'placeholder'           => "varchar(255) NOT NULL DEFAULT ''",
+                    'show_in_template'      => 'tinyint(1) NOT NULL DEFAULT 1',
+                    'validation_rules_json' => 'longtext NULL',
+                ]
+            );
+        }
+
+        if ($this->table_exists($wpdb, 'eko_sampa_orders')) {
+            $table = $wpdb->prefix . 'eko_sampa_orders';
+            $this->add_missing_columns(
+                $wpdb,
+                $table,
+                [
+                    'service_fields_snapshot_json' => 'longtext NULL',
+                ]
+            );
+        }
     }
 }

@@ -71,6 +71,12 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             return false;
         }
 
+        $snap_override = null;
+        if (isset($data['_eko_sampa_field_snapshot']) && is_string($data['_eko_sampa_field_snapshot'])) {
+            $snap_override = $data['_eko_sampa_field_snapshot'];
+        }
+        unset($data['_eko_sampa_field_snapshot']);
+
         $row = $this->sanitize_row($data, false);
         if (array_key_exists('dynamic_data_json', $data)) {
             $encoded = $this->normalize_json($data['dynamic_data_json']);
@@ -81,6 +87,19 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         }
 
         $row['user_id'] = $uid;
+
+        $sid = (int) ($row['service_id'] ?? 0);
+        $snap_in = $snap_override;
+        if (is_string($snap_in) && $snap_in !== '' && strlen($snap_in) <= 131072) {
+            $row['service_fields_snapshot_json'] = $snap_in;
+        } elseif ($sid > 0) {
+            $built = $this->build_service_fields_snapshot_json($sid);
+            if ($built !== null) {
+                $row['service_fields_snapshot_json'] = $built;
+            }
+        }
+
+        $row = $this->filter_row_to_existing_columns($row);
 
         $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
 
@@ -138,6 +157,13 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             $row['dynamic_data_json'] = $encoded;
         }
 
+        unset($row['service_fields_snapshot_json']);
+
+        if ($row === []) {
+            return true;
+        }
+
+        $row = $this->filter_row_to_existing_columns($row);
         if ($row === []) {
             return true;
         }
@@ -229,6 +255,11 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             'dynamic_data_json'  => $source['dynamic_data_json'] ?? null,
             'print_ready'        => 0,
         ];
+
+        $snap = $source['service_fields_snapshot_json'] ?? null;
+        if (is_string($snap) && $snap !== '') {
+            $payload['_eko_sampa_field_snapshot'] = $snap;
+        }
 
         return $this->create($payload);
     }
@@ -325,6 +356,64 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         }
 
         return $ctx;
+    }
+
+    /**
+     * Immutable schema snapshot for the service field definitions at order creation time.
+     *
+     * @return non-empty-string|null
+     */
+    private function build_service_fields_snapshot_json(int $service_id): ?string {
+        if ($service_id <= 0) {
+            return null;
+        }
+
+        $field_model = new Eko_Sampa_Service_Field();
+        $rows        = $field_model->list_for_service($service_id, ['limit' => 500, 'offset' => 0]);
+        $fields      = [];
+        foreach ($rows as $r) {
+            if (! is_array($r)) {
+                continue;
+            }
+            $opt_raw = $r['options_json'] ?? null;
+            $opts    = null;
+            if (is_string($opt_raw) && $opt_raw !== '') {
+                $dec = json_decode($opt_raw, true);
+                $opts = JSON_ERROR_NONE === json_last_error() && is_array($dec) ? $dec : null;
+            }
+
+            $rules_raw = $r['validation_rules_json'] ?? null;
+            $rules     = null;
+            if (is_string($rules_raw) && $rules_raw !== '') {
+                $dec2 = json_decode($rules_raw, true);
+                $rules = JSON_ERROR_NONE === json_last_error() && is_array($dec2) ? $dec2 : null;
+            }
+
+            $fields[] = [
+                'id'                 => (int) ($r['id'] ?? 0),
+                'label'              => (string) ($r['label'] ?? ''),
+                'slug'               => (string) ($r['slug'] ?? ''),
+                'type'               => (string) ($r['type'] ?? 'text'),
+                'required'           => (int) ($r['required'] ?? 0),
+                'sort_order'         => (int) ($r['sort_order'] ?? 0),
+                'default_value'      => (string) ($r['default_value'] ?? ''),
+                'placeholder'        => (string) ($r['placeholder'] ?? ''),
+                'show_in_template'   => (int) ($r['show_in_template'] ?? 1),
+                'options'            => $opts,
+                'validation_rules'   => $rules,
+            ];
+        }
+
+        $payload = [
+            'version'     => 1,
+            'captured_at' => gmdate('c'),
+            'service_id'  => $service_id,
+            'fields'      => $fields,
+        ];
+
+        $json = wp_json_encode($payload, JSON_UNESCAPED_UNICODE);
+
+        return is_string($json) && $json !== '' ? $json : null;
     }
 
     /**
@@ -501,14 +590,15 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
      */
     private function insert_formats(array $row): array {
         $map = [
-            'user_id'            => '%d',
-            'client_id'          => '%d',
-            'service_id'         => '%d',
-            'template_id'        => '%d',
-            'woo_order_id'       => '%d',
-            'status'             => '%s',
-            'dynamic_data_json'  => '%s',
-            'print_ready'        => '%d',
+            'user_id'                        => '%d',
+            'client_id'                      => '%d',
+            'service_id'                     => '%d',
+            'template_id'                    => '%d',
+            'woo_order_id'                   => '%d',
+            'status'                         => '%s',
+            'dynamic_data_json'              => '%s',
+            'service_fields_snapshot_json'   => '%s',
+            'print_ready'                    => '%d',
         ];
         $out = [];
         foreach (array_keys($row) as $key) {

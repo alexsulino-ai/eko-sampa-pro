@@ -350,6 +350,10 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
             }
+        } elseif ($this->is_frontend_services_view()) {
+            if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_SORTABLE);
+            }
         }
 
         // Alpine last: alpine:init listeners must already be attached (class docblock).
@@ -485,6 +489,14 @@ final class Eko_Sampa_Assets {
         }
 
         return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'orders';
+    }
+
+    private function is_frontend_services_view(): bool {
+        if (! $this->is_frontend_virtual_route()) {
+            return false;
+        }
+
+        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'services';
     }
 
     private function should_enqueue_admin(string $hook_suffix): bool {
