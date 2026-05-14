@@ -70,6 +70,192 @@ function ekoSampaNormalizeDynamicKey(raw) {
         .replace(/^-+|-+$/g, '');
 }
 
+/**
+ * Declarative validation UI ↔ validation_rules_json (REST/DB).
+ * State uses fieldForm.validation (object); serialize only in saveField.
+ * Legacy non-object JSON is kept in _validationLegacyRaw until overwritten.
+ */
+window.ekoSampaFieldValidation = (function () {
+    var KNOWN = ['minLength', 'maxLength', 'pattern', 'minimum', 'maximum', 'format'];
+
+    function emptyValidationState() {
+        return {
+            minLength: '',
+            maxLength: '',
+            pattern: '',
+            minimum: '',
+            maximum: '',
+            format: '',
+            __extras: {},
+        };
+    }
+
+    function parseFromApiObject(obj) {
+        var out = emptyValidationState();
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+            return out;
+        }
+        var k;
+        for (k in obj) {
+            if (!Object.prototype.hasOwnProperty.call(obj, k)) {
+                continue;
+            }
+            if (KNOWN.indexOf(k) !== -1) {
+                var v = obj[k];
+                if (v == null) {
+                    continue;
+                }
+                out[k] = String(v);
+            } else {
+                out.__extras[k] = obj[k];
+            }
+        }
+        return out;
+    }
+
+    function cloneValidationState(src) {
+        var e = src && src.__extras && typeof src.__extras === 'object' ? src.__extras : {};
+        var nx = {};
+        var k;
+        for (k in e) {
+            if (Object.prototype.hasOwnProperty.call(e, k)) {
+                nx[k] = e[k];
+            }
+        }
+        return {
+            minLength: src && src.minLength != null ? String(src.minLength) : '',
+            maxLength: src && src.maxLength != null ? String(src.maxLength) : '',
+            pattern: src && src.pattern != null ? String(src.pattern) : '',
+            minimum: src && src.minimum != null ? String(src.minimum) : '',
+            maximum: src && src.maximum != null ? String(src.maximum) : '',
+            format: src && src.format != null ? String(src.format) : '',
+            __extras: nx,
+        };
+    }
+
+    function parseFieldRow(f) {
+        var raw = f && f.validation_rules_json != null ? f.validation_rules_json : null;
+        if (raw == null || raw === '') {
+            return { validation: emptyValidationState(), _validationLegacyRaw: null };
+        }
+        if (typeof raw === 'object' && !Array.isArray(raw)) {
+            return { validation: cloneValidationState(parseFromApiObject(raw)), _validationLegacyRaw: null };
+        }
+        if (typeof raw === 'object' && Array.isArray(raw)) {
+            try {
+                return { validation: emptyValidationState(), _validationLegacyRaw: JSON.stringify(raw) };
+            } catch (e) {
+                return { validation: emptyValidationState(), _validationLegacyRaw: null };
+            }
+        }
+        if (typeof raw === 'string') {
+            var t = raw.trim();
+            if (t === '') {
+                return { validation: emptyValidationState(), _validationLegacyRaw: null };
+            }
+            try {
+                var p = JSON.parse(t);
+                if (p !== null && typeof p === 'object' && !Array.isArray(p)) {
+                    return { validation: cloneValidationState(parseFromApiObject(p)), _validationLegacyRaw: null };
+                }
+                return { validation: emptyValidationState(), _validationLegacyRaw: t };
+            } catch (e2) {
+                return { validation: emptyValidationState(), _validationLegacyRaw: t };
+            }
+        }
+        return { validation: emptyValidationState(), _validationLegacyRaw: null };
+    }
+
+    function serializeForApi(validation) {
+        if (!validation || typeof validation !== 'object') {
+            return null;
+        }
+        var o = {};
+        var ml = String(validation.minLength != null ? validation.minLength : '').trim();
+        if (ml !== '') {
+            var nml = parseInt(ml, 10);
+            if (!Number.isNaN(nml) && nml >= 0) {
+                o.minLength = nml;
+            }
+        }
+        var xl = String(validation.maxLength != null ? validation.maxLength : '').trim();
+        if (xl !== '') {
+            var nxl = parseInt(xl, 10);
+            if (!Number.isNaN(nxl) && nxl >= 0) {
+                o.maxLength = nxl;
+            }
+        }
+        var pat = String(validation.pattern != null ? validation.pattern : '').trim();
+        if (pat !== '') {
+            o.pattern = pat;
+        }
+        var fmt = String(validation.format != null ? validation.format : '').trim();
+        if (fmt !== '') {
+            o.format = fmt;
+        }
+        var mn = String(validation.minimum != null ? validation.minimum : '').trim();
+        if (mn !== '') {
+            var fn = Number(mn);
+            if (!Number.isNaN(fn)) {
+                o.minimum = fn;
+            }
+        }
+        var mx = String(validation.maximum != null ? validation.maximum : '').trim();
+        if (mx !== '') {
+            var fx = Number(mx);
+            if (!Number.isNaN(fx)) {
+                o.maximum = fx;
+            }
+        }
+        var ext = validation.__extras && typeof validation.__extras === 'object' ? validation.__extras : {};
+        var ek;
+        for (ek in ext) {
+            if (!Object.prototype.hasOwnProperty.call(ext, ek)) {
+                continue;
+            }
+            if (ek === '__proto__') {
+                continue;
+            }
+            o[ek] = ext[ek];
+        }
+        if (Object.keys(o).length === 0) {
+            return null;
+        }
+        return o;
+    }
+
+    /**
+     * @returns {unknown|null} payload for REST, or `false` if legacy raw is invalid JSON
+     */
+    function buildRestValidationPayload(fieldForm) {
+        var ui = serializeForApi(fieldForm.validation);
+        var hasUi = ui != null && Object.keys(ui).length > 0;
+        if (hasUi) {
+            return ui;
+        }
+        if (fieldForm._validationLegacyRaw) {
+            try {
+                var t = String(fieldForm._validationLegacyRaw).trim();
+                if (t === '') {
+                    return null;
+                }
+                return JSON.parse(t);
+            } catch (e) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    return {
+        emptyValidationState: emptyValidationState,
+        parseFieldRow: parseFieldRow,
+        serializeForApi: serializeForApi,
+        buildRestValidationPayload: buildRestValidationPayload,
+        cloneValidationState: cloneValidationState,
+    };
+})();
+
 /** Runtime probe: if this never appears, frontend-app.js did not execute (404, blocked, or parse error). */
 window.EkoModules = Object.assign(window.EkoModules || {}, {
     frontendAppJsStart: true,
@@ -228,7 +414,8 @@ function ekoServicesFactory() {
                 default_value: '',
                 placeholder: '',
                 show_in_template: 1,
-                validation_rules_json: null,
+                validation: window.ekoSampaFieldValidation.emptyValidationState(),
+                _validationLegacyRaw: null,
             },
             _fieldSortable: null,
         },
@@ -368,6 +555,7 @@ function ekoServicesFactory() {
             } else if (opt != null && typeof opt !== 'string') {
                 opt = String(opt);
             }
+            const vr = window.ekoSampaFieldValidation.parseFieldRow(f);
             this.state.fieldForm = {
                 id: f.id,
                 service_id: this.state.form.id,
@@ -380,12 +568,8 @@ function ekoServicesFactory() {
                 default_value: f.default_value != null ? String(f.default_value) : '',
                 placeholder: f.placeholder != null ? String(f.placeholder) : '',
                 show_in_template: sit,
-                validation_rules_json:
-                    f.validation_rules_json != null && f.validation_rules_json !== ''
-                        ? typeof f.validation_rules_json === 'string'
-                            ? f.validation_rules_json
-                            : JSON.stringify(f.validation_rules_json)
-                        : null,
+                validation: vr.validation,
+                _validationLegacyRaw: vr._validationLegacyRaw,
             };
         },
         reset() {
@@ -438,7 +622,8 @@ function ekoServicesFactory() {
                 default_value: '',
                 placeholder: '',
                 show_in_template: 1,
-                validation_rules_json: null,
+                validation: window.ekoSampaFieldValidation.emptyValidationState(),
+                _validationLegacyRaw: null,
             };
         },
         /**
@@ -514,18 +699,16 @@ function ekoServicesFactory() {
                     show_in_template: parseInt(String(this.state.fieldForm.show_in_template), 10) ? 1 : 0,
                 })
             );
-            let rulesPayload = this.state.fieldForm.validation_rules_json;
-            if (rulesPayload != null && rulesPayload !== '') {
-                if (typeof rulesPayload === 'string') {
-                    try {
-                        body.validation_rules_json = JSON.parse(rulesPayload.trim() || 'null');
-                    } catch (e) {
-                        this.error = 'Validation rules must be valid JSON object or empty.';
-                        return;
-                    }
-                } else {
-                    body.validation_rules_json = rulesPayload;
-                }
+            const vr = window.ekoSampaFieldValidation.buildRestValidationPayload(this.state.fieldForm);
+            if (vr === false) {
+                this.error =
+                    'This field has stored validation rules that are not valid JSON. Fix or clear them in the database, then reload.';
+                return;
+            }
+            if (this.state.fieldForm.id) {
+                body.validation_rules_json = vr;
+            } else if (vr !== null) {
+                body.validation_rules_json = vr;
             }
             try {
                 if (this.state.fieldForm.id) {
