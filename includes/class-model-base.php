@@ -161,6 +161,69 @@ abstract class Eko_Sampa_Model_Base {
     }
 
     /**
+     * Clear cached SHOW COLUMNS maps (call after schema migrations).
+     */
+    public static function clear_table_column_map_cache(): void {
+        self::$eko_sampa_table_column_map_cache = [];
+    }
+
+    /**
+     * When SHOW COLUMNS fails, only allow columns from the original baseline schema (safe INSERT).
+     *
+     * @return array<int, string>
+     */
+    protected function table_fallback_column_allowlist(): array {
+        return match ($this->table_suffix()) {
+            'eko_sampa_fields' => [
+                'service_id',
+                'label',
+                'slug',
+                'type',
+                'required',
+                'options_json',
+                'sort_order',
+            ],
+            'eko_sampa_orders' => [
+                'user_id',
+                'client_id',
+                'service_id',
+                'template_id',
+                'woo_order_id',
+                'status',
+                'dynamic_data_json',
+                'print_ready',
+            ],
+            default => [],
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    private function filter_row_to_allowlist(array $row, array $allow): array {
+        if ($allow === []) {
+            return $row;
+        }
+
+        $set = [];
+        foreach ($allow as $col) {
+            $set[ strtolower((string) $col) ] = true;
+        }
+
+        $out = [];
+        foreach ($row as $key => $val) {
+            $lk = strtolower((string) $key);
+            if (isset($set[ $lk ])) {
+                $out[ $key ] = $val;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Remove keys that are not real table columns so INSERT/UPDATE survives when DB migrations lag behind plugin code.
      *
      * @param array<string, mixed> $row
@@ -170,7 +233,7 @@ abstract class Eko_Sampa_Model_Base {
     protected function filter_row_to_existing_columns(array $row): array {
         $map = $this->table_column_name_map();
         if ($map === []) {
-            return $row;
+            return $this->filter_row_to_allowlist($row, $this->table_fallback_column_allowlist());
         }
 
         $out = [];

@@ -314,6 +314,7 @@ final class Eko_Sampa_Assets {
                             'editor' => Eko_Sampa_Frontend_Router::get_url('editor'),
                             'print'  => Eko_Sampa_Frontend_Router::get_url('print'),
                         ],
+                        'crud'           => Eko_Sampa_Frontend_Router::current_crud_context(),
                     ]
                 );
             }
@@ -496,7 +497,11 @@ final class Eko_Sampa_Assets {
             return false;
         }
 
-        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'services';
+        if (sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) !== 'services') {
+            return false;
+        }
+
+        return Eko_Sampa_Frontend_Router::current_action() === 'edit';
     }
 
     private function should_enqueue_admin(string $hook_suffix): bool {

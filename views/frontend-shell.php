@@ -13,7 +13,9 @@ if (! defined('ABSPATH')) {
 
 require_once EKO_SAMPA_PLUGIN_DIR . 'views/partial-shell-nav-icon.php';
 
-$active = isset($GLOBALS['eko_sampa_active_view']) ? sanitize_key((string) $GLOBALS['eko_sampa_active_view']) : 'dashboard';
+$active       = isset($GLOBALS['eko_sampa_active_view']) ? sanitize_key((string) $GLOBALS['eko_sampa_active_view']) : 'dashboard';
+$crud_action  = isset($GLOBALS['eko_sampa_crud_action']) ? sanitize_key((string) $GLOBALS['eko_sampa_crud_action']) : 'list';
+$crud_record  = isset($GLOBALS['eko_sampa_crud_record']) ? absint((int) $GLOBALS['eko_sampa_crud_record']) : 0;
 
 $nav = [
     [
@@ -73,6 +75,40 @@ $titles = [
     'profile'   => __('Profile', 'eko-sampa'),
 ];
 $page_title = $titles[ $active ] ?? __('Eko Sampa', 'eko-sampa');
+if (in_array($active, ['clients', 'services', 'templates', 'orders'], true)) {
+    $page_title = match ($crud_action) {
+        'new'  => match ($active) {
+            'clients'   => __('New client', 'eko-sampa'),
+            'services'  => __('New service', 'eko-sampa'),
+            'templates' => __('New template', 'eko-sampa'),
+            'orders'    => __('New order', 'eko-sampa'),
+            default     => $page_title,
+        },
+        'view' => match ($active) {
+            'clients'   => __('Client details', 'eko-sampa'),
+            'services'  => __('Service details', 'eko-sampa'),
+            'templates' => __('Template details', 'eko-sampa'),
+            'orders'    => sprintf(
+                /* translators: %d: order ID */
+                __('Order #%d', 'eko-sampa'),
+                $crud_record
+            ),
+            default     => $page_title,
+        },
+        'edit' => match ($active) {
+            'clients'   => __('Edit client', 'eko-sampa'),
+            'services'  => __('Edit service', 'eko-sampa'),
+            'templates' => __('Edit template', 'eko-sampa'),
+            'orders'    => sprintf(
+                /* translators: %d: order ID */
+                __('Edit order #%d', 'eko-sampa'),
+                $crud_record
+            ),
+            default     => $page_title,
+        },
+        default => $page_title,
+    };
+}
 
 ?>
 <div

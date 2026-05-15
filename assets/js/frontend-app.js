@@ -33,6 +33,9 @@
                 if (j && j.message) {
                     msg = j.message;
                 }
+                if (j && j.data && j.data.failure_reason) {
+                    msg += ' [' + String(j.data.failure_reason) + ']';
+                }
                 if (j && j.data && j.data.db_last_error) {
                     msg += ' — ' + String(j.data.db_last_error);
                 }
@@ -50,6 +53,72 @@
 
     window.ekoSampaApi = api;
 })();
+
+/** @returns {{ mode: string, recordId: number, view: string, urls: Record<string, string> }} */
+function ekoCrudPage() {
+    const c = window.ekoSampaRest && window.ekoSampaRest.crud;
+    if (c && typeof c === 'object') {
+        return c;
+    }
+    return { mode: 'list', recordId: 0, view: '', urls: {} };
+}
+
+function ekoCrudMixin() {
+    return {
+        mode: 'list',
+        recordId: 0,
+        crudUrls: {},
+        initCrud() {
+            const p = ekoCrudPage();
+            this.mode = p.mode || 'list';
+            this.recordId = parseInt(String(p.recordId || 0), 10) || 0;
+            this.crudUrls = p.urls && typeof p.urls === 'object' ? p.urls : {};
+        },
+        resourceUrl(action, id) {
+            const u = this.crudUrls || {};
+            if (action === 'list' && u.list) {
+                return u.list;
+            }
+            if (action === 'new' && u.new) {
+                return u.new;
+            }
+            const nid = parseInt(String(id || 0), 10) || 0;
+            if (action === 'view' && nid > 0) {
+                if (u.view) {
+                    return u.view;
+                }
+                const base = (u.list || '').replace(/\/?$/, '/');
+                return base + nid + '/';
+            }
+            if (action === 'edit' && nid > 0) {
+                if (u.edit) {
+                    return u.edit;
+                }
+                const base = (u.list || '').replace(/\/?$/, '/');
+                return base + nid + '/edit/';
+            }
+            return u.list || '';
+        },
+        viewUrl(id) {
+            return this.resourceUrl('view', id);
+        },
+        editUrl(id) {
+            return this.resourceUrl('edit', id);
+        },
+        goToList() {
+            const url = this.resourceUrl('list');
+            if (url) {
+                window.location.href = url;
+            }
+        },
+        goToView(id) {
+            const url = this.viewUrl(id);
+            if (url) {
+                window.location.href = url;
+            }
+        },
+    };
+}
 
 /**
  * Aligns with PHP {@see sanitize_title()} + lowercase for dynamic_data / template placeholder keys.
@@ -288,9 +357,10 @@ function ekoShellFactory() {
 }
 
 function ekoClientsFactory() {
-    return {
+    return Object.assign({}, ekoCrudMixin(), {
         state: {
             rows: [],
+            record: {},
             page: 1,
             pageSize: 30,
             hasNext: false,
@@ -303,6 +373,7 @@ function ekoClientsFactory() {
         error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
+            this.initCrud();
             if (this.isAdmin) {
                 try {
                     this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
@@ -310,9 +381,40 @@ function ekoClientsFactory() {
                     this.state.users = [];
                 }
             }
-            await this.load();
+            if (this.mode === 'list') {
+                await this.load();
+                return;
+            }
+            if (this.mode === 'new') {
+                this.reset();
+                return;
+            }
+            await this.loadRecord();
+        },
+        async loadRecord() {
+            if (!this.recordId) {
+                this.error = 'Invalid record.';
+                return;
+            }
+            this.loading = true;
+            this.error = null;
+            try {
+                const row = await window.ekoSampaApi('clients/' + this.recordId, { method: 'GET' });
+                if (this.mode === 'view') {
+                    this.state.record = row && typeof row === 'object' ? row : {};
+                } else {
+                    this.state.form = Object.assign({ user_id: '' }, row);
+                }
+            } catch (e) {
+                this.error = String(e.message || e);
+            } finally {
+                this.loading = false;
+            }
         },
         async load() {
+            if (this.mode !== 'list') {
+                return;
+            }
             this.loading = true;
             this.error = null;
             const ps = this.state.pageSize;
@@ -351,9 +453,6 @@ function ekoClientsFactory() {
             this.state.page++;
             this.load();
         },
-        edit(row) {
-            this.state.form = Object.assign({ user_id: '' }, row);
-        },
         reset() {
             this.state.form = { id: 0, nome: '', email: '', telefone: '', documento: '', cidade: '', estado: '', user_id: '' };
         },
@@ -362,16 +461,21 @@ function ekoClientsFactory() {
             const payload = { ...this.state.form };
             delete payload.id;
             try {
-                if (this.state.form.id) {
-                    await window.ekoSampaApi('clients/' + this.state.form.id, { method: 'PATCH', body: payload });
+                let id = parseInt(String(this.state.form.id || 0), 10);
+                if (id) {
+                    await window.ekoSampaApi('clients/' + id, { method: 'PATCH', body: payload });
                 } else {
                     if (this.isAdmin && this.state.form.user_id) {
                         payload.user_id = parseInt(String(this.state.form.user_id), 10);
                     }
-                    await window.ekoSampaApi('clients', { method: 'POST', body: payload });
+                    const created = await window.ekoSampaApi('clients', { method: 'POST', body: payload });
+                    id = created && created.id ? parseInt(String(created.id), 10) : 0;
                 }
-                this.reset();
-                await this.load();
+                if (id) {
+                    this.goToView(id);
+                } else {
+                    this.goToList();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
@@ -382,18 +486,19 @@ function ekoClientsFactory() {
             }
             try {
                 await window.ekoSampaApi('clients/' + id, { method: 'DELETE' });
-                await this.load();
+                this.goToList();
             } catch (e) {
                 this.error = String(e.message || e);
             }
         },
-    };
+    });
 }
 
 function ekoServicesFactory() {
-    return {
+    return Object.assign({}, ekoCrudMixin(), {
         state: {
             rows: [],
+            record: {},
             fields: [],
             page: 1,
             pageSize: 30,
@@ -423,6 +528,7 @@ function ekoServicesFactory() {
         error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
+            this.initCrud();
             if (this.isAdmin) {
                 try {
                     this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
@@ -430,9 +536,52 @@ function ekoServicesFactory() {
                     this.state.users = [];
                 }
             }
-            await this.load();
+            if (this.mode === 'list') {
+                await this.load();
+                return;
+            }
+            if (this.mode === 'new') {
+                this.reset();
+                return;
+            }
+            if (this.mode === 'view') {
+                await this.loadRecord();
+                if (this.recordId) {
+                    await this.loadFields(this.recordId, { silent: true });
+                }
+                return;
+            }
+            if (this.mode === 'edit') {
+                await this.loadRecord();
+            }
+        },
+        async loadRecord() {
+            if (!this.recordId) {
+                this.error = 'Invalid record.';
+                return;
+            }
+            this.loading = true;
+            this.error = null;
+            try {
+                const row = await window.ekoSampaApi('services/' + this.recordId, { method: 'GET' });
+                if (this.mode === 'view') {
+                    this.state.record = row && typeof row === 'object' ? row : {};
+                } else {
+                    this.state.form = Object.assign({ is_global: 0 }, row);
+                    this.state.form.id = parseInt(String(this.state.form.id || row.id || 0), 10) || 0;
+                    await this.loadFields(this.state.form.id);
+                    this.newField();
+                }
+            } catch (e) {
+                this.error = String(e.message || e);
+            } finally {
+                this.loading = false;
+            }
         },
         async load() {
+            if (this.mode !== 'list') {
+                return;
+            }
             this.loading = true;
             this.error = null;
             const ps = this.state.pageSize;
@@ -533,12 +682,6 @@ function ekoServicesFactory() {
                 },
             });
         },
-        edit(row) {
-            this.destroyFieldSortable();
-            this.state.form = Object.assign({ is_global: 0 }, row);
-            this.loadFields(row.id);
-            this.newField();
-        },
         editField(f) {
             if (!f || !this.state.form.id) {
                 return;
@@ -584,13 +727,22 @@ function ekoServicesFactory() {
                 payload.is_global = parseInt(String(this.state.form.is_global), 10) ? 1 : 0;
             }
             try {
-                if (this.state.form.id) {
-                    await window.ekoSampaApi('services/' + this.state.form.id, { method: 'PATCH', body: payload });
+                let id = parseInt(String(this.state.form.id || 0), 10);
+                if (id) {
+                    await window.ekoSampaApi('services/' + id, { method: 'PATCH', body: payload });
                 } else {
-                    await window.ekoSampaApi('services', { method: 'POST', body: payload });
+                    const created = await window.ekoSampaApi('services', { method: 'POST', body: payload });
+                    id = created && created.id ? parseInt(String(created.id), 10) : 0;
                 }
-                this.reset();
-                await this.load();
+                if (id) {
+                    if (this.mode === 'new') {
+                        window.location.href = this.editUrl(id);
+                    } else {
+                        this.goToView(id);
+                    }
+                } else {
+                    this.goToList();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
@@ -601,7 +753,7 @@ function ekoServicesFactory() {
             }
             try {
                 await window.ekoSampaApi('services/' + id, { method: 'DELETE' });
-                await this.load();
+                this.goToList();
             } catch (e) {
                 this.error = String(e.message || e);
             }
@@ -642,8 +794,9 @@ function ekoServicesFactory() {
                 .replace(/^-+|-+$/g, '');
         },
         async saveField() {
-            const sid = this.state.form.id;
+            const sid = parseInt(String(this.state.form.id || 0), 10);
             if (!sid) {
+                this.error = 'Save the service first before adding dynamic fields.';
                 return;
             }
             if (!this.state.fieldForm.label || !this.state.fieldForm.slug) {
@@ -734,13 +887,16 @@ function ekoServicesFactory() {
                 this.error = String(e.message || e);
             }
         },
-    };
+    });
 }
 
 function ekoTemplatesFactory() {
-    return {
+    return Object.assign({}, ekoCrudMixin(), {
         state: {
             rows: [],
+            record: {},
+            placeholders: [],
+            elementCount: 0,
             page: 1,
             pageSize: 30,
             hasNext: false,
@@ -765,6 +921,7 @@ function ekoTemplatesFactory() {
         error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
+            this.initCrud();
             if (this.isAdmin) {
                 try {
                     this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
@@ -772,9 +929,64 @@ function ekoTemplatesFactory() {
                     this.state.users = [];
                 }
             }
-            await this.load();
+            if (this.mode === 'list') {
+                await this.load();
+                return;
+            }
+            if (this.mode === 'new') {
+                this.reset();
+                return;
+            }
+            await this.loadRecord();
+        },
+        parseElementCount(jsonData) {
+            if (!jsonData || typeof jsonData !== 'object') {
+                return 0;
+            }
+            const els = jsonData.elements;
+            return Array.isArray(els) ? els.length : 0;
+        },
+        async loadRecord() {
+            if (!this.recordId) {
+                this.error = 'Invalid record.';
+                return;
+            }
+            this.loading = true;
+            this.error = null;
+            try {
+                const row = await window.ekoSampaApi('templates/' + this.recordId, { method: 'GET' });
+                if (this.mode === 'view') {
+                    this.state.record = row && typeof row === 'object' ? row : {};
+                    this.state.elementCount = this.parseElementCount(this.state.record.json_data);
+                    try {
+                        const ph = await window.ekoSampaApi('templates/' + this.recordId + '/placeholders', { method: 'GET' });
+                        this.state.placeholders =
+                            ph && typeof ph === 'object' && Array.isArray(ph.placeholders) ? ph.placeholders : [];
+                    } catch (e) {
+                        this.state.placeholders = [];
+                    }
+                } else {
+                    this.applyFormRow(row);
+                }
+            } catch (e) {
+                this.error = String(e.message || e);
+            } finally {
+                this.loading = false;
+            }
+        },
+        applyFormRow(row) {
+            const r = Object.assign({ user_id: '' }, row);
+            r.product_id = r.product_id != null ? parseInt(String(r.product_id), 10) : 0;
+            r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
+            r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
+            r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
+            r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
+            this.state.form = r;
         },
         async load() {
+            if (this.mode !== 'list') {
+                return;
+            }
             this.loading = true;
             this.error = null;
             const ps = this.state.pageSize;
@@ -837,13 +1049,14 @@ function ekoTemplatesFactory() {
         async duplicate(id) {
             try {
                 await window.ekoSampaApi('templates/' + id + '/duplicate', { method: 'POST' });
-                await this.load();
+                if (this.mode === 'list') {
+                    await this.load();
+                } else {
+                    this.goToList();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
-        },
-        async preview(id) {
-            window.open(this.editorUrl(id), '_blank');
         },
         reset() {
             this.state.form = {
@@ -869,28 +1082,27 @@ function ekoTemplatesFactory() {
             payload.product_id = parseInt(String(payload.product_id || 0), 10);
             payload.preview_image = payload.preview_image != null ? String(payload.preview_image) : '';
             try {
-                if (this.state.form.id) {
-                    await window.ekoSampaApi('templates/' + this.state.form.id, { method: 'PATCH', body: payload });
+                let id = parseInt(String(this.state.form.id || 0), 10);
+                if (id) {
+                    await window.ekoSampaApi('templates/' + id, { method: 'PATCH', body: payload });
                 } else {
                     if (this.isAdmin && this.state.form.user_id) {
                         payload.user_id = parseInt(String(this.state.form.user_id), 10);
                     }
-                    await window.ekoSampaApi('templates', { method: 'POST', body: Object.assign({ json_data: { elements: [] } }, payload) });
+                    const created = await window.ekoSampaApi('templates', {
+                        method: 'POST',
+                        body: Object.assign({ json_data: { elements: [] } }, payload),
+                    });
+                    id = created && created.id ? parseInt(String(created.id), 10) : 0;
                 }
-                this.reset();
-                await this.load();
+                if (id) {
+                    this.goToView(id);
+                } else {
+                    this.goToList();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
-        },
-        edit(row) {
-            const r = Object.assign({ user_id: '' }, row);
-            r.product_id = r.product_id != null ? parseInt(String(r.product_id), 10) : 0;
-            r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
-            r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
-            r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
-            r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
-            this.state.form = r;
         },
         async remove(id) {
             if (!window.confirm('OK?')) {
@@ -898,18 +1110,19 @@ function ekoTemplatesFactory() {
             }
             try {
                 await window.ekoSampaApi('templates/' + id, { method: 'DELETE' });
-                await this.load();
+                this.goToList();
             } catch (e) {
                 this.error = String(e.message || e);
             }
         },
-    };
+    });
 }
 
 function ekoOrdersFactory() {
-    return {
+    return Object.assign({}, ekoCrudMixin(), {
         state: {
             rows: [],
+            record: {},
             page: 1,
             pageSize: 30,
             hasNext: false,
@@ -1001,6 +1214,7 @@ function ekoOrdersFactory() {
             }
         },
         async init() {
+            this.initCrud();
             if (this.isAdmin) {
                 try {
                     this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
@@ -1008,8 +1222,30 @@ function ekoOrdersFactory() {
                     this.state.users = [];
                 }
             }
-            await this.loadLookups();
-            await this.load();
+            if (this.mode === 'list') {
+                await this.load();
+                return;
+            }
+            if (this.mode === 'new') {
+                await this.loadLookups();
+                this.reset();
+                this.bindFormWatchers();
+                return;
+            }
+            if (this.mode === 'view') {
+                await this.loadRecord();
+                if (this.recordId) {
+                    await this.fetchPreview(this.recordId);
+                }
+                return;
+            }
+            if (this.mode === 'edit') {
+                await this.loadLookups();
+                await this.loadRecord();
+                this.bindFormWatchers();
+            }
+        },
+        bindFormWatchers() {
             this.$watch('state.form.service_id', () => {
                 this.onServiceChange();
             });
@@ -1026,6 +1262,68 @@ function ekoOrdersFactory() {
                 },
                 { deep: true }
             );
+        },
+        async loadRecord() {
+            if (!this.recordId) {
+                this.error = 'Invalid record.';
+                return;
+            }
+            this.loading = true;
+            this.error = null;
+            try {
+                const row = await window.ekoSampaApi('orders/' + this.recordId, { method: 'GET' });
+                if (this.mode === 'view') {
+                    this.state.record = row && typeof row === 'object' ? row : {};
+                    if (typeof this.state.record.dynamic_data_json === 'string' && this.state.record.dynamic_data_json) {
+                        try {
+                            this.state.record.dynamic_data_json = JSON.parse(this.state.record.dynamic_data_json);
+                        } catch (e) {
+                            this.state.record.dynamic_data_json = {};
+                        }
+                    } else if (
+                        !this.state.record.dynamic_data_json ||
+                        typeof this.state.record.dynamic_data_json !== 'object'
+                    ) {
+                        this.state.record.dynamic_data_json = {};
+                    }
+                    const sid = parseInt(String(this.state.record.service_id || 0), 10);
+                    if (sid) {
+                        try {
+                            const fields = await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
+                            this.state.serviceFields = Array.isArray(fields) ? fields : [];
+                        } catch (e) {
+                            this.state.serviceFields = [];
+                        }
+                    }
+                } else {
+                    await this.applyOrderRow(row);
+                }
+            } catch (e) {
+                this.error = String(e.message || e);
+            } finally {
+                this.loading = false;
+            }
+        },
+        async applyOrderRow(row) {
+            const r = Object.assign({}, row);
+            r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
+            r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
+            r.client_id = r.client_id != null && String(r.client_id) !== '' ? parseInt(String(r.client_id), 10) : 0;
+            this.state.form = r;
+            let d = {};
+            if (typeof this.state.form.dynamic_data_json === 'string' && this.state.form.dynamic_data_json) {
+                try {
+                    d = JSON.parse(this.state.form.dynamic_data_json);
+                } catch (e) {
+                    d = {};
+                }
+            } else if (typeof this.state.form.dynamic_data_json === 'object') {
+                d = this.state.form.dynamic_data_json || {};
+            }
+            this.state.form.dynamic_data_json = d;
+            await this.$nextTick();
+            await this.onServiceChange();
+            this.schedulePreviewDraft();
         },
         async loadLookups() {
             try {
@@ -1044,6 +1342,9 @@ function ekoOrdersFactory() {
             }
         },
         async load() {
+            if (this.mode !== 'list') {
+                return;
+            }
             this.loading = true;
             this.error = null;
             const ps = this.state.pageSize;
@@ -1105,27 +1406,6 @@ function ekoOrdersFactory() {
             } catch (e) {
                 void e;
             }
-        },
-        async edit(row) {
-            const r = Object.assign({}, row);
-            r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
-            r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
-            r.client_id = r.client_id != null && String(r.client_id) !== '' ? parseInt(String(r.client_id), 10) : 0;
-            this.state.form = r;
-            let d = {};
-            if (typeof this.state.form.dynamic_data_json === 'string' && this.state.form.dynamic_data_json) {
-                try {
-                    d = JSON.parse(this.state.form.dynamic_data_json);
-                } catch (e) {
-                    d = {};
-                }
-            } else if (typeof this.state.form.dynamic_data_json === 'object') {
-                d = this.state.form.dynamic_data_json || {};
-            }
-            this.state.form.dynamic_data_json = d;
-            await this.$nextTick();
-            await this.onServiceChange();
-            this.schedulePreviewDraft();
         },
         async onServiceChange() {
             const sid = parseInt(String(this.state.form.service_id || 0), 10);
@@ -1253,13 +1533,18 @@ function ekoOrdersFactory() {
                 payload.user_id = parseInt(String(this.state.form.user_id), 10);
             }
             try {
-                if (this.state.form.id) {
-                    await window.ekoSampaApi('orders/' + this.state.form.id, { method: 'PATCH', body: payload });
+                let id = parseInt(String(this.state.form.id || 0), 10);
+                if (id) {
+                    await window.ekoSampaApi('orders/' + id, { method: 'PATCH', body: payload });
                 } else {
-                    await window.ekoSampaApi('orders', { method: 'POST', body: payload });
+                    const created = await window.ekoSampaApi('orders', { method: 'POST', body: payload });
+                    id = created && created.id ? parseInt(String(created.id), 10) : 0;
                 }
-                this.reset();
-                await this.load();
+                if (id) {
+                    this.goToView(id);
+                } else {
+                    this.goToList();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
@@ -1270,15 +1555,20 @@ function ekoOrdersFactory() {
             }
             try {
                 await window.ekoSampaApi('orders/' + id, { method: 'DELETE' });
-                await this.load();
+                this.goToList();
             } catch (e) {
                 this.error = String(e.message || e);
             }
         },
         async dup(id) {
             try {
-                await window.ekoSampaApi('orders/' + id + '/duplicate', { method: 'POST' });
-                await this.load();
+                const created = await window.ekoSampaApi('orders/' + id + '/duplicate', { method: 'POST' });
+                const nid = created && created.id ? parseInt(String(created.id), 10) : 0;
+                if (nid) {
+                    window.location.href = this.viewUrl(nid);
+                } else if (this.mode === 'list') {
+                    await this.load();
+                }
             } catch (e) {
                 this.error = String(e.message || e);
             }
@@ -1323,7 +1613,7 @@ function ekoOrdersFactory() {
                 this.state.previewSrcdoc = this.wrapPreviewSrcdoc('<p>' + msg + '</p>');
             }
         },
-    };
+    });
 }
 
 window.ekoShellFactory = ekoShellFactory;

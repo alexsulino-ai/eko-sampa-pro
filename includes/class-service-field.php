@@ -19,6 +19,13 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     /** @var bool|null Lazily set: whether wp_{prefix}eko_sampa_fields exists. */
     private static ?bool $fields_table_exists = null;
 
+    /** Last {@see create()} failure code for REST diagnostics (not persisted). */
+    private ?string $last_create_failure = null;
+
+    public function last_create_failure(): ?string {
+        return $this->last_create_failure;
+    }
+
     private function fields_table_available(): bool {
         if (self::$fields_table_exists !== null) {
             return self::$fields_table_exists;
@@ -162,20 +169,30 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
      * @param array<string, mixed> $data
      */
     public function create(int $service_id, array $data): int|false {
+        $this->last_create_failure = null;
+
         if (! $this->fields_table_available()) {
+            $this->last_create_failure = 'fields_table_missing';
+
             return false;
         }
         if (! $this->actor_may_touch_service($service_id)) {
+            $this->last_create_failure = 'service_not_accessible';
+
             return false;
         }
 
         $row = $this->sanitize_row($data, false, $service_id);
         if ($row === []) {
+            $this->last_create_failure = 'empty_field_row';
+
             return false;
         }
 
         $slug = (string) ($row['slug'] ?? '');
         if ($slug !== '' && ! $this->slug_is_available($service_id, $slug, null)) {
+            $this->last_create_failure = 'slug_not_available';
+
             return false;
         }
 
@@ -188,14 +205,27 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         }
 
         $row = $this->filter_row_to_existing_columns($row);
+        if ($row === [] || ! isset($row['service_id'], $row['label'], $row['slug'])) {
+            $this->last_create_failure = 'row_missing_required_columns';
+
+            return false;
+        }
 
         $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
         if (false === $inserted) {
+            $this->last_create_failure = 'db_insert_failed';
+
             return false;
         }
         $new_id = (int) $this->db()->insert_id;
 
-        return $new_id > 0 ? $new_id : false;
+        if ($new_id <= 0) {
+            $this->last_create_failure = 'no_insert_id';
+
+            return false;
+        }
+
+        return $new_id;
     }
 
     public function get(int $id): ?array {

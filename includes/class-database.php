@@ -46,6 +46,8 @@ final class Eko_Sampa_Database {
         }
 
         update_option(self::OPTION_DB_VERSION, EKO_SAMPA_DB_VERSION);
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
     }
 
     /**

@@ -22,6 +22,14 @@ final class Eko_Sampa_Frontend_Router {
 
     public const QUERY_ORDER_ID = 'eko_sampa_order_id';
 
+    /** @var string list|new|view|edit */
+    public const QUERY_ACTION = 'eko_sampa_action';
+
+    public const QUERY_RECORD_ID = 'eko_sampa_record_id';
+
+    /** Views that support list / new / :id / :id/edit sub-routes. */
+    private const CRUD_VIEWS = ['clients', 'services', 'templates', 'orders'];
+
     public const ACTION_LOGIN = 'eko_sampa_login';
 
     public const ACTION_LOGOUT = 'eko_sampa_logout';
@@ -46,6 +54,8 @@ final class Eko_Sampa_Frontend_Router {
         $vars[] = self::QUERY_FLAG;
         $vars[] = self::QUERY_VIEW;
         $vars[] = self::QUERY_ORDER_ID;
+        $vars[] = self::QUERY_ACTION;
+        $vars[] = self::QUERY_RECORD_ID;
 
         return $vars;
     }
@@ -74,9 +84,29 @@ final class Eko_Sampa_Frontend_Router {
                 continue;
             }
 
+            if (in_array($view, self::CRUD_VIEWS, true)) {
+                $base = 'index.php?' . self::QUERY_FLAG . '=1&' . self::QUERY_VIEW . '=' . $view;
+                add_rewrite_rule(
+                    '^' . preg_quote($slug, '/') . '/([0-9]+)/edit/?$',
+                    $base . '&' . self::QUERY_ACTION . '=edit&' . self::QUERY_RECORD_ID . '=$matches[1]',
+                    'top'
+                );
+                add_rewrite_rule(
+                    '^' . preg_quote($slug, '/') . '/([0-9]+)/?$',
+                    $base . '&' . self::QUERY_ACTION . '=view&' . self::QUERY_RECORD_ID . '=$matches[1]',
+                    'top'
+                );
+                add_rewrite_rule(
+                    '^' . preg_quote($slug, '/') . '/new/?$',
+                    $base . '&' . self::QUERY_ACTION . '=new',
+                    'top'
+                );
+            }
+
             add_rewrite_rule(
                 '^' . preg_quote($slug, '/') . '/?$',
-                'index.php?' . self::QUERY_FLAG . '=1&' . self::QUERY_VIEW . '=' . $view,
+                'index.php?' . self::QUERY_FLAG . '=1&' . self::QUERY_VIEW . '=' . $view
+                . (in_array($view, self::CRUD_VIEWS, true) ? '&' . self::QUERY_ACTION . '=list' : ''),
                 'top'
             );
         }
@@ -116,6 +146,37 @@ final class Eko_Sampa_Frontend_Router {
                 wp_die(esc_html__('Invalid print request.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 404]);
             }
         }
+
+        if (in_array($view, self::CRUD_VIEWS, true)) {
+            $action = self::current_action();
+            $rid    = self::current_record_id();
+            if (in_array($action, ['view', 'edit'], true)) {
+                if ($rid <= 0) {
+                    wp_die(esc_html__('Invalid record.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 404]);
+                }
+                if (! self::crud_record_exists($view, $rid)) {
+                    wp_die(esc_html__('Record not found.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 404]);
+                }
+            }
+            if ($action === 'new' && $rid > 0) {
+                wp_safe_redirect(self::get_resource_url($view, 'edit', $rid));
+                exit;
+            }
+        }
+    }
+
+    private static function crud_record_exists(string $view, int $id): bool {
+        if ($id <= 0) {
+            return false;
+        }
+
+        return match ($view) {
+            'clients'   => is_array((new Eko_Sampa_Client())->get($id)),
+            'services'  => is_array((new Eko_Sampa_Service())->get($id)),
+            'templates' => is_array((new Eko_Sampa_Template())->get($id)),
+            'orders'    => is_array((new Eko_Sampa_Order())->get($id)),
+            default     => false,
+        };
     }
 
     /**
@@ -220,6 +281,95 @@ final class Eko_Sampa_Frontend_Router {
         return home_url('/' . $slugs[ $view ] . '/');
     }
 
+    /**
+     * CRUD sub-route URL for clients, services, templates, or orders.
+     *
+     * @param string $view    clients|services|templates|orders
+     * @param string $action  list|new|view|edit
+     */
+    public static function get_resource_url(string $view, string $action = 'list', ?int $record_id = null): string {
+        $view   = sanitize_key($view);
+        $action = sanitize_key($action);
+        if (! in_array($view, self::CRUD_VIEWS, true)) {
+            return self::get_url($view);
+        }
+
+        $slugs = [
+            'clients'   => 'eko-sampa_clients',
+            'services'  => 'eko-sampa_services',
+            'templates' => 'eko-sampa_templates',
+            'orders'    => 'eko-sampa_orders',
+        ];
+        $slug = $slugs[ $view ];
+        $base = home_url('/' . $slug . '/');
+
+        if ($action === 'list' || $action === '') {
+            return $base;
+        }
+        if ($action === 'new') {
+            return $base . 'new/';
+        }
+        if (in_array($action, ['view', 'edit'], true) && $record_id !== null && $record_id > 0) {
+            $path = $record_id . '/';
+            if ($action === 'edit') {
+                $path .= 'edit/';
+            }
+
+            return $base . $path;
+        }
+
+        return $base;
+    }
+
+    /**
+     * @return string list|new|view|edit
+     */
+    public static function current_action(): string {
+        $view = sanitize_key((string) get_query_var(self::QUERY_VIEW));
+        if (! in_array($view, self::CRUD_VIEWS, true)) {
+            return 'list';
+        }
+        $action = sanitize_key((string) get_query_var(self::QUERY_ACTION));
+        if ($action === '') {
+            return 'list';
+        }
+        if (in_array($action, ['list', 'new', 'view', 'edit'], true)) {
+            return $action;
+        }
+
+        return 'list';
+    }
+
+    public static function current_record_id(): int {
+        return absint((int) get_query_var(self::QUERY_RECORD_ID));
+    }
+
+    /**
+     * Page context for Alpine factories (mode + record id + navigation URLs).
+     *
+     * @return array{mode: string, recordId: int, view: string, urls: array<string, string>}
+     */
+    public static function current_crud_context(): array {
+        $view   = sanitize_key((string) get_query_var(self::QUERY_VIEW));
+        $mode   = self::current_action();
+        $rid    = self::current_record_id();
+        $urls   = [
+            'list' => self::get_resource_url($view, 'list'),
+            'new'  => self::get_resource_url($view, 'new'),
+        ];
+        if ($rid > 0) {
+            $urls['view'] = self::get_resource_url($view, 'view', $rid);
+            $urls['edit'] = self::get_resource_url($view, 'edit', $rid);
+        }
+
+        return [
+            'view'     => $view,
+            'mode'     => $mode,
+            'recordId' => $rid,
+            'urls'     => $urls,
+        ];
+    }
+
     public static function logout_url(): string {
         return wp_nonce_url(
             admin_url('admin-post.php?action=' . self::ACTION_LOGOUT),
@@ -317,9 +467,11 @@ final class Eko_Sampa_Frontend_Router {
             return;
         }
 
-        $GLOBALS['eko_sampa_active_view'] = $view;
+        $GLOBALS['eko_sampa_active_view']  = $view;
+        $GLOBALS['eko_sampa_crud_action']  = self::current_action();
+        $GLOBALS['eko_sampa_crud_record']  = self::current_record_id();
         require $shell;
-        unset($GLOBALS['eko_sampa_active_view']);
+        unset($GLOBALS['eko_sampa_active_view'], $GLOBALS['eko_sampa_crud_action'], $GLOBALS['eko_sampa_crud_record']);
     }
 
     private static function current_user_may_use_app(): bool {

@@ -650,24 +650,7 @@ final class Eko_Sampa_Rest_Api {
 
         $id = $field->create($sid, $params);
         if (! $id) {
-            global $wpdb;
-            $err = isset($wpdb) && is_object($wpdb) ? trim((string) $wpdb->last_error) : '';
-            $data = array_merge(
-                ['status' => 400],
-                $this->wpdb_debug_data(),
-                $err !== '' ? ['db_last_error' => $err] : []
-            );
-            $code = 'eko_sampa_create_failed';
-            $msg  = __('Could not create field.', 'eko-sampa');
-            if ($err !== '' && (stripos($err, 'unknown column') !== false || stripos($err, "doesn't exist") !== false)) {
-                $code = 'eko_sampa_db_schema_outdated';
-                $msg  = __(
-                    'Could not create field: the database is missing recent Eko Sampa columns. Load the WordPress admin once so the plugin can finish upgrading, then try again.',
-                    'eko-sampa'
-                );
-            }
-
-            return new \WP_Error($code, $msg, $data);
+            return $this->field_create_failure_error($field);
         }
 
         return new \WP_REST_Response($field->get((int) $id), 201);
@@ -1082,6 +1065,58 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_REST_Response(['deleted' => true]);
+    }
+
+    private function field_create_failure_error(Eko_Sampa_Service_Field $field): \WP_Error {
+        $reason = (string) ($field->last_create_failure() ?? '');
+        $err    = $this->wpdb_last_error_snippet();
+        $data   = array_merge(
+            ['status' => 400, 'failure_reason' => $reason],
+            $this->wpdb_debug_data(),
+            $err !== '' ? ['db_last_error' => $err] : []
+        );
+
+        $code = 'eko_sampa_create_failed';
+        $msg  = __('Could not create field.', 'eko-sampa');
+
+        if ($reason === 'fields_table_missing') {
+            $code = 'eko_sampa_fields_table_missing';
+            $msg  = __(
+                'Dynamic fields table is missing. Open WordPress admin once to run the Eko Sampa database upgrade, then try again.',
+                'eko-sampa'
+            );
+        } elseif ($reason === 'service_not_accessible') {
+            $code = 'eko_sampa_service_not_found';
+            $msg  = __('Service not found or not allowed for your account.', 'eko-sampa');
+            $data['status'] = 404;
+        } elseif ($err !== '' && (stripos($err, 'unknown column') !== false || stripos($err, "doesn't exist") !== false)) {
+            $code = 'eko_sampa_db_schema_outdated';
+            $msg  = __(
+                'Could not create field: the database is missing recent Eko Sampa columns. Open WordPress admin once to run the upgrade, then try again.',
+                'eko-sampa'
+            );
+        } elseif ($reason === 'db_insert_failed' && $err !== '') {
+            $msg = __('Could not create field. Database reported an error (see details).', 'eko-sampa');
+        }
+
+        return new \WP_Error($code, $msg, $data);
+    }
+
+    /**
+     * @return string
+     */
+    private function wpdb_last_error_snippet(): string {
+        global $wpdb;
+        if (! isset($wpdb) || ! is_object($wpdb)) {
+            return '';
+        }
+
+        $err = trim((string) $wpdb->last_error);
+        if ($err === '') {
+            return '';
+        }
+
+        return strlen($err) > 500 ? substr($err, 0, 500) : $err;
     }
 
     /**
