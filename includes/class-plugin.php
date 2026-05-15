@@ -113,15 +113,10 @@ final class Eko_Sampa_Plugin {
     }
 
     /**
-     * Run migrations when the stored DB version is behind EKO_SAMPA_DB_VERSION.
+     * Run migrations and repair missing core tables when the stored version is stale or incomplete.
      */
     private function maybe_upgrade_database(): void {
-        $stored = (string) get_option('eko_sampa_db_version', '0');
-        if (version_compare($stored, EKO_SAMPA_DB_VERSION, '>=')) {
-            return;
-        }
-
-        $this->database->migrate();
+        $this->database->ensure_schema();
     }
 
     public function load_textdomain_on_init(): void {

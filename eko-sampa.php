@@ -3,7 +3,7 @@
  * Plugin Name:       Eko Sampa
  * Plugin URI:        https://example.com/eko-sampa
  * Description:       Sistema modular de templates de impressão para WordPress e WooCommerce.
- * Version:           1.4.6
+ * Version:           1.4.7
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            Eko Sampa
@@ -23,7 +23,7 @@ if (version_compare(PHP_VERSION, '8.0.0', '<')) {
     return;
 }
 
-define('EKO_SAMPA_VERSION', '1.4.6');
+define('EKO_SAMPA_VERSION', '1.4.7');
 define('EKO_SAMPA_DB_VERSION', '1.0.3');
 
 if (! defined('EKO_SAMPA_DEBUG')) {
@@ -104,7 +104,7 @@ register_activation_hook(
         }
 
         $database = new Eko_Sampa_Database();
-        $database->migrate();
+        $database->ensure_schema();
 
         Eko_Sampa_Roles::activate();
 

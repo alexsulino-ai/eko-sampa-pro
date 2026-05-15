@@ -19,6 +19,8 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     /** @var bool|null Lazily set: whether wp_{prefix}eko_sampa_fields exists. */
     private static ?bool $fields_table_exists = null;
 
+    private static bool $schema_ensure_attempted = false;
+
     /** Last {@see create()} failure code for REST diagnostics (not persisted). */
     private ?string $last_create_failure = null;
 
@@ -26,7 +28,28 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         return $this->last_create_failure;
     }
 
+    public static function clear_fields_table_cache(): void {
+        self::$fields_table_exists = null;
+    }
+
+    private function ensure_fields_schema_once(): void {
+        if (self::$schema_ensure_attempted) {
+            return;
+        }
+        self::$schema_ensure_attempted = true;
+
+        $database = new Eko_Sampa_Database();
+        if ($database->table_exists_for_suffix('eko_sampa_fields')) {
+            return;
+        }
+
+        $database->ensure_schema();
+        self::clear_fields_table_cache();
+    }
+
     private function fields_table_available(): bool {
+        $this->ensure_fields_schema_once();
+
         if (self::$fields_table_exists !== null) {
             return self::$fields_table_exists;
         }

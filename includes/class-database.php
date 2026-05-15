@@ -23,6 +23,71 @@ final class Eko_Sampa_Database {
     private const OPTION_DB_VERSION = 'eko_sampa_db_version';
 
     /**
+     * Core tables that must exist for the plugin to function.
+     *
+     * @return list<string> Table suffix without $wpdb->prefix.
+     */
+    public function required_table_suffixes(): array {
+        return [
+            'eko_sampa_clients',
+            'eko_sampa_services',
+            'eko_sampa_fields',
+            'eko_sampa_templates',
+            'eko_sampa_layers',
+            'eko_sampa_orders',
+        ];
+    }
+
+    /**
+     * Suffixes of required tables that are not present in the database.
+     *
+     * @return list<string>
+     */
+    public function missing_required_tables(): array {
+        global $wpdb;
+
+        $missing = [];
+        foreach ($this->required_table_suffixes() as $suffix) {
+            if (! $this->table_exists($wpdb, $suffix)) {
+                $missing[] = $suffix;
+            }
+        }
+
+        return $missing;
+    }
+
+    /**
+     * Run version migrations and repair any missing core tables (e.g. option says 1.0.3 but a table was never created).
+     */
+    public function ensure_schema(): void {
+        $this->migrate();
+
+        if ($this->missing_required_tables() === []) {
+            return;
+        }
+
+        $this->repair_missing_tables();
+    }
+
+    /**
+     * Re-apply all migration steps via dbDelta / ALTER (safe when tables or columns are missing).
+     */
+    public function repair_missing_tables(): void {
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+        global $wpdb;
+        $charset_collate = $this->get_table_charset_collate($wpdb);
+
+        foreach ($this->migration_callbacks() as $callback) {
+            $callback($charset_collate);
+        }
+
+        update_option(self::OPTION_DB_VERSION, EKO_SAMPA_DB_VERSION);
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
+    }
+
+    /**
      * Run pending incremental migrations up to EKO_SAMPA_DB_VERSION.
      * Never removes tables automatically.
      */
@@ -30,6 +95,10 @@ final class Eko_Sampa_Database {
         $installed = (string) get_option(self::OPTION_DB_VERSION, '0');
 
         if (version_compare($installed, EKO_SAMPA_DB_VERSION, '>=')) {
+            if ($this->missing_required_tables() !== []) {
+                $this->repair_missing_tables();
+            }
+
             return;
         }
 
