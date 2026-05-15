@@ -24,7 +24,7 @@ if (version_compare(PHP_VERSION, '8.0.0', '<')) {
 }
 
 define('EKO_SAMPA_VERSION', '1.7.2');
-define('EKO_SAMPA_DB_VERSION', '1.0.3');
+define('EKO_SAMPA_DB_VERSION', '1.0.5');
 
 if (! defined('EKO_SAMPA_DEBUG')) {
     define('EKO_SAMPA_DEBUG', false);

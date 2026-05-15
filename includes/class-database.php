@@ -61,12 +61,64 @@ final class Eko_Sampa_Database {
      */
     public function ensure_schema(): void {
         $this->migrate();
+        $this->run_schema_alignment();
+
+        $integrity = new Eko_Sampa_Database_Integrity($this);
+        $integrity->run(false);
 
         if ($this->missing_required_tables() === []) {
             return;
         }
 
         $this->repair_missing_tables();
+        $this->run_schema_alignment();
+        $integrity->run(false);
+    }
+
+    /**
+     * Whether a row exists in a core table (existence only; no ownership scope).
+     */
+    public function row_exists(string $table_suffix, int $id): bool {
+        if ($id <= 0) {
+            return false;
+        }
+
+        $safe = preg_replace('/[^a-z0-9_]/i', '', $table_suffix);
+        if ($safe === '' || $safe !== $table_suffix) {
+            return false;
+        }
+
+        if (! in_array($safe, $this->required_table_suffixes(), true)) {
+            return false;
+        }
+
+        global $wpdb;
+        if (! $this->table_exists($wpdb, $safe)) {
+            return false;
+        }
+
+        $table = $wpdb->prefix . $safe;
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- suffix whitelisted.
+        $found = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE id = %d LIMIT 1", $id));
+
+        return $found !== null && absint((int) $found) === $id;
+    }
+
+    /**
+     * Align columns / legacy names on all core tables (idempotent).
+     */
+    public function run_schema_alignment(): void {
+        global $wpdb;
+
+        $this->schema_align_clients($wpdb);
+        $this->schema_align_services($wpdb);
+        $this->schema_align_fields($wpdb);
+        $this->schema_align_templates($wpdb);
+        $this->schema_align_layers($wpdb);
+        $this->schema_align_orders($wpdb);
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
     }
 
     /**
@@ -130,7 +182,29 @@ final class Eko_Sampa_Database {
             '1.0.1' => [$this, 'migrate_to_1_0_1'],
             '1.0.2' => [$this, 'migrate_to_1_0_2'],
             '1.0.3' => [$this, 'migrate_to_1_0_3'],
+            '1.0.4' => [$this, 'migrate_to_1_0_4'],
+            '1.0.5' => [$this, 'migrate_to_1_0_5'],
         ];
+    }
+
+    /**
+     * Add columns introduced after the stored DB version was already bumped (safe on every request).
+     */
+    private function repair_missing_column_alignments(): void {
+        global $wpdb;
+
+        if (! $this->table_exists($wpdb, 'eko_sampa_templates')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $have  = $this->table_column_set($wpdb, $table);
+        if (isset($have['client_id'])) {
+            return;
+        }
+
+        $this->schema_align_templates($wpdb);
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
     }
 
     /**
@@ -202,10 +276,11 @@ final class Eko_Sampa_Database {
 			KEY service_id (service_id)
 		{$suffix}";
 
-        // templates: id, user_id, product_id, service_id, nome, descricao, width_mm, height_mm, preview_image, json_data, created_at, updated_at
+        // templates: id, user_id, client_id, product_id, service_id, nome, descricao, width_mm, height_mm, preview_image, json_data, created_at, updated_at
         $sql_templates = "CREATE TABLE {$templates} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 			user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			client_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			product_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			service_id bigint(20) unsigned NOT NULL DEFAULT 0,
 			nome varchar(255) NOT NULL DEFAULT '',
@@ -218,6 +293,7 @@ final class Eko_Sampa_Database {
 			updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY user_id (user_id),
+			KEY client_id (client_id),
 			KEY product_id (product_id),
 			KEY service_id (service_id)
 		{$suffix}";
@@ -541,6 +617,7 @@ final class Eko_Sampa_Database {
             $table,
             [
                 'user_id'       => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'client_id'     => 'bigint(20) unsigned NOT NULL DEFAULT 0',
                 'product_id'    => 'bigint(20) unsigned NOT NULL DEFAULT 0',
                 'service_id'    => 'bigint(20) unsigned NOT NULL DEFAULT 0',
                 'nome'          => "varchar(255) NOT NULL DEFAULT ''",
@@ -549,8 +626,9 @@ final class Eko_Sampa_Database {
                 'width_mm'      => 'int(11) NOT NULL DEFAULT 0',
                 'height_mm'     => 'int(11) NOT NULL DEFAULT 0',
                 'preview_image' => "varchar(500) NOT NULL DEFAULT ''",
-                'thumbnail_version' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
-                'json_data'     => 'longtext NULL',
+                'thumbnail_version'     => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'thumbnail_visual_hash' => "varchar(16) NOT NULL DEFAULT ''",
+                'json_data'             => 'longtext NULL',
                 'created_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 'updated_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
             ]
@@ -559,6 +637,8 @@ final class Eko_Sampa_Database {
         $this->copy_column_data_if_both_exist($wpdb, $table, 'nome', 'name');
         $this->copy_column_data_if_both_exist($wpdb, $table, 'descricao', 'description');
         $this->copy_column_data_if_both_exist($wpdb, $table, 'categoria', 'category');
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'service_id', 'servico_id', true);
+        $this->copy_column_data_if_both_exist($wpdb, $table, 'client_id', 'cliente_id', true);
         $this->drop_column_if_exists($wpdb, $table, 'name');
         $this->drop_column_if_exists($wpdb, $table, 'description');
         $this->drop_column_if_exists($wpdb, $table, 'category');
@@ -645,5 +725,37 @@ final class Eko_Sampa_Database {
                 ]
             );
         }
+    }
+
+    /**
+     * Templates: client_id for order creation / ownership UX.
+     */
+    private function migrate_to_1_0_4(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        $this->schema_align_templates($wpdb);
+        $this->copy_column_data_if_both_exist(
+            $wpdb,
+            $wpdb->prefix . 'eko_sampa_templates',
+            'client_id',
+            'cliente_id',
+            true
+        );
+    }
+
+    /**
+     * Legacy FK consolidation + integrity snapshot after template service_id alignment.
+     */
+    private function migrate_to_1_0_5(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        $this->run_schema_alignment();
+
+        $integrity = new Eko_Sampa_Database_Integrity($this);
+        $integrity->run(false);
     }
 }

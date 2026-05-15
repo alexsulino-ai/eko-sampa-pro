@@ -52,6 +52,19 @@
     }
 
     window.ekoSampaApi = api;
+
+    if (typeof window.ekoSampaCan !== 'function') {
+        window.ekoSampaCan = function (ability) {
+            const caps = window.ekoSampaRest && window.ekoSampaRest.capabilities;
+            if (!caps || typeof caps !== 'object') {
+                return true;
+            }
+            if (ability == null || String(ability) === '') {
+                return true;
+            }
+            return !!caps[String(ability)];
+        };
+    }
 })();
 
 /** @returns {{ mode: string, recordId: number, view: string, urls: Record<string, string> }} */
@@ -1117,6 +1130,7 @@ function ekoTemplatesFactory() {
         thumbState: {},
         _thumbReadyBound: false,
         _thumbBackfillRunning: false,
+        _createOrderBusy: null,
         state: {
             rows: [],
             record: {},
@@ -1129,6 +1143,7 @@ function ekoTemplatesFactory() {
             cat: '',
             filterUserId: '',
             users: [],
+            clients: [],
             form: {
                 id: 0,
                 nome: '',
@@ -1136,6 +1151,7 @@ function ekoTemplatesFactory() {
                 descricao: '',
                 width_mm: 210,
                 height_mm: 297,
+                client_id: 0,
                 service_id: 0,
                 product_id: 0,
                 preview_image: '',
@@ -1160,28 +1176,48 @@ function ekoTemplatesFactory() {
             }
         },
         async init() {
-            this.initCrud();
-            if (this.mode === 'list' && !this._thumbReadyBound) {
-                this._thumbReadyBound = true;
-                document.addEventListener('eko-sampa:thumbnail-ready', (ev) => this.onThumbnailReady(ev));
-            }
-            if (this.isAdmin) {
-                try {
-                    this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
-                } catch (e) {
-                    this.state.users = [];
+            try {
+                this.initCrud();
+                if (this.mode === 'list' && !this._thumbReadyBound) {
+                    this._thumbReadyBound = true;
+                    document.addEventListener('eko-sampa:thumbnail-ready', (ev) => this.onThumbnailReady(ev));
                 }
+                if (this.isAdmin) {
+                    try {
+                        this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
+                    } catch (e) {
+                        this.state.users = [];
+                    }
+                }
+                if (this.mode === 'list') {
+                    this.initListView();
+                    await this.load();
+                    return;
+                }
+                if (this.mode === 'new') {
+                    await this.loadTemplateClients();
+                    this.reset();
+                    return;
+                }
+                await this.loadTemplateClients();
+                await this.loadRecord();
+            } catch (e) {
+                this.error = String((e && e.message) || e || 'Failed to load templates.');
+                // eslint-disable-next-line no-console
+                console.error('[ekoTemplates] init', e);
             }
-            if (this.mode === 'list') {
-                this.initListView();
-                await this.load();
-                return;
+        },
+        async loadTemplateClients() {
+            try {
+                const qs = new URLSearchParams({ limit: '500' });
+                if (this.isAdmin && this.state.filterUserId) {
+                    qs.set('filter_user_id', this.state.filterUserId);
+                }
+                const arr = await window.ekoSampaApi('clients?' + qs.toString(), { method: 'GET' });
+                this.state.clients = Array.isArray(arr) ? arr : [];
+            } catch (e) {
+                this.state.clients = [];
             }
-            if (this.mode === 'new') {
-                this.reset();
-                return;
-            }
-            await this.loadRecord();
         },
         initListView() {
             try {
@@ -1207,6 +1243,33 @@ function ekoTemplatesFactory() {
             }
             return String(r.thumbnail_url);
         },
+        thumbPlaceholderStyle(r) {
+            if (!r) {
+                return '';
+            }
+            const seed = String(r.id || r.nome || '0');
+            let h = 0;
+            for (let i = 0; i < seed.length; i++) {
+                h = (h * 31 + seed.charCodeAt(i)) % 360;
+            }
+            const hue = h;
+            return (
+                'background: linear-gradient(145deg, hsl(' +
+                hue +
+                ' 45% 94%), hsl(' +
+                hue +
+                ' 35% 88%));'
+            );
+        },
+        thumbPlaceholderLabel(r) {
+            if (!r || !r.nome) {
+                return '';
+            }
+            const parts = String(r.nome).trim().split(/\s+/);
+            const a = parts[0] ? parts[0].charAt(0) : '';
+            const b = parts[1] ? parts[1].charAt(0) : '';
+            return (a + b).toUpperCase() || '?';
+        },
         thumbLoaded(id) {
             return !!this.thumbState['l' + id];
         },
@@ -1218,6 +1281,9 @@ function ekoTemplatesFactory() {
                 return false;
             }
             const st = r.thumbnail_state || (r.has_thumbnail ? 'ready' : 'missing');
+            if (st === 'generating' || st === 'queued') {
+                return false;
+            }
             return st === 'missing' || st === 'stale' || st === 'failed';
         },
         async backfillMissingThumbnails() {
@@ -1258,10 +1324,180 @@ function ekoTemplatesFactory() {
             }
         },
         markThumbLoaded(id) {
-            this.thumbState['l' + id] = true;
+            const key = parseInt(String(id || 0), 10);
+            if (!key) {
+                return;
+            }
+            delete this.thumbState['f' + key];
+            this.thumbState['l' + key] = true;
         },
-        markThumbFailed(id) {
-            this.thumbState['f' + id] = true;
+        markThumbFailed(id, el) {
+            const key = parseInt(String(id || 0), 10);
+            if (!key) {
+                return;
+            }
+            const src = el && el.src ? String(el.src).trim() : '';
+            if (!src || src === window.location.href) {
+                return;
+            }
+            this.thumbState['f' + key] = true;
+        },
+        ensureThumbLoaded(el, id) {
+            const key = parseInt(String(id || 0), 10);
+            if (!el || !key) {
+                return;
+            }
+            if (el.complete && el.naturalWidth > 0) {
+                this.markThumbLoaded(key);
+            }
+        },
+        resetThumbStateFor(id) {
+            const key = parseInt(String(id || 0), 10);
+            if (!key) {
+                return;
+            }
+            delete this.thumbState['f' + key];
+            delete this.thumbState['l' + key];
+        },
+        previewRow() {
+            if (this.mode === 'view') {
+                return this.state.record && typeof this.state.record === 'object' ? this.state.record : {};
+            }
+            if (this.mode === 'edit') {
+                return this.state.form && typeof this.state.form === 'object' ? this.state.form : {};
+            }
+            return {};
+        },
+        orderEditUrl(id) {
+            const nid = parseInt(String(id || 0), 10);
+            if (!nid) {
+                return '';
+            }
+            let base = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.orders) || '';
+            if (typeof base !== 'string' || !base) {
+                return '/eko-sampa_orders/' + nid + '/edit/';
+            }
+            return base.replace(/\/?$/, '/') + nid + '/edit/';
+        },
+        isCreatingOrder(id) {
+            const tid = parseInt(String(id || 0), 10);
+            return tid > 0 && this._createOrderBusy === 'order-' + tid;
+        },
+        normalizeTemplateRow(row) {
+            const r = Object.assign({}, row && typeof row === 'object' ? row : {});
+            r.id = r.id != null ? parseInt(String(r.id), 10) || 0 : 0;
+            r.product_id = r.product_id != null ? parseInt(String(r.product_id), 10) : 0;
+            r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
+            r.client_id = r.client_id != null ? parseInt(String(r.client_id), 10) : 0;
+            r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
+            r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
+            r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
+            return r;
+        },
+        templateIdFromRow(row) {
+            const r = row && typeof row === 'object' ? row : {};
+            return parseInt(String(r.id || this.recordId || 0), 10) || 0;
+        },
+        canCreateOrderFrom(row) {
+            return this.templateIdFromRow(row) > 0;
+        },
+        canOrderCreate() {
+            return typeof window.ekoSampaCan === 'function' && window.ekoSampaCan('order.create');
+        },
+        async buildCreateOrderPayload(row) {
+            const tid = this.templateIdFromRow(row);
+            if (!tid) {
+                return null;
+            }
+            let template = null;
+            try {
+                template = await window.ekoSampaApi('templates/' + tid, { method: 'GET' });
+            } catch (e) {
+                const msg = String((e && e.message) || e || 'Could not load template.');
+                this.error = msg;
+                if (window.ekoSampaToast) {
+                    window.ekoSampaToast.show({ type: 'error', message: msg, duration: 6000 });
+                }
+                return null;
+            }
+            const t = this.normalizeTemplateRow(template);
+            if (this.mode === 'view') {
+                this.state.record = t;
+            } else if (this.mode === 'edit') {
+                this.state.form = Object.assign({}, this.state.form, t);
+            }
+            const sid = parseInt(String(t.service_id || 0), 10);
+            if (!sid) {
+                const msg = 'Link a service to this template before creating an order.';
+                this.error = msg;
+                if (window.ekoSampaToast) {
+                    window.ekoSampaToast.show({ type: 'error', message: msg, duration: 6000 });
+                }
+                return null;
+            }
+            return {
+                client_id: 0,
+                template_id: tid,
+                service_id: sid,
+                status: 'pending',
+                dynamic_data_json: {},
+            };
+        },
+        async createOrderFromTemplate(row) {
+            const tid = this.templateIdFromRow(row);
+            if (!tid) {
+                return;
+            }
+            const busyKey = 'order-' + tid;
+            if (this._createOrderBusy === busyKey) {
+                return;
+            }
+            this._createOrderBusy = busyKey;
+            this.error = null;
+            const toastId = 'eko-create-order-' + tid;
+            const loadingMsg = 'Creating order…';
+            if (window.ekoSampaToast) {
+                window.ekoSampaToast.show({ id: toastId, type: 'loading', message: loadingMsg, duration: 0 });
+            }
+            try {
+                const payload = await this.buildCreateOrderPayload(row);
+                if (!payload) {
+                    return;
+                }
+                if (typeof window !== 'undefined' && window.ekoSampaRest && window.ekoSampaRest.debugRest) {
+                    // eslint-disable-next-line no-console
+                    console.log('[eko] createOrder payload', payload);
+                }
+                const created = await window.ekoSampaApi('orders', {
+                    method: 'POST',
+                    body: payload,
+                });
+                const oid = created && created.id ? parseInt(String(created.id), 10) : 0;
+                if (window.ekoSampaToast) {
+                    window.ekoSampaToast.dismiss(toastId);
+                    window.ekoSampaToast.show({
+                        type: 'success',
+                        message: oid ? 'Order #' + oid + ' created.' : 'Order created.',
+                        duration: 3000,
+                    });
+                }
+                if (oid) {
+                    window.location.href = this.orderEditUrl(oid);
+                    return;
+                }
+                this.error = 'Order was created but could not open the editor.';
+            } catch (e) {
+                const msg = String(e.message || e);
+                this.error = msg;
+                if (window.ekoSampaToast) {
+                    window.ekoSampaToast.dismiss(toastId);
+                    window.ekoSampaToast.show({ type: 'error', message: msg, duration: 6000 });
+                }
+            } finally {
+                if (this._createOrderBusy === busyKey) {
+                    this._createOrderBusy = null;
+                }
+            }
         },
         formatDimensions(r) {
             const w = r && r.width_mm != null ? r.width_mm : 210;
@@ -1320,7 +1556,7 @@ function ekoTemplatesFactory() {
             try {
                 const row = await window.ekoSampaApi('templates/' + this.recordId, { method: 'GET' });
                 if (this.mode === 'view') {
-                    this.state.record = row && typeof row === 'object' ? row : {};
+                    this.state.record = this.normalizeTemplateRow(row && typeof row === 'object' ? row : {});
                     this.state.elementCount = this.parseElementCount(this.state.record.json_data);
                     try {
                         const ph = await window.ekoSampaApi('templates/' + this.recordId + '/placeholders', { method: 'GET' });
@@ -1339,12 +1575,10 @@ function ekoTemplatesFactory() {
             }
         },
         applyFormRow(row) {
-            const r = Object.assign({ user_id: '' }, row);
-            r.product_id = r.product_id != null ? parseInt(String(r.product_id), 10) : 0;
-            r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
-            r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
-            r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
-            r.service_id = r.service_id != null ? parseInt(String(r.service_id), 10) : 0;
+            const r = this.normalizeTemplateRow(Object.assign({ user_id: '' }, row));
+            if (r.user_id === undefined || r.user_id === null) {
+                r.user_id = '';
+            }
             this.state.form = r;
         },
         async load() {
@@ -1432,32 +1666,42 @@ function ekoTemplatesFactory() {
                 descricao: '',
                 width_mm: 210,
                 height_mm: 297,
+                client_id: 0,
                 service_id: 0,
                 product_id: 0,
                 preview_image: '',
                 user_id: '',
             };
         },
+        templateSavePayload() {
+            const f = this.state.form || {};
+            return {
+                nome: f.nome != null ? String(f.nome) : '',
+                categoria: f.categoria != null ? String(f.categoria) : '',
+                descricao: f.descricao != null ? String(f.descricao) : '',
+                width_mm: parseInt(String(f.width_mm || 0), 10) || 0,
+                height_mm: parseInt(String(f.height_mm || 0), 10) || 0,
+                client_id: parseInt(String(f.client_id || 0), 10) || 0,
+                service_id: parseInt(String(f.service_id || 0), 10) || 0,
+                product_id: parseInt(String(f.product_id || 0), 10) || 0,
+                preview_image: f.preview_image != null ? String(f.preview_image) : '',
+            };
+        },
         async save() {
             this.error = null;
-            const payload = { ...this.state.form };
-            delete payload.id;
-            delete payload.json_data;
-            delete payload.created_at;
-            delete payload.updated_at;
-            payload.product_id = parseInt(String(payload.product_id || 0), 10);
-            payload.preview_image = payload.preview_image != null ? String(payload.preview_image) : '';
+            const payload = this.templateSavePayload();
             try {
                 let id = parseInt(String(this.state.form.id || 0), 10);
                 if (id) {
                     await window.ekoSampaApi('templates/' + id, { method: 'PATCH', body: payload });
                 } else {
+                    const createBody = Object.assign({ json_data: { elements: [] } }, payload);
                     if (this.isAdmin && this.state.form.user_id) {
-                        payload.user_id = parseInt(String(this.state.form.user_id), 10);
+                        createBody.user_id = parseInt(String(this.state.form.user_id), 10);
                     }
                     const created = await window.ekoSampaApi('templates', {
                         method: 'POST',
-                        body: Object.assign({ json_data: { elements: [] } }, payload),
+                        body: createBody,
                     });
                     id = created && created.id ? parseInt(String(created.id), 10) : 0;
                 }

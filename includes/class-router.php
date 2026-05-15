@@ -55,6 +55,15 @@ final class Eko_Sampa_Router {
             self::EDITOR_SLUG,
             [$this, 'render_editor_canvas']
         );
+
+        add_submenu_page(
+            self::MENU_SLUG,
+            __('Diagnostics', 'eko-sampa'),
+            __('Diagnostics', 'eko-sampa'),
+            'manage_options',
+            self::MENU_SLUG . '-diagnostics',
+            [$this, 'render_diagnostics_page']
+        );
     }
 
     /**
@@ -80,6 +89,44 @@ final class Eko_Sampa_Router {
         }
 
         $view = EKO_SAMPA_PLUGIN_DIR . 'views/editor-canvas.php';
+        if (is_readable($view)) {
+            require $view;
+        }
+    }
+
+    /**
+     * Database integrity report and repair actions.
+     */
+    public function render_diagnostics_page(): void {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
+        }
+
+        $database  = new Eko_Sampa_Database();
+        $integrity = new Eko_Sampa_Database_Integrity($database);
+        $notice    = '';
+
+        if (isset($_POST['eko_sampa_integrity_action'])
+            && check_admin_referer('eko_sampa_integrity', 'eko_sampa_integrity_nonce')) {
+            $action = sanitize_key((string) wp_unslash($_POST['eko_sampa_integrity_action']));
+
+            if ($action === 'run_check') {
+                $database->ensure_schema();
+                $integrity->run(false);
+                $notice = __('Integrity check completed.', 'eko-sampa');
+            } elseif ($action === 'repair_orphans') {
+                $database->ensure_schema();
+                $integrity->run(true);
+                $notice = __('Orphan template→service links were repaired where possible.', 'eko-sampa');
+            }
+        }
+
+        $report = $integrity->last_report();
+        if ($report === []) {
+            $report = $integrity->run(false);
+        }
+
+        $view = EKO_SAMPA_PLUGIN_DIR . 'views/admin-diagnostics.php';
         if (is_readable($view)) {
             require $view;
         }

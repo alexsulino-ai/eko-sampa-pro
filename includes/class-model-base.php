@@ -63,6 +63,21 @@ abstract class Eko_Sampa_Model_Base {
     }
 
     /**
+     * Fetch a row by primary key without ownership scope (existence checks only).
+     */
+    public function get_row_by_id(int $id): ?array {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $sql  = 'SELECT * FROM ' . $this->table() . ' WHERE id = %d';
+        $prep = $this->prepare($sql, [$id]);
+        $row  = $this->db()->get_row($prep, ARRAY_A);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
      * @param array<int, int|string|float> $base_values Values for placeholders before ownership fragment.
      */
     protected function prepare(string $sql, array $base_values): string {

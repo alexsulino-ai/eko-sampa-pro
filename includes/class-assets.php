@@ -101,6 +101,10 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_EKO_THUMBNAIL_CONFIG = 'eko-sampa-thumbnail-config';
 
+    public const HANDLE_EKO_THUMBNAIL_VISUAL = 'eko-sampa-thumbnail-visual';
+
+    public const HANDLE_EKO_THUMBNAIL_HISTORY = 'eko-sampa-thumbnail-history';
+
     public const HANDLE_HTML_TO_IMAGE = 'html-to-image';
 
     public const HANDLE_EKO_THUMBNAIL_EXPORT = 'eko-sampa-thumbnail-export';
@@ -329,13 +333,16 @@ final class Eko_Sampa_Assets {
             true
         );
 
-        wp_register_script(
-            self::HANDLE_HTML_TO_IMAGE,
-            'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js',
-            [],
-            '1.11.11',
-            true
-        );
+        $html_to_image_rel = 'assets/vendor/html-to-image/html-to-image.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $html_to_image_rel)) {
+            wp_register_script(
+                self::HANDLE_HTML_TO_IMAGE,
+                $this->plugin_asset_url($html_to_image_rel),
+                [],
+                $this->plugin_asset_version($html_to_image_rel),
+                true
+            );
+        }
 
         $thumb_config_rel = 'assets/js/eko-thumbnail-config.js';
         if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_config_rel)) {
@@ -344,6 +351,28 @@ final class Eko_Sampa_Assets {
                 $this->plugin_asset_url($thumb_config_rel),
                 [],
                 $this->plugin_asset_version($thumb_config_rel),
+                true
+            );
+        }
+
+        $thumb_visual_rel = 'assets/js/eko-thumbnail-visual.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_visual_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_THUMBNAIL_VISUAL,
+                $this->plugin_asset_url($thumb_visual_rel),
+                [self::HANDLE_EKO_THUMBNAIL_CONFIG],
+                $this->plugin_asset_version($thumb_visual_rel),
+                true
+            );
+        }
+
+        $thumb_history_rel = 'assets/js/eko-thumbnail-history.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_history_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_THUMBNAIL_HISTORY,
+                $this->plugin_asset_url($thumb_history_rel),
+                [self::HANDLE_EKO_THUMBNAIL_CONFIG],
+                $this->plugin_asset_version($thumb_history_rel),
                 true
             );
         }
@@ -389,6 +418,12 @@ final class Eko_Sampa_Assets {
         $thumb_export_rel = 'assets/js/eko-thumbnail-export.js';
         if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_export_rel)) {
             $thumb_deps = [];
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_HISTORY, 'registered')) {
+                $thumb_deps[] = self::HANDLE_EKO_THUMBNAIL_HISTORY;
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_VISUAL, 'registered')) {
+                $thumb_deps[] = self::HANDLE_EKO_THUMBNAIL_VISUAL;
+            }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
                 $thumb_deps[] = self::HANDLE_EKO_THUMBNAIL_CONFIG;
             }
@@ -521,6 +556,7 @@ final class Eko_Sampa_Assets {
                         'urls'           => [
                             'editor' => Eko_Sampa_Frontend_Router::get_url('editor'),
                             'print'  => Eko_Sampa_Frontend_Router::get_url('print'),
+                            'orders' => Eko_Sampa_Frontend_Router::get_resource_url('orders', 'list'),
                         ],
                         'crud'           => Eko_Sampa_Frontend_Router::current_crud_context(),
                     ]
@@ -531,10 +567,12 @@ final class Eko_Sampa_Assets {
             }
         }
 
-        if ($this->is_frontend_templates_list_view()) {
+        if ($this->is_frontend_templates_crud_view()) {
             if (wp_style_is(self::HANDLE_EKO_TEMPLATES_GALLERY, 'registered')) {
                 wp_enqueue_style(self::HANDLE_EKO_TEMPLATES_GALLERY);
             }
+        }
+        if ($this->is_frontend_templates_list_view()) {
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
             }
@@ -544,6 +582,12 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_CONFIG);
             }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_VISUAL, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_VISUAL);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_HISTORY, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_HISTORY);
+            }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
             }
@@ -552,6 +596,18 @@ final class Eko_Sampa_Assets {
         if ($this->is_frontend_editor_view()) {
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
+            }
+            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_HTML_TO_IMAGE);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_CONFIG);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_VISUAL, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_VISUAL);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_HISTORY, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_HISTORY);
             }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
@@ -591,6 +647,9 @@ final class Eko_Sampa_Assets {
                 wp_enqueue_script(self::HANDLE_SORTABLE);
             }
         } elseif ($this->is_frontend_print_view()) {
+            if (wp_style_is(self::HANDLE_DESIGN_SYSTEM, 'registered')) {
+                wp_enqueue_style(self::HANDLE_DESIGN_SYSTEM);
+            }
             if (wp_style_is(self::HANDLE_EKO_PRINT_CSS, 'registered')) {
                 wp_enqueue_style(self::HANDLE_EKO_PRINT_CSS);
             }
@@ -764,12 +823,16 @@ final class Eko_Sampa_Assets {
         return Eko_Sampa_Frontend_Router::current_action() === 'edit';
     }
 
-    private function is_frontend_templates_list_view(): bool {
+    private function is_frontend_templates_crud_view(): bool {
         if (! $this->is_frontend_virtual_route()) {
             return false;
         }
 
-        if (sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) !== 'templates') {
+        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'templates';
+    }
+
+    private function is_frontend_templates_list_view(): bool {
+        if (! $this->is_frontend_templates_crud_view()) {
             return false;
         }
 

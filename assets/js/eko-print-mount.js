@@ -38,11 +38,18 @@
         const R = window.EkoCanvasRenderer;
 
         if (!mount || !R || !raw) {
-
             document.body.classList.add('eko-sampa-print-error');
-
+            var statusErr = document.getElementById('eko-sampa-print-status');
+            if (statusErr) {
+                if (!R) {
+                    statusErr.textContent = 'Renderer failed to load. Check console for script errors.';
+                } else if (!raw) {
+                    statusErr.textContent = 'Print data missing.';
+                } else {
+                    statusErr.textContent = 'Print mount missing.';
+                }
+            }
             return;
-
         }
 
 
@@ -69,8 +76,12 @@
 
 
 
+        var painted = false;
         const onPaint = function (ev) {
-
+            if (painted) {
+                return;
+            }
+            painted = true;
             document.body.classList.add('eko-sampa-print-ready');
 
             if (status) {
@@ -93,17 +104,18 @@
 
             }
 
-            document.removeEventListener(R.RenderLifecycle.PAINT_READY, onPaint);
-
+            if (R.RenderLifecycle && R.RenderLifecycle.PAINT_READY) {
+                document.removeEventListener(R.RenderLifecycle.PAINT_READY, onPaint);
+            }
+            document.removeEventListener('eko-sampa-print-ready', onPaint);
         };
 
 
 
         if (R.RenderLifecycle && R.RenderLifecycle.PAINT_READY) {
-
             document.addEventListener(R.RenderLifecycle.PAINT_READY, onPaint);
-
         }
+        document.addEventListener('eko-sampa-print-ready', onPaint);
 
 
 

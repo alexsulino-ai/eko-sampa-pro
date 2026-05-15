@@ -1298,8 +1298,18 @@ function ekoEditorCanvasFactory() {
                     height_mm: this.heightMm,
                     elements: this.elements,
                 });
+                const V = window.EkoThumbnailVisual;
+                if (V && typeof V.visualChecksum === 'function') {
+                    payload.visual_hash = V.visualChecksum(payload);
+                }
                 try {
-                    await Ex.captureAndUpload(id, payload, { source: 'editor_save', maxWidth: 520, quality: 0.85 });
+                    await Ex.captureAndUpload(id, payload, {
+                        source: 'editor_save',
+                        maxWidth: 520,
+                        quality: 0.85,
+                        storedVisualHash: this._lastThumbVisualHash || '',
+                        hasThumbnail: !!this._hasThumbnail,
+                    });
                 } catch (clientErr) {
                     await this.api('templates/' + id + '/thumbnail/generate', {
                         method: 'POST',

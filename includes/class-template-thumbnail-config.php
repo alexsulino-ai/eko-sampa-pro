@@ -22,12 +22,26 @@ final class Eko_Sampa_Template_Thumbnail_Config {
     /** Reject uploads larger than this (bytes). */
     public const MAX_FILE_BYTES = 512000;
 
+    /** Minimum valid JPEG size (bytes). */
+    public const MIN_FILE_BYTES = 512;
+
+    /** Minimum decoded width/height (px). */
+    public const MIN_WIDTH_PX = 8;
+
+    public const MIN_HEIGHT_PX = 8;
+
     /** Client generation timeout guidance (ms). */
     public const GENERATION_TIMEOUT_MS = 20000;
 
     public const DEBOUNCE_MS = 1200;
 
     public const MAX_RETRIES = 1;
+
+    /** Server/client generation lock TTL (seconds). */
+    public const LOCK_TTL_SECONDS = 90;
+
+    /** Ring buffer size for client debug history. */
+    public const HISTORY_MAX_ENTRIES = 20;
 
     public const SUBDIR = 'eko-sampa/templates';
 

@@ -37,6 +37,13 @@ function eko_sampa_crud_action_variants(): array {
             'btn'       => 'border-violet-200/90 bg-violet-50/90 text-violet-900',
             'btn_hover' => 'hover:border-violet-300 hover:bg-violet-100',
         ],
+        'create_order' => [
+            'label'     => __('Create order', 'eko-sampa'),
+            'title'     => __('Create order from this template', 'eko-sampa'),
+            'icon'      => '<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/>',
+            'btn'       => 'border-indigo-500/90 bg-indigo-600 text-white shadow-sm',
+            'btn_hover' => 'hover:border-indigo-600 hover:bg-indigo-700',
+        ],
         'duplicate' => [
             'label'     => __('Duplicate', 'eko-sampa'),
             'title'     => __('Duplicate record', 'eko-sampa'),
@@ -100,7 +107,9 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
         $attrs['x-show'] = (string) $args['show'];
     }
     if (! empty($args['can'])) {
-        $can_expr = "ekoSampaCan('" . esc_attr((string) $args['can']) . "')";
+        $can_expr = function_exists('eko_sampa_alpine_can_expr')
+            ? eko_sampa_alpine_can_expr((string) $args['can'])
+            : "ekoSampaCan('" . esc_attr((string) $args['can']) . "')";
         $policy   = isset($args['policy']) ? (string) $args['policy'] : 'hidden';
         if ($policy === 'disabled') {
             if ($is_button) {
@@ -120,7 +129,14 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
         $attrs[':disabled'] = (string) $args['disabled'];
     }
     if (! empty($args['loading'])) {
-        $attrs['x-bind:class'] = "((" . (string) $args['loading'] . ") ? 'opacity-50 pointer-events-none' : '')";
+        $loading_expr = (string) $args['loading'];
+        $attrs['x-bind:class'] = "((" . $loading_expr . ") ? 'opacity-50 pointer-events-none' : '')";
+        if ($is_button) {
+            $existing_disabled = isset($attrs[':disabled']) ? (string) $attrs[':disabled'] : '';
+            $attrs[':disabled'] = $existing_disabled !== ''
+                ? '(' . $existing_disabled . ') || ' . $loading_expr
+                : $loading_expr;
+        }
     }
 
     if ($is_button) {

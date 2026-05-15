@@ -45,21 +45,26 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
     <div class="eko-templates-grid" x-show="listView === 'grid' && !loading && state.rows.length" x-cloak>
         <template x-for="r in state.rows" :key="r.id">
             <article class="eko-template-card">
-                <div class="eko-template-card__thumb-wrap" @click="openZoom(r)" :title="<?php echo esc_attr__('Enlarge preview', 'eko-sampa'); ?>" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
-                    <div class="eko-template-card__thumb--skeleton" x-show="thumbnailSrc(r) && !thumbLoaded(r.id) && !thumbFailed(r.id)" x-cloak></div>
+                <div class="eko-template-card__thumb-wrap">
+                    <div class="eko-tpl-preview__frame eko-tpl-preview__frame--zoom" @click="openZoom(r)" title="<?php echo esc_attr__('Enlarge preview', 'eko-sampa'); ?>" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
+                    <div class="eko-tpl-preview__skeleton" x-show="thumbnailSrc(r) && !thumbLoaded(r.id) && !thumbFailed(r.id)" x-cloak></div>
                     <img
-                        class="eko-template-card__thumb"
+                        class="eko-tpl-preview__img eko-template-card__thumb"
                         :src="thumbnailSrc(r)"
                         :alt="r.nome"
                         loading="lazy"
                         decoding="async"
                         x-show="thumbnailSrc(r) && !thumbFailed(r.id)"
+                        x-init="ensureThumbLoaded($el, r.id)"
                         @load="markThumbLoaded(r.id)"
-                        @error="markThumbFailed(r.id)"
+                        @error="markThumbFailed(r.id, $event.target)"
                     />
-                    <div class="eko-template-card__thumb-fallback" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
-                        <svg class="mb-2 h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                        <span x-text="formatDimensions(r)"></span>
+                    <div class="eko-tpl-preview__empty" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
+                            <svg class="eko-tpl-preview__empty-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                            </svg>
+                            <span class="eko-tpl-preview__empty-label"><?php echo esc_html__('No preview', 'eko-sampa'); ?></span>
+                        </div>
                     </div>
                 </div>
                 <div class="eko-template-card__body">
@@ -67,6 +72,13 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     <p class="eko-template-card__meta" x-text="formatDimensions(r)"></p>
                     <p class="eko-template-card__meta" x-show="r.categoria" x-text="r.categoria"></p>
                     <p class="eko-template-card__meta" x-text="formatUpdated(r)"></p>
+                    <button
+                        type="button"
+                        class="eko-tpl-create-order"
+                        x-show="canOrderCreate() && canCreateOrderFrom(r)"
+                        :disabled="isCreatingOrder(r.id)"
+                        @click="createOrderFromTemplate(r)"
+                    ><?php echo esc_html__('Create order', 'eko-sampa'); ?></button>
                     <div class="eko-template-card__actions">
                         <?php
                         eko_sampa_crud_actions_render(
@@ -88,19 +100,26 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
     <div class="eko-templates-list" x-show="listView === 'list' && !loading && state.rows.length" x-cloak>
         <template x-for="r in state.rows" :key="'list-' + r.id">
             <article class="eko-template-row">
-                <div class="eko-template-row__thumb-wrap" @click="openZoom(r)" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
-                    <img
-                        x-show="thumbnailSrc(r) && !thumbFailed(r.id)"
-                        class="eko-template-row__thumb"
-                        :src="thumbnailSrc(r)"
-                        :alt="r.nome"
-                        loading="lazy"
-                        decoding="async"
-                        @load="markThumbLoaded(r.id)"
-                        @error="markThumbFailed(r.id)"
-                    />
-                    <div class="eko-template-card__thumb-fallback h-full" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
-                        <span class="text-[10px]" x-text="formatDimensions(r)"></span>
+                <div class="eko-template-row__thumb-wrap">
+                    <div class="eko-tpl-preview__frame eko-tpl-preview__frame--zoom" @click="openZoom(r)" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
+                        <div class="eko-tpl-preview__skeleton" x-show="thumbnailSrc(r) && !thumbLoaded(r.id) && !thumbFailed(r.id)" x-cloak></div>
+                        <img
+                            x-show="thumbnailSrc(r) && !thumbFailed(r.id)"
+                            class="eko-tpl-preview__img eko-template-row__thumb"
+                            :src="thumbnailSrc(r)"
+                            :alt="r.nome"
+                            loading="lazy"
+                            decoding="async"
+                            x-init="ensureThumbLoaded($el, r.id)"
+                            @load="markThumbLoaded(r.id)"
+                            @error="markThumbFailed(r.id, $event.target)"
+                        />
+                        <div class="eko-tpl-preview__empty" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
+                            <svg class="eko-tpl-preview__empty-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                            </svg>
+                            <span class="eko-tpl-preview__empty-label"><?php echo esc_html__('No preview', 'eko-sampa'); ?></span>
+                        </div>
                     </div>
                 </div>
                 <div class="eko-template-row__main">
@@ -112,6 +131,7 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     <?php
                     eko_sampa_crud_actions_render(
                         [
+                            ['type' => 'create_order', 'click' => 'createOrderFromTemplate(r)', 'can' => 'order.create', 'show' => 'canCreateOrderFrom(r)', 'loading' => 'isCreatingOrder(r.id)', 'size' => 'sm'],
                             ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm'],
                             ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm'],
                             ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm'],
@@ -128,7 +148,7 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
     <div class="eko-templates-grid" x-show="loading" x-cloak>
         <template x-for="i in 8" :key="'sk-' + i">
             <article class="eko-template-card">
-                <div class="eko-template-card__thumb-wrap"><div class="eko-template-card__thumb--skeleton"></div></div>
+                <div class="eko-template-card__thumb-wrap"><div class="eko-tpl-preview__skeleton"></div></div>
                 <div class="eko-template-card__body">
                     <div class="h-4 w-3/4 rounded bg-slate-200"></div>
                     <div class="mt-2 h-3 w-1/2 rounded bg-slate-100"></div>

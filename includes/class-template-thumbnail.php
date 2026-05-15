@@ -26,7 +26,16 @@ final class Eko_Sampa_Template_Thumbnail {
 
     public const STATE_STALE = 'stale';
 
+    /** Client pipeline states (also exposed in REST for debugging). */
+    public const STATE_IDLE = 'idle';
+
+    public const STATE_QUEUED = 'queued';
+
+    public const STATE_ABORTED = 'aborted';
+
     private const TRANSIENT_GENERATING = 'eko_sampa_thumb_gen_';
+
+    private const TRANSIENT_LOCK = 'eko_sampa_thumb_lock_';
 
     public static function uploads_subdir(): string {
         return Eko_Sampa_Template_Thumbnail_Config::SUBDIR;
@@ -61,7 +70,47 @@ final class Eko_Sampa_Template_Thumbnail {
 
         $path = self::file_path($template_id);
 
-        return $path !== '' && is_readable($path) && filesize($path) > 32;
+        $min = Eko_Sampa_Template_Thumbnail_Config::MIN_FILE_BYTES;
+
+        return $path !== '' && is_readable($path) && filesize($path) > $min;
+    }
+
+    public static function acquire_generation_lock(int $template_id): bool {
+        if ($template_id <= 0) {
+            return false;
+        }
+        $key = self::TRANSIENT_LOCK . $template_id;
+        if (get_transient($key)) {
+            return false;
+        }
+        set_transient($key, (string) time(), Eko_Sampa_Template_Thumbnail_Config::LOCK_TTL_SECONDS);
+
+        return true;
+    }
+
+    public static function release_generation_lock(int $template_id): void {
+        delete_transient(self::TRANSIENT_LOCK . $template_id);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function needs_regeneration(array $row, string $visual_hash = ''): bool {
+        $id = (int) ( $row['id'] ?? 0 );
+        if ($id <= 0) {
+            return true;
+        }
+
+        $hash = $visual_hash !== ''
+            ? $visual_hash
+            : Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        $stored = (string) ( $row['thumbnail_visual_hash'] ?? '' );
+
+        if ($hash !== '' && $stored === $hash && self::exists($id)) {
+            return false;
+        }
+
+        return true;
     }
 
     public static function public_url(int $template_id, int $version = 0): string {
@@ -122,15 +171,9 @@ final class Eko_Sampa_Template_Thumbnail {
             return self::STATE_MISSING;
         }
 
-        $file_ver = self::file_version($id);
-        $row_ver  = (int) ( $row['thumbnail_version'] ?? 0 );
-        $tpl_at   = isset($row['updated_at']) ? strtotime((string) $row['updated_at']) : false;
-
-        if ($tpl_at && $file_ver > 0 && $file_ver < (int) $tpl_at - 2) {
-            return self::STATE_STALE;
-        }
-
-        if ($row_ver > 0 && $file_ver > 0 && $row_ver !== $file_ver) {
+        $stored_visual = (string) ( $row['thumbnail_visual_hash'] ?? '' );
+        $current_visual = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        if ($stored_visual !== '' && $current_visual !== '' && $stored_visual !== $current_visual) {
             return self::STATE_STALE;
         }
 
@@ -140,26 +183,14 @@ final class Eko_Sampa_Template_Thumbnail {
     /**
      * @return true|\WP_Error
      */
-    public static function save_jpeg_binary(int $template_id, string $binary): bool|\WP_Error {
+    public static function save_jpeg_binary(int $template_id, string $binary, string $visual_hash = ''): bool|\WP_Error {
         if ($template_id <= 0) {
             return new \WP_Error('eko_sampa_thumb_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
         }
 
-        $max = Eko_Sampa_Template_Thumbnail_Config::MAX_FILE_BYTES;
-        if ($binary === '' || strlen($binary) < 32) {
-            return new \WP_Error('eko_sampa_thumb_empty', __('Thumbnail data is empty.', 'eko-sampa'), ['status' => 400]);
-        }
-
-        if (strlen($binary) > $max) {
-            return new \WP_Error(
-                'eko_sampa_thumb_large',
-                sprintf(
-                    /* translators: %d: max kilobytes */
-                    __('Thumbnail exceeds %d KB limit.', 'eko-sampa'),
-                    (int) round($max / 1024)
-                ),
-                ['status' => 413]
-            );
+        $valid = Eko_Sampa_Template_Thumbnail_Validator::validate_jpeg_binary($binary);
+        if ($valid instanceof \WP_Error) {
+            return $valid;
         }
 
         $path = self::file_path($template_id);
@@ -201,10 +232,15 @@ final class Eko_Sampa_Template_Thumbnail {
             $data['thumbnail_version'] = $version;
             $fmt[]                     = '%d';
         }
+        if ($visual_hash !== '' && self::table_has_thumbnail_visual_hash_column()) {
+            $data['thumbnail_visual_hash'] = substr($visual_hash, 0, 16);
+            $fmt[]                         = '%s';
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $wpdb->update($table, $data, ['id' => $template_id], $fmt, ['%d']);
 
         self::clear_generating($template_id);
+        self::release_generation_lock($template_id);
 
         return true;
     }
@@ -232,7 +268,7 @@ final class Eko_Sampa_Template_Thumbnail {
      *
      * @return true|\WP_Error
      */
-    public static function save_from_data_url(int $template_id, string $data_url_or_base64): bool|\WP_Error {
+    public static function save_from_data_url(int $template_id, string $data_url_or_base64, string $visual_hash = ''): bool|\WP_Error {
         $raw = trim($data_url_or_base64);
         if (str_contains($raw, 'base64,')) {
             $parts = explode('base64,', $raw, 2);
@@ -244,7 +280,7 @@ final class Eko_Sampa_Template_Thumbnail {
             return new \WP_Error('eko_sampa_thumb_decode', __('Invalid thumbnail encoding.', 'eko-sampa'), ['status' => 400]);
         }
 
-        return self::save_jpeg_binary($template_id, $binary);
+        return self::save_jpeg_binary($template_id, $binary, $visual_hash);
     }
 
     public static function delete(int $template_id): void {
@@ -272,10 +308,22 @@ final class Eko_Sampa_Template_Thumbnail {
     }
 
     private static function table_has_thumbnail_version_column(): bool {
+        return self::table_has_column('thumbnail_version');
+    }
+
+    private static function table_has_thumbnail_visual_hash_column(): bool {
+        return self::table_has_column('thumbnail_visual_hash');
+    }
+
+    private static function table_has_column(string $column): bool {
         global $wpdb;
-        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $table  = $wpdb->prefix . 'eko_sampa_templates';
+        $column = preg_replace('/[^a-z0-9_]/', '', $column) ?? '';
+        if ($column === '') {
+            return false;
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $cols = $wpdb->get_results("SHOW COLUMNS FROM `{$table}` LIKE 'thumbnail_version'", ARRAY_A);
+        $cols = $wpdb->get_results("SHOW COLUMNS FROM `{$table}` LIKE '{$column}'", ARRAY_A);
 
         return is_array($cols) && $cols !== [];
     }
@@ -313,8 +361,12 @@ final class Eko_Sampa_Template_Thumbnail {
         $state                    = self::resolve_state($row);
         $row['thumbnail_version'] = $version;
         $row['thumbnail_state']   = $state;
-        $row['has_thumbnail']     = self::exists($id);
-        $row['thumbnail_url']     = $row['has_thumbnail'] ? self::public_url($id, $version) : '';
+        $row['has_thumbnail']          = self::exists($id);
+        $row['thumbnail_url']          = $row['has_thumbnail'] ? self::public_url($id, $version) : '';
+        $row['thumbnail_visual_hash']  = (string) ( $row['thumbnail_visual_hash'] ?? '' );
+        if ($row['thumbnail_visual_hash'] === '') {
+            $row['thumbnail_visual_hash'] = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        }
 
         if ($state === self::STATE_READY && $version > 0 && is_readable(self::file_path($id))) {
             $row['thumbnail_bytes'] = (int) filesize(self::file_path($id));

@@ -53,6 +53,20 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
             return new \WP_Error('eko_sampa_thumb_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
         }
 
+        if (! Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
+            return true;
+        }
+
+        if (! Eko_Sampa_Template_Thumbnail::acquire_generation_lock($id)) {
+            return new \WP_Error(
+                'eko_sampa_thumb_locked',
+                __('Thumbnail generation already in progress.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
+        Eko_Sampa_Template_Thumbnail::mark_generating($id);
+
         $renderer = new Eko_Sampa_Template_Renderer();
         $elements = $renderer->parse_elements_from_template_row($row);
         if ($elements === []) {
@@ -97,14 +111,18 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
             imagedestroy($im);
         }
 
-        if (! is_string($binary) || strlen($binary) < 32) {
+        if (! is_string($binary)) {
+            Eko_Sampa_Template_Thumbnail::clear_generating($id);
+            Eko_Sampa_Template_Thumbnail::release_generation_lock($id);
+
             return new \WP_Error('eko_sampa_thumb_empty', __('Thumbnail render produced empty output.', 'eko-sampa'), ['status' => 500]);
         }
 
-        Eko_Sampa_Template_Thumbnail::mark_generating($id);
-        $saved = Eko_Sampa_Template_Thumbnail::save_jpeg_binary($id, $binary);
+        $visual_hash = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        $saved       = Eko_Sampa_Template_Thumbnail::save_jpeg_binary($id, $binary, $visual_hash);
         if ($saved instanceof \WP_Error) {
             Eko_Sampa_Template_Thumbnail::clear_generating($id);
+            Eko_Sampa_Template_Thumbnail::release_generation_lock($id);
 
             return $saved;
         }

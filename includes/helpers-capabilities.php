@@ -32,6 +32,7 @@ function eko_sampa_frontend_capabilities(): array {
         'template.duplicate' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
         'template.delete' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
         'order.view'      => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
+        'order.create'    => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
         'order.edit'      => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
         'order.print'     => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
         'order.duplicate' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
@@ -51,4 +52,13 @@ function eko_sampa_user_can(string $ability): bool {
     $caps = eko_sampa_frontend_capabilities();
 
     return ! empty($caps[ $ability ]);
+}
+
+/**
+ * Safe Alpine expression for capability checks (never throws if ekoSampaCan is missing).
+ */
+function eko_sampa_alpine_can_expr(string $ability): string {
+    $ability = esc_attr($ability);
+
+    return "(typeof window.ekoSampaCan === 'function' ? window.ekoSampaCan('" . $ability . "') : true)";
 }

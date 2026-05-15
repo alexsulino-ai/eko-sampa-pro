@@ -1,25 +1,18 @@
 /**
- * Thumbnail queue + capture via EkoCanvasRenderer (clean THUMBNAIL target) + html-to-image.
+ * Thumbnail pipeline: queue, lock, abort, visual checksum, raster adapters, history.
  */
 (function (global) {
     'use strict';
 
-    const CFG = global.EkoThumbnailConfig || {
-        MAX_WIDTH_PX: 520,
-        JPEG_QUALITY: 0.85,
-        MAX_FILE_BYTES: 512000,
-        GENERATION_TIMEOUT_MS: 20000,
-        DEBOUNCE_MS: 1200,
-        MAX_RETRIES: 1,
-    };
-
-    const log = {
-        debug() {
-            if (!global.EKO_RENDER_DEBUG && !global.EkoCanvasRenderer?.isRenderDebug?.()) {
-                return;
-            }
-            // eslint-disable-next-line no-console
-            console.log.apply(console, ['[EkoThumbnail]'].concat(Array.prototype.slice.call(arguments)));
+    const CFG = global.EkoThumbnailConfig || {};
+    const LC = global.EkoThumbnailLifecycle || {};
+    const History = global.EkoThumbnailHistoryStore || { push() {}, setLifecycle() {} };
+    const Visual = global.EkoThumbnailVisual || {
+        visualChecksum() {
+            return '';
+        },
+        payloadFromTemplateRow(r) {
+            return r;
         },
     };
 
@@ -27,88 +20,210 @@
         return new Promise((resolve) => requestAnimationFrame(() => resolve()));
     }
 
+    function logDebug() {
+        if (!global.EKO_RENDER_DEBUG && !global.EkoCanvasRenderer?.isRenderDebug?.()) {
+            return;
+        }
+        // eslint-disable-next-line no-console
+        console.log.apply(console, ['[EkoThumbnail]'].concat(Array.prototype.slice.call(arguments)));
+    }
+
+    function classifyError(err) {
+        const msg = String((err && err.message) || err || '').toLowerCase();
+        if (err && err.name === 'AbortError') {
+            return { retryable: false, kind: 'aborted' };
+        }
+        if (msg.indexOf('aborted') !== -1 || msg.indexOf('abort') !== -1) {
+            return { retryable: false, kind: 'aborted' };
+        }
+        if (msg.indexOf('timeout') !== -1 || msg.indexOf('network') !== -1 || msg.indexOf('fetch') !== -1) {
+            return { retryable: true, kind: 'network' };
+        }
+        if (msg.indexOf('asset') !== -1 || msg.indexOf('image') !== -1 && msg.indexOf('load') !== -1) {
+            return { retryable: true, kind: 'asset' };
+        }
+        if (
+            msg.indexOf('empty') !== -1 ||
+            msg.indexOf('invalid') !== -1 ||
+            msg.indexOf('unavailable') !== -1 ||
+            msg.indexOf('mount') !== -1 ||
+            msg.indexOf('exceeds') !== -1
+        ) {
+            return { retryable: false, kind: 'fatal' };
+        }
+        return { retryable: false, kind: 'unknown' };
+    }
+
+    /** Per-template generation slot (lock + abort). */
+    const slots = new Map();
+
+    function getSlot(templateId) {
+        const id = parseInt(String(templateId), 10);
+        if (!slots.has(id)) {
+            slots.set(id, {
+                id: id,
+                lifecycle: LC.IDLE || 'idle',
+                runId: 0,
+                abortController: null,
+                lock: false,
+            });
+        }
+        return slots.get(id);
+    }
+
+    function setSlotLifecycle(templateId, state, extra) {
+        const slot = getSlot(templateId);
+        slot.lifecycle = state;
+        History.setLifecycle(templateId, state, extra);
+        try {
+            document.dispatchEvent(
+                new CustomEvent('eko-sampa:thumbnail-lifecycle', {
+                    detail: { templateId: templateId, state: state, extra: extra || {} },
+                })
+            );
+        } catch (e) {
+            void e;
+        }
+    }
+
+    function abortSlot(templateId, reason) {
+        const slot = getSlot(templateId);
+        if (slot.abortController) {
+            try {
+                slot.abortController.abort(reason || 'superseded');
+            } catch (e) {
+                void e;
+            }
+            slot.abortController = null;
+        }
+        if (slot.lifecycle === (LC.GENERATING || 'generating') || slot.lifecycle === (LC.QUEUED || 'queued')) {
+            setSlotLifecycle(templateId, LC.ABORTED || 'aborted', { reason: reason || 'superseded' });
+        }
+    }
+
+    function acquireSlot(templateId) {
+        const id = parseInt(String(templateId), 10);
+        abortSlot(id, 'new-run');
+        const slot = getSlot(id);
+        slot.runId += 1;
+        const runId = slot.runId;
+        slot.abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        slot.lock = true;
+        return { id: id, runId: runId, signal: slot.abortController ? slot.abortController.signal : null };
+    }
+
+    function releaseSlot(templateId, runId) {
+        const slot = getSlot(templateId);
+        if (slot.runId === runId) {
+            slot.lock = false;
+            slot.abortController = null;
+        }
+    }
+
+    function isRunCurrent(templateId, runId) {
+        return getSlot(templateId).runId === runId;
+    }
+
+    function throwIfAborted(signal) {
+        if (signal && signal.aborted) {
+            const err = new Error('thumbnail aborted');
+            err.name = 'AbortError';
+            throw err;
+        }
+    }
+
     function getHtmlToImageLib() {
         if (global.htmlToImage && typeof global.htmlToImage.toJpeg === 'function') {
             return global.htmlToImage;
         }
-        if (global.htmlToImage && global.htmlToImage.default && typeof global.htmlToImage.default.toJpeg === 'function') {
+        if (global.htmlToImage?.default && typeof global.htmlToImage.default.toJpeg === 'function') {
             return global.htmlToImage.default;
         }
         return null;
     }
 
-    function payloadFromTemplateRow(row) {
-        const r = row && typeof row === 'object' ? row : {};
-        let jd = r.json_data;
-        if (typeof jd === 'string') {
+    const RasterAdapters = {
+        htmlToImage: {
+            id: 'html-to-image',
+            async capture(payload, ctx) {
+                throwIfAborted(ctx.signal);
+                return capturePayloadToJpegDom(payload, ctx);
+            },
+        },
+        server: {
+            id: 'server-gd',
+            async capture(payload, ctx) {
+                throwIfAborted(ctx.signal);
+                const id = ctx.templateId;
+                const res = await global.ekoSampaApi('templates/' + id + '/thumbnail/generate', {
+                    method: 'POST',
+                    body: {
+                        source: ctx.source || 'server_adapter',
+                        visual_hash: payload.visual_hash || Visual.visualChecksum(payload),
+                    },
+                    signal: ctx.signal,
+                });
+                return { server: true, response: res };
+            },
+        },
+    };
+
+    function cleanupCaptureHost(host, objectUrls) {
+        if (host && host.parentNode) {
+            host.remove();
+        }
+        (objectUrls || []).forEach((u) => {
             try {
-                jd = JSON.parse(jd);
+                if (u && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+                    URL.revokeObjectURL(u);
+                }
             } catch (e) {
-                jd = {};
+                void e;
             }
-        }
-        if (!jd || typeof jd !== 'object') {
-            jd = {};
-        }
-        let elements = [];
-        if (Array.isArray(jd)) {
-            elements = jd;
-        } else if (Array.isArray(jd.elements)) {
-            elements = jd.elements;
-        }
-        return {
-            width_mm: r.width_mm != null ? Number(r.width_mm) : 210,
-            height_mm: r.height_mm != null ? Number(r.height_mm) : 297,
-            elements: elements,
-        };
+        });
     }
 
-    function fingerprintPayload(payload) {
-        try {
-            return JSON.stringify(payload);
-        } catch (e) {
-            return String(Date.now());
-        }
-    }
-
-    async function captureElementToJpeg(rootEl, options) {
+    async function captureElementToJpeg(rootEl, options, signal) {
         const opts = options || {};
-        const quality = opts.quality != null ? opts.quality : CFG.JPEG_QUALITY;
-        const pixelRatio = 1;
-        const node = rootEl.querySelector('.eko-sampa-thumbnail-root') || rootEl;
         const lib = getHtmlToImageLib();
         if (!lib) {
             throw new Error('html-to-image library not loaded');
         }
-
+        const node = rootEl.querySelector('.eko-sampa-thumbnail-root') || rootEl;
         const w = Math.max(1, node.offsetWidth || parseInt(node.style.width, 10) || 1);
         const h = Math.max(1, node.offsetHeight || parseInt(node.style.height, 10) || 1);
+        throwIfAborted(signal);
         const captureOpts = {
-            quality: quality,
-            pixelRatio: pixelRatio,
+            quality: opts.quality != null ? opts.quality : CFG.JPEG_QUALITY,
+            pixelRatio: 1,
             width: w,
             height: h,
             cacheBust: true,
             backgroundColor: '#ffffff',
             skipAutoScale: true,
         };
-
         try {
             return await lib.toJpeg(node, captureOpts);
         } catch (err) {
+            const c = classifyError(err);
+            if (!c.retryable) {
+                throw err;
+            }
+            throwIfAborted(signal);
             return lib.toJpeg(node, Object.assign({}, captureOpts, { skipAutoScale: false }));
         }
     }
 
-    async function capturePayloadToJpeg(payload, options) {
+    async function capturePayloadToJpegDom(payload, ctx) {
         const R = global.EkoCanvasRenderer;
         if (!R || typeof R.runRenderPipeline !== 'function') {
             throw new Error('EkoCanvasRenderer unavailable');
         }
 
-        const opts = options || {};
+        const opts = ctx || {};
         const maxWidth = opts.maxWidth || CFG.MAX_WIDTH_PX;
         const timeoutMs = opts.timeoutMs || CFG.GENERATION_TIMEOUT_MS;
+        const signal = opts.signal;
 
         const host = document.createElement('div');
         host.setAttribute('aria-hidden', 'true');
@@ -117,21 +232,33 @@
             'position:fixed;left:0;top:0;overflow:hidden;pointer-events:none;z-index:-1;opacity:0.01;';
         document.body.appendChild(host);
 
+        let timeoutId = null;
         const timeout = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('thumbnail timeout')), timeoutMs);
+            timeoutId = setTimeout(() => reject(new Error('thumbnail timeout')), timeoutMs);
         });
 
+        const onAbort = () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        };
+        if (signal) {
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
+
         try {
+            throwIfAborted(signal);
             const pipeline = R.runRenderPipeline(host, payload, {
                 forPrint: true,
                 forThumbnail: true,
                 target: R.RenderTargets.THUMBNAIL,
                 maxWidth: maxWidth,
                 assetTimeoutMs: Math.min(15000, timeoutMs - 2000),
-                assetRetries: CFG.MAX_RETRIES,
+                assetRetries: 0,
             });
 
             await Promise.race([pipeline, timeout]);
+            throwIfAborted(signal);
             await waitFrame();
             await waitFrame();
 
@@ -140,16 +267,40 @@
                 throw new Error('thumbnail mount empty');
             }
 
-            return await captureElementToJpeg(root, { quality: opts.quality });
+            return await captureElementToJpeg(root, { quality: opts.quality }, signal);
         } finally {
-            host.remove();
+            if (signal) {
+                signal.removeEventListener('abort', onAbort);
+            }
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            cleanupCaptureHost(host, []);
         }
+    }
+
+    async function captureWithRetry(adapter, payload, ctx) {
+        const maxAttempts = 1 + (CFG.MAX_RETRIES || 0);
+        let lastErr = null;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            throwIfAborted(ctx.signal);
+            try {
+                return await adapter.capture(payload, ctx);
+            } catch (err) {
+                lastErr = err;
+                const c = classifyError(err);
+                logDebug('capture attempt fail', { adapter: adapter.id, attempt: attempt, kind: c.kind });
+                if (!c.retryable || attempt >= maxAttempts - 1) {
+                    throw err;
+                }
+            }
+        }
+        throw lastErr || new Error('capture failed');
     }
 
     const queue = {
         _pending: new Map(),
         _timers: new Map(),
-        _inflight: null,
 
         enqueue(templateId, payload, meta) {
             const id = parseInt(String(templateId), 10);
@@ -157,7 +308,26 @@
                 return Promise.resolve(null);
             }
 
-            const fp = fingerprintPayload(payload);
+            const normalized =
+                global.EkoCanvasRenderer && typeof global.EkoCanvasRenderer.normalizePayload === 'function'
+                    ? global.EkoCanvasRenderer.normalizePayload(payload)
+                    : payload;
+            normalized.visual_hash = normalized.visual_hash || Visual.visualChecksum(normalized);
+
+            const storedHash = meta && meta.storedVisualHash ? String(meta.storedVisualHash) : '';
+            if (storedHash && storedHash === normalized.visual_hash && meta.hasThumbnail) {
+                logDebug('skip unchanged visual', { id: id, hash: storedHash });
+                History.push({
+                    templateId: id,
+                    lifecycle: LC.READY || 'ready',
+                    skipped: true,
+                    visual_hash: storedHash,
+                    source: (meta && meta.source) || 'skip',
+                });
+                return Promise.resolve(meta.row || { skipped: true, thumbnail_visual_hash: storedHash });
+            }
+
+            const fp = normalized.visual_hash;
             const existing = this._pending.get(id);
             if (existing && existing.fp === fp && existing.promise) {
                 return existing.promise;
@@ -167,11 +337,13 @@
                 clearTimeout(this._timers.get(id));
             }
 
+            setSlotLifecycle(id, LC.QUEUED || 'queued', { source: (meta && meta.source) || '' });
+
             const promise = new Promise((resolve, reject) => {
                 const timer = setTimeout(() => {
                     this._timers.delete(id);
-                    this._run(id, payload, meta).then(resolve).catch(reject);
-                }, CFG.DEBOUNCE_MS);
+                    this._run(id, normalized, meta).then(resolve).catch(reject);
+                }, CFG.DEBOUNCE_MS || 1200);
                 this._timers.set(id, timer);
             });
 
@@ -181,57 +353,83 @@
 
         async _run(templateId, payload, meta) {
             const id = parseInt(String(templateId), 10);
-            if (this._inflight && this._inflight.id === id) {
-                return this._inflight.promise;
-            }
-
+            const runCtx = acquireSlot(id);
             const started = performance.now();
             const source = (meta && meta.source) || 'unknown';
-            log.debug('generate start', { id: id, source: source });
 
-            const run = (async () => {
-                const R = global.EkoCanvasRenderer;
-                const normalized =
-                    R && typeof R.normalizePayload === 'function' ? R.normalizePayload(payload) : payload;
+            setSlotLifecycle(id, LC.GENERATING || 'generating', { source: source, runId: runCtx.runId });
+            logDebug('generate start', { id: id, source: source, hash: payload.visual_hash });
 
-                const dataUrl = await capturePayloadToJpeg(normalized, {
-                    maxWidth: CFG.MAX_WIDTH_PX,
-                    quality: CFG.JPEG_QUALITY,
-                });
+            try {
+                let uploadResult = null;
+                let adapterUsed = '';
 
-                const byteLen = dataUrl ? Math.max(0, Math.round((dataUrl.length - 22) * 0.75)) : 0;
-                if (byteLen > CFG.MAX_FILE_BYTES) {
-                    throw new Error('thumbnail exceeds max file size');
+                try {
+                    const domResult = await captureWithRetry(RasterAdapters.htmlToImage, payload, {
+                        templateId: id,
+                        source: source,
+                        signal: runCtx.signal,
+                        maxWidth: CFG.MAX_WIDTH_PX,
+                        quality: CFG.JPEG_QUALITY,
+                    });
+                    if (!isRunCurrent(id, runCtx.runId)) {
+                        throw Object.assign(new Error('thumbnail aborted'), { name: 'AbortError' });
+                    }
+
+                    const dataUrl = domResult;
+                    const byteLen = dataUrl ? Math.max(0, Math.round((dataUrl.length - 22) * 0.75)) : 0;
+                    if (byteLen < (CFG.MIN_FILE_BYTES || 512)) {
+                        throw new Error('thumbnail empty blob');
+                    }
+                    if (byteLen > CFG.MAX_FILE_BYTES) {
+                        throw new Error('thumbnail exceeds max file size');
+                    }
+
+                    adapterUsed = RasterAdapters.htmlToImage.id;
+                    uploadResult = await global.ekoSampaApi('templates/' + id + '/thumbnail', {
+                        method: 'POST',
+                        body: {
+                            image: dataUrl,
+                            source: source,
+                            visual_hash: payload.visual_hash,
+                            duration_ms: Math.round(performance.now() - started),
+                        },
+                        signal: runCtx.signal,
+                    });
+                } catch (clientErr) {
+                    const cc = classifyError(clientErr);
+                    if (cc.kind === 'aborted' || !isRunCurrent(id, runCtx.runId)) {
+                        throw clientErr;
+                    }
+                    logDebug('client capture failed, server fallback', { id: id, err: String(clientErr) });
+                    const serverResult = await captureWithRetry(RasterAdapters.server, payload, {
+                        templateId: id,
+                        source: source + '_server',
+                        signal: runCtx.signal,
+                    });
+                    adapterUsed = RasterAdapters.server.id;
+                    uploadResult = serverResult.response;
                 }
 
-                const res = await global.ekoSampaApi('templates/' + id + '/thumbnail', {
-                    method: 'POST',
-                    body: {
-                        image: dataUrl,
-                        source: source,
-                        duration_ms: Math.round(performance.now() - started),
-                    },
-                });
+                if (!isRunCurrent(id, runCtx.runId)) {
+                    throw Object.assign(new Error('thumbnail aborted'), { name: 'AbortError' });
+                }
 
                 const elapsed = Math.round(performance.now() - started);
-                log.debug('generate ok', { id: id, ms: elapsed, bytes: byteLen, source: source });
-
-                if (global.EKO_RENDER_DEBUG || global.EkoCanvasRenderer?.isRenderDebug?.()) {
-                    global.EkoThumbnailDebug = {
-                        templateId: id,
-                        state: 'ready',
-                        version: res && res.thumbnail_version ? res.thumbnail_version : null,
-                        durationMs: elapsed,
-                        bytes: byteLen,
-                        source: source,
-                        at: new Date().toISOString(),
-                    };
-                }
+                History.push({
+                    templateId: id,
+                    lifecycle: LC.READY || 'ready',
+                    ms: elapsed,
+                    adapter: adapterUsed,
+                    visual_hash: payload.visual_hash,
+                    source: source,
+                });
+                setSlotLifecycle(id, LC.READY || 'ready', { ms: elapsed });
 
                 try {
                     document.dispatchEvent(
                         new CustomEvent('eko-sampa:thumbnail-ready', {
-                            detail: { templateId: id, response: res },
+                            detail: { templateId: id, response: uploadResult },
                         })
                     );
                 } catch (e2) {
@@ -239,29 +437,22 @@
                 }
 
                 this._pending.delete(id);
-                return res;
-            })().catch((err) => {
-                log.debug('generate fail', { id: id, err: String(err), source: source });
-                if (global.EKO_RENDER_DEBUG || global.EkoCanvasRenderer?.isRenderDebug?.()) {
-                    global.EkoThumbnailDebug = {
-                        templateId: id,
-                        state: 'failed',
-                        error: String(err),
-                        source: source,
-                        at: new Date().toISOString(),
-                    };
+                return uploadResult;
+            } catch (err) {
+                const cc = classifyError(err);
+                if (cc.kind !== 'aborted') {
+                    setSlotLifecycle(id, LC.FAILED || 'failed', { error: String(err) });
                 }
+                History.push({
+                    templateId: id,
+                    lifecycle: cc.kind === 'aborted' ? LC.ABORTED || 'aborted' : LC.FAILED || 'failed',
+                    error: String(err),
+                    source: source,
+                });
                 this._pending.delete(id);
                 throw err;
-            });
-
-            this._inflight = { id: id, promise: run };
-            try {
-                return await run;
             } finally {
-                if (this._inflight && this._inflight.id === id) {
-                    this._inflight = null;
-                }
+                releaseSlot(id, runCtx.runId);
             }
         },
     };
@@ -276,9 +467,14 @@
 
     global.EkoThumbnailExport = {
         config: CFG,
+        Lifecycle: LC,
+        RasterAdapters: RasterAdapters,
         queue: queue,
-        payloadFromTemplateRow: payloadFromTemplateRow,
-        capturePayloadToJpeg: capturePayloadToJpeg,
+        payloadFromTemplateRow: Visual.payloadFromTemplateRow,
+        visualChecksum: Visual.visualChecksum,
+        capturePayloadToJpeg: capturePayloadToJpegDom,
         captureAndUpload: captureAndUpload,
+        classifyError: classifyError,
+        getSlot: getSlot,
     };
 })(typeof window !== 'undefined' ? window : global);

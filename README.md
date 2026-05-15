@@ -2,7 +2,9 @@
 
 WordPress plugin: **frontend-first** app for print templates (JSON layout), clients, services with dynamic fields, templates, and orders. **Stack (frozen for MVP):** PHP 8+, Tailwind CDN, Alpine.js, Interact.js, Sortable.js, REST API `eko-sampa/v1`.
 
-Authoritative install and user flow: **`INSTALL.md`**, **`MANUAL.md`**. Pre-production QA: **`CHECKLIST-MVP.md`**. Release notes: **`CHANGELOG.md`**. Architecture notes: **`docs/architecture.md`**, **`docs/database.md`**, **`docs/frontend.md`**, **`docs/editor.md`**.
+Authoritative install and user flow: **`INSTALL.md`**, **`MANUAL.md`**. Pre-production QA: **`CHECKLIST-MVP.md`**. Release notes: **`CHANGELOG.md`**.
+
+**Technical documentation (source of truth):** [`docs/README.md`](docs/README.md) — architecture, database integrity, business rules, REST, tutorials, troubleshooting. Legacy top-level files in `docs/*.md` redirect into that tree.
 
 ---
 

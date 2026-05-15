@@ -16,6 +16,9 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
 
+    /** @var array{ok: bool, debug: array<string, mixed>}|null */
+    private ?array $last_relations_check = null;
+
     private const STATUS_PENDING     = 'pending';
 
     private const STATUS_IN_PROGRESS = 'in_progress';
@@ -66,6 +69,8 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
                 $uid = $forced;
             }
         }
+
+        $data = $this->prepare_create_data($data);
 
         if (! $this->relations_visible($data, null)) {
             return false;
@@ -265,46 +270,272 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Normalize create payload: inherit client_id from template when omitted.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function prepare_create_data(array $data): array {
+        $data = $this->resolve_order_relations_from_template($data);
+        $data = $this->inherit_client_from_template($data);
+
+        return $data;
+    }
+
+    /**
+     * Last failed relations_validate() result (for REST error payloads).
+     *
+     * @return array{ok: bool, debug: array<string, mixed>}|null
+     */
+    public function last_relations_check(): ?array {
+        return $this->last_relations_check;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function inherit_client_from_template(array $data): array {
+        $template_id = absint((int) ( $data['template_id'] ?? 0 ));
+        if ($template_id <= 0) {
+            return $data;
+        }
+
+        // Explicit client_id in payload (including 0 = anonymous) must not be overridden.
+        if (array_key_exists('client_id', $data)) {
+            $data['client_id'] = absint((int) $data['client_id']);
+
+            return $data;
+        }
+
+        $template = (new Eko_Sampa_Template())->get($template_id);
+        if (! is_array($template)) {
+            return $data;
+        }
+
+        $client_id = absint((int) ( $template['client_id'] ?? 0 ));
+        if ($client_id > 0) {
+            $data['client_id'] = $client_id;
+        }
+
+        return $data;
+    }
+
+    /**
+     * When template_id is set, load the template from DB and align service_id (template is authoritative).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    private function resolve_order_relations_from_template(array $data): array {
+        $template_id = absint((int) ( $data['template_id'] ?? 0 ));
+        if ($template_id <= 0) {
+            return $data;
+        }
+
+        $template = (new Eko_Sampa_Template())->get($template_id);
+        if (! is_array($template)) {
+            return $data;
+        }
+
+        $tpl_service     = $this->template_service_id_from_row($template);
+        $payload_service = absint((int) ( $data['service_id'] ?? 0 ));
+
+        if ($tpl_service > 0) {
+            $data['service_id'] = $tpl_service;
+        } elseif ($payload_service > 0) {
+            $data['service_id'] = $payload_service;
+        }
+
+        $data['template_id'] = $template_id;
+
+        return $data;
+    }
+
+    /**
+     * Validate relations; returns which check failed (for API debug).
+     *
+     * @param array<string, mixed>      $data
+     * @param array<string, mixed>|null $existing_row
+     *
+     * @return array{ok: bool, debug: array<string, mixed>}
+     */
+    public function relations_validate(array $data, ?array $existing_row = null): array {
+        $ids   = $this->resolve_relation_ids($data, $existing_row);
+        $debug = [
+            'template_id'     => $ids['template_id'],
+            'service_id'      => $ids['service_id'],
+            'client_id'       => $ids['client_id'],
+            'current_user_id' => get_current_user_id(),
+            'failed_at'       => null,
+        ];
+
+        if ($ids['client_id'] > 0) {
+            $client_row = (new Eko_Sampa_Client())->get($ids['client_id']);
+            $debug['client_visible'] = is_array($client_row);
+            if (! is_array($client_row)) {
+                $debug['failed_at'] = 'client_not_visible';
+
+                $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+
+                return $this->last_relations_check;
+            }
+        }
+
+        $template_row = null;
+        if ($ids['template_id'] > 0) {
+            $template_model = new Eko_Sampa_Template();
+            $template_row   = $template_model->get($ids['template_id']);
+            $debug['template_exists']  = is_array($template_model->get_row_by_id($ids['template_id']));
+            $debug['template_visible'] = is_array($template_row);
+            $debug['template_user_id'] = is_array($template_row) ? absint((int) ( $template_row['user_id'] ?? 0 )) : null;
+            $debug['template_service_id'] = is_array($template_row)
+                ? $this->template_service_id_from_row($template_row)
+                : null;
+
+            if (! is_array($template_row)) {
+                $debug['failed_at'] = 'template_not_visible';
+
+                $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+
+                return $this->last_relations_check;
+            }
+
+            $tpl_service = $this->template_service_id_from_row($template_row);
+            if ($tpl_service > 0) {
+                $ids['service_id']      = $tpl_service;
+                $debug['service_id']    = $tpl_service;
+                $data['service_id']     = $tpl_service;
+            }
+        }
+
+        if ($ids['template_id'] > 0 && $ids['service_id'] <= 0) {
+            $debug['failed_at'] = 'service_missing_for_template';
+
+            $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+
+            return $this->last_relations_check;
+        }
+
+        if ($ids['service_id'] > 0) {
+            $service_model = new Eko_Sampa_Service();
+            $debug['service_exists']            = ( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $ids['service_id']);
+            $debug['service_lookup_table']      = $GLOBALS['wpdb']->prefix . 'eko_sampa_services';
+            $debug['service_visible_in_scope']  = is_array($service_model->get($ids['service_id']));
+            $debug['service_visible_for_order'] = $this->service_visible_for_order(
+                $ids['service_id'],
+                $ids['template_id'],
+                is_array($template_row) ? $template_row : null
+            );
+
+            if (! $debug['service_visible_for_order']) {
+                $debug['failed_at'] = 'service_not_visible_for_order';
+
+                $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+
+                return $this->last_relations_check;
+            }
+        }
+
+        if (is_array($template_row)) {
+            $tpl_client = absint((int) ( $template_row['client_id'] ?? 0 ));
+            if ($tpl_client > 0 && $ids['client_id'] > 0 && $ids['client_id'] !== $tpl_client) {
+                $debug['template_client_id'] = $tpl_client;
+                $debug['failed_at']          = 'template_client_mismatch';
+
+                $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+
+                return $this->last_relations_check;
+            }
+        }
+
+        $this->last_relations_check = ['ok' => true, 'debug' => $debug];
+
+        return $this->last_relations_check;
+    }
+
+    /**
      * Whether referenced client/service/template rows exist and are visible for this actor.
      *
      * @param array<string, mixed>      $data
      * @param array<string, mixed>|null $existing_row
      */
     public function relations_visible(array $data, ?array $existing_row): bool {
+        return $this->relations_validate($data, $existing_row)['ok'];
+    }
+
+    /**
+     * @param array<string, mixed>      $data
+     * @param array<string, mixed>|null $existing_row
+     *
+     * @return array{client_id: int, service_id: int, template_id: int}
+     */
+    private function resolve_relation_ids(array $data, ?array $existing_row): array {
         $keys = ['client_id', 'service_id', 'template_id'];
         $ids  = [];
         foreach ($keys as $key) {
             if (array_key_exists($key, $data)) {
-                $ids[$key] = absint((int) $data[$key]);
+                $ids[ $key ] = absint((int) $data[ $key ]);
             } elseif (is_array($existing_row)) {
-                $ids[$key] = (int) ($existing_row[$key] ?? 0);
+                $ids[ $key ] = (int) ( $existing_row[ $key ] ?? 0 );
             } else {
-                $ids[$key] = 0;
+                $ids[ $key ] = 0;
             }
         }
 
-        if ($ids['client_id'] > 0) {
-            $client = new Eko_Sampa_Client();
-            if (! is_array($client->get($ids['client_id']))) {
-                return false;
-            }
+        return $ids;
+    }
+
+    /**
+     * Service readable by actor, or linked/existing when creating from an owned template.
+     *
+     * @param array<string, mixed>|null $template_row Preloaded visible template (avoids double query).
+     */
+    private function service_visible_for_order(int $service_id, int $template_id, ?array $template_row = null): bool {
+        if ($service_id <= 0) {
+            return false;
         }
 
-        if ($ids['service_id'] > 0) {
-            $service = new Eko_Sampa_Service();
-            if (! is_array($service->get($ids['service_id']))) {
-                return false;
-            }
+        $service_model = new Eko_Sampa_Service();
+        if (is_array($service_model->get($service_id))) {
+            return true;
         }
 
-        if ($ids['template_id'] > 0) {
-            $template = new Eko_Sampa_Template();
-            if (! is_array($template->get($ids['template_id']))) {
-                return false;
-            }
+        if ($template_id <= 0) {
+            return false;
         }
 
-        return true;
+        if ($template_row === null) {
+            $template_row = (new Eko_Sampa_Template())->get($template_id);
+        }
+
+        if (! is_array($template_row)) {
+            return false;
+        }
+
+        if (is_array($service_model->get_row_by_id($service_id))) {
+            return true;
+        }
+
+        return ( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $service_id);
+    }
+
+    /**
+     * @param array<string, mixed> $template_row
+     */
+    private function template_service_id_from_row(array $template_row): int {
+        if (array_key_exists('service_id', $template_row)) {
+            return absint((int) $template_row['service_id']);
+        }
+
+        if (array_key_exists('servico_id', $template_row)) {
+            return absint((int) $template_row['servico_id']);
+        }
+
+        return 0;
     }
 
     /**

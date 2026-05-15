@@ -871,7 +871,7 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get((int) $id);
-        if (is_array($row)) {
+        if (is_array($row) && Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
             Eko_Sampa_Template_Thumbnail_Generator::generate_for_id((int) $id);
             $row = (new Eko_Sampa_Template())->get((int) $id);
         }
@@ -907,7 +907,7 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get($id);
-        if (is_array($row)) {
+        if (is_array($row) && Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
             Eko_Sampa_Template_Thumbnail_Generator::generate_for_id($id);
             $row = (new Eko_Sampa_Template())->get($id);
         }
@@ -950,13 +950,16 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_thumbnail(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (int) $request['id'];
-        if (! is_array((new Eko_Sampa_Template())->get($id))) {
+        $id  = (int) $request['id'];
+        $row = (new Eko_Sampa_Template())->get($id);
+        if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        $params = $this->json_params($request);
-        $image  = isset($params['image']) ? (string) $params['image'] : '';
+        $params      = $this->json_params($request);
+        $image       = isset($params['image']) ? (string) $params['image'] : '';
+        $visual_hash = isset($params['visual_hash']) ? (string) $params['visual_hash'] : '';
+        $force       = ! empty($params['force']);
         if ($image === '' && isset($params['dataUrl'])) {
             $image = (string) $params['dataUrl'];
         }
@@ -965,21 +968,38 @@ final class Eko_Sampa_Rest_Api {
             return $this->route_templates_thumbnail_generate($request);
         }
 
+        if ($visual_hash === '') {
+            $visual_hash = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        }
+
+        if (! $force && ! Eko_Sampa_Template_Thumbnail::needs_regeneration($row, $visual_hash)) {
+            return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
+        }
+
+        if (! Eko_Sampa_Template_Thumbnail::acquire_generation_lock($id)) {
+            return new \WP_Error(
+                'eko_sampa_thumb_locked',
+                __('Thumbnail generation already in progress.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
         Eko_Sampa_Template_Thumbnail::mark_generating($id);
 
-        $saved = Eko_Sampa_Template_Thumbnail::save_from_data_url($id, $image);
+        $saved = Eko_Sampa_Template_Thumbnail::save_from_data_url($id, $image, $visual_hash);
         if ($saved instanceof \WP_Error) {
             Eko_Sampa_Template_Thumbnail::clear_generating($id);
+            Eko_Sampa_Template_Thumbnail::release_generation_lock($id);
 
             return $saved;
         }
 
-        $row = (new Eko_Sampa_Template())->get($id);
-        if (! is_array($row)) {
+        $fresh = (new Eko_Sampa_Template())->get($id);
+        if (! is_array($fresh)) {
             return new \WP_REST_Response(['ok' => true], 200);
         }
 
-        return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
+        return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($fresh));
     }
 
     public function route_templates_thumbnail_generate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1021,14 +1041,44 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_orders_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $params = $this->json_params($request);
         $order  = new Eko_Sampa_Order();
-        if (! $order->relations_visible($params, null)) {
+        $raw    = $this->json_params($request);
+        $params = $order->prepare_create_data($raw);
+
+        $relations = $order->relations_validate($params, null);
+        if (! $relations['ok']) {
+            $relations = $this->maybe_repair_orphan_template_service_for_order($raw, $params, $order, $relations);
+        }
+
+        if (! $relations['ok']) {
+            $failed = isset($relations['debug']['failed_at']) ? (string) $relations['debug']['failed_at'] : 'unknown';
+            $base   = __('Could not create order: service or template is missing or not allowed for your account.', 'eko-sampa');
+            $msg    = $failed !== '' && $failed !== 'unknown'
+                ? $base . ' [' . $failed . ']'
+                : $base;
+
+            if ($failed === 'service_not_visible_for_order'
+                && empty($relations['debug']['service_exists'])
+                && ! empty($relations['debug']['template_id'])) {
+                $msg .= ' ' . __(
+                    'The template references a service that does not exist in the database. Open Eko Sampa → Diagnostics and run repair, or re-link the service on the template.',
+                    'eko-sampa'
+                );
+            }
+
             return new \WP_Error(
                 'eko_sampa_order_invalid_relations',
-                __('Could not create order: client, service, or template is missing or not allowed for your account.', 'eko-sampa'),
-                ['status' => 400]
+                $msg,
+                [
+                    'status'    => 400,
+                    'failed_at' => $failed,
+                    'debug'     => $relations['debug'],
+                ]
             );
+        }
+
+        if (isset($relations['debug']['service_id']) && (int) $relations['debug']['service_id'] > 0) {
+            $params['service_id'] = (int) $relations['debug']['service_id'];
         }
 
         $id = $order->create($params);
@@ -1247,6 +1297,56 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_Error($code, $msg, $data);
+    }
+
+    /**
+     * When template points at a missing service row, create service + re-link once, then re-validate.
+     *
+     * @param array<string, mixed> $raw
+     * @param array<string, mixed> $params
+     * @param array{ok: bool, debug: array<string, mixed>} $relations
+     *
+     * @return array{ok: bool, debug: array<string, mixed>}
+     */
+    private function maybe_repair_orphan_template_service_for_order(
+        array $raw,
+        array $params,
+        Eko_Sampa_Order $order,
+        array $relations
+    ): array {
+        if ($relations['ok']) {
+            return $relations;
+        }
+
+        $failed = (string) ( $relations['debug']['failed_at'] ?? '' );
+        if ($failed !== 'service_not_visible_for_order' || ! empty($relations['debug']['service_exists'])) {
+            return $relations;
+        }
+
+        $template_id = absint((int) ( $params['template_id'] ?? 0 ));
+        $service_id  = absint((int) ( $params['service_id'] ?? 0 ));
+        if ($template_id <= 0 || $service_id <= 0) {
+            return $relations;
+        }
+
+        $integrity = new Eko_Sampa_Database_Integrity();
+        $integrity->repair_orphan_template_services(
+            [
+                [
+                    'template_id' => $template_id,
+                    'service_id'  => $service_id,
+                    'user_id'     => 0,
+                ],
+            ]
+        );
+
+        $params    = $order->prepare_create_data($raw);
+        $relations = $order->relations_validate($params, null);
+        if ($relations['ok']) {
+            $relations['debug']['repaired_orphan_service'] = true;
+        }
+
+        return $relations;
     }
 
     /**

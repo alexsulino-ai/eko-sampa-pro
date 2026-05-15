@@ -57,6 +57,11 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
         }
 
         $row['user_id'] = $uid;
+        $row = $this->filter_row_to_existing_columns($row);
+
+        if ($row === []) {
+            return false;
+        }
 
         $inserted = $this->db()->insert($this->table(), $row, $this->insert_formats($row));
 
@@ -93,6 +98,11 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             $row['json_data'] = $encoded;
         }
 
+        if ($row === []) {
+            return true;
+        }
+
+        $row = $this->filter_row_to_existing_columns($row);
         if ($row === []) {
             return true;
         }
@@ -179,6 +189,7 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             'nome'           => $copy,
             'categoria'      => (string) ($source['categoria'] ?? ''),
             'descricao'      => (string) ($source['descricao'] ?? ''),
+            'client_id'      => (int) ( $source['client_id'] ?? 0 ),
             'product_id'     => (int) ($source['product_id'] ?? 0),
             'service_id'     => (int) ($source['service_id'] ?? 0),
             'width_mm'       => (int) ($source['width_mm'] ?? 0),
@@ -221,6 +232,9 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
     private function sanitize_row(array $data, bool $partial): array {
         $out = [];
 
+        if (! $partial || array_key_exists('client_id', $data)) {
+            $out['client_id'] = isset($data['client_id']) ? absint((int) $data['client_id']) : 0;
+        }
         if (! $partial || array_key_exists('product_id', $data)) {
             $out['product_id'] = isset($data['product_id']) ? absint((int) $data['product_id']) : 0;
         }
@@ -293,6 +307,7 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
     private function insert_formats(array $row): array {
         $map = [
             'user_id'        => '%d',
+            'client_id'      => '%d',
             'product_id'     => '%d',
             'service_id'     => '%d',
             'nome'           => '%s',

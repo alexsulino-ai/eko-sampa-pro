@@ -608,7 +608,7 @@
             html:
                 `<div class="eko-sampa-thumbnail-root" data-eko-render-target="thumbnail" style="width:${outW}px;height:${outH}px;position:relative;overflow:hidden;box-sizing:border-box;background:#fff;${printAdjust}">` +
                 canvasHtml +
-                </div>,
+                '</div>',
         };
     }
 
