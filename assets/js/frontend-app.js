@@ -1221,8 +1221,7 @@ function ekoTemplatesFactory() {
             return st === 'missing' || st === 'stale' || st === 'failed';
         },
         async backfillMissingThumbnails() {
-            const Ex = window.EkoThumbnailExport;
-            if (!Ex || typeof Ex.captureAndUpload !== 'function' || this._thumbBackfillRunning) {
+            if (this._thumbBackfillRunning) {
                 return;
             }
             const missing = this.state.rows.filter((r) => this.needsThumbnailBackfill(r));
@@ -1230,7 +1229,7 @@ function ekoTemplatesFactory() {
                 return;
             }
             this._thumbBackfillRunning = true;
-            const limit = 4;
+            const limit = 8;
             try {
                 for (let i = 0; i < Math.min(limit, missing.length); i++) {
                     const r = missing[i];
@@ -1239,15 +1238,10 @@ function ekoTemplatesFactory() {
                         continue;
                     }
                     try {
-                        const full = await window.ekoSampaApi('templates/' + tid, { method: 'GET' });
-                        const payload =
-                            typeof Ex.payloadFromTemplateRow === 'function'
-                                ? Ex.payloadFromTemplateRow(full)
-                                : { width_mm: full.width_mm, height_mm: full.height_mm, elements: [] };
-                        if (!payload.elements || !payload.elements.length) {
-                            continue;
-                        }
-                        const res = await Ex.captureAndUpload(tid, payload, { source: 'catalog_backfill' });
+                        const res = await window.ekoSampaApi('templates/' + tid + '/thumbnail/generate', {
+                            method: 'POST',
+                            body: { source: 'catalog_backfill' },
+                        });
                         const idx = this.state.rows.findIndex((row) => parseInt(String(row.id), 10) === tid);
                         if (idx >= 0 && res && typeof res === 'object') {
                             this.state.rows[idx] = Object.assign({}, this.state.rows[idx], res);
@@ -1255,10 +1249,8 @@ function ekoTemplatesFactory() {
                             delete this.thumbState['l' + tid];
                         }
                     } catch (e) {
-                        if (window.EKO_RENDER_DEBUG) {
-                            // eslint-disable-next-line no-console
-                            console.warn('[EkoThumbnail] backfill', tid, e);
-                        }
+                        // eslint-disable-next-line no-console
+                        console.warn('[EkoThumbnail] server backfill', tid, e && e.message ? e.message : e);
                     }
                 }
             } finally {

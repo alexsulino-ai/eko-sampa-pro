@@ -50,7 +50,12 @@
         if (!jd || typeof jd !== 'object') {
             jd = {};
         }
-        const elements = Array.isArray(jd.elements) ? jd.elements : [];
+        let elements = [];
+        if (Array.isArray(jd)) {
+            elements = jd;
+        } else if (Array.isArray(jd.elements)) {
+            elements = jd.elements;
+        }
         return {
             width_mm: r.width_mm != null ? Number(r.width_mm) : 210,
             height_mm: r.height_mm != null ? Number(r.height_mm) : 297,

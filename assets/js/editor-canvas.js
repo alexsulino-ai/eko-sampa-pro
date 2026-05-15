@@ -1298,11 +1298,26 @@ function ekoEditorCanvasFactory() {
                     height_mm: this.heightMm,
                     elements: this.elements,
                 });
-                await Ex.captureAndUpload(id, payload, { source: 'editor_save', maxWidth: 520, quality: 0.85 });
+                try {
+                    await Ex.captureAndUpload(id, payload, { source: 'editor_save', maxWidth: 520, quality: 0.85 });
+                } catch (clientErr) {
+                    await this.api('templates/' + id + '/thumbnail/generate', {
+                        method: 'POST',
+                        body: { source: 'editor_save_fallback' },
+                    });
+                    void clientErr;
+                }
             } catch (e) {
-                if (window.EKO_RENDER_DEBUG || (R && R.isRenderDebug && R.isRenderDebug())) {
-                    // eslint-disable-next-line no-console
-                    console.warn('[EkoThumbnail] editor save', e);
+                try {
+                    await this.api('templates/' + id + '/thumbnail/generate', {
+                        method: 'POST',
+                        body: { source: 'editor_save_fallback' },
+                    });
+                } catch (e2) {
+                    if (window.EKO_RENDER_DEBUG || (R && R.isRenderDebug && R.isRenderDebug())) {
+                        // eslint-disable-next-line no-console
+                        console.warn('[EkoThumbnail] editor save', e2);
+                    }
                 }
             }
         },

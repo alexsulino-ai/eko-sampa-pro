@@ -195,17 +195,14 @@ final class Eko_Sampa_Template_Thumbnail {
 
         global $wpdb;
         $table = $wpdb->prefix . 'eko_sampa_templates';
+        $data  = ['preview_image' => $rel];
+        $fmt   = ['%s'];
+        if (self::table_has_thumbnail_version_column()) {
+            $data['thumbnail_version'] = $version;
+            $fmt[]                     = '%d';
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $wpdb->update(
-            $table,
-            [
-                'preview_image'       => $rel,
-                'thumbnail_version'   => $version,
-            ],
-            ['id' => $template_id],
-            ['%s', '%d'],
-            ['%d']
-        );
+        $wpdb->update($table, $data, ['id' => $template_id], $fmt, ['%d']);
 
         self::clear_generating($template_id);
 
@@ -264,17 +261,23 @@ final class Eko_Sampa_Template_Thumbnail {
 
         global $wpdb;
         $table = $wpdb->prefix . 'eko_sampa_templates';
+        $data  = ['preview_image' => ''];
+        $fmt   = ['%s'];
+        if (self::table_has_thumbnail_version_column()) {
+            $data['thumbnail_version'] = 0;
+            $fmt[]                     = '%d';
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $wpdb->update(
-            $table,
-            [
-                'preview_image'     => '',
-                'thumbnail_version' => 0,
-            ],
-            ['id' => $template_id],
-            ['%s', '%d'],
-            ['%d']
-        );
+        $wpdb->update($table, $data, ['id' => $template_id], $fmt, ['%d']);
+    }
+
+    private static function table_has_thumbnail_version_column(): bool {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $cols = $wpdb->get_results("SHOW COLUMNS FROM `{$table}` LIKE 'thumbnail_version'", ARRAY_A);
+
+        return is_array($cols) && $cols !== [];
     }
 
     public static function copy(int $from_id, int $to_id): bool {

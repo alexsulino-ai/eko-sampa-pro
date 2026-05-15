@@ -295,6 +295,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/templates/(?P<id>\d+)/thumbnail/generate',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_templates_thumbnail_generate'],
+                'permission_callback' => [$this, 'require_templates_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/templates/(?P<id>\d+)/placeholders',
             [
                 'methods'             => \WP_REST_Server::READABLE,
@@ -861,6 +871,10 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get((int) $id);
+        if (is_array($row)) {
+            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id((int) $id);
+            $row = (new Eko_Sampa_Template())->get((int) $id);
+        }
 
         return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row, 201);
     }
@@ -893,6 +907,10 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get($id);
+        if (is_array($row)) {
+            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id($id);
+            $row = (new Eko_Sampa_Template())->get($id);
+        }
 
         return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row);
     }
@@ -942,8 +960,9 @@ final class Eko_Sampa_Rest_Api {
         if ($image === '' && isset($params['dataUrl'])) {
             $image = (string) $params['dataUrl'];
         }
+
         if ($image === '') {
-            return new \WP_Error('eko_sampa_thumb_missing', __('Thumbnail image required.', 'eko-sampa'), ['status' => 400]);
+            return $this->route_templates_thumbnail_generate($request);
         }
 
         Eko_Sampa_Template_Thumbnail::mark_generating($id);
@@ -961,6 +980,23 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
+    }
+
+    public function route_templates_thumbnail_generate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id = (int) $request['id'];
+        $row = (new Eko_Sampa_Template())->get($id);
+        if (! is_array($row)) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $generated = Eko_Sampa_Template_Thumbnail_Generator::generate_from_row($row);
+        if ($generated instanceof \WP_Error) {
+            return $generated;
+        }
+
+        $fresh = (new Eko_Sampa_Template())->get($id);
+
+        return new \WP_REST_Response(is_array($fresh) ? Eko_Sampa_Template_Thumbnail::enrich_row($fresh) : ['ok' => true]);
     }
 
     public function route_templates_placeholders(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
