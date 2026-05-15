@@ -193,6 +193,27 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/services/(?P<id>\d+)/fields/check-slug',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_fields_check_slug'],
+                'permission_callback' => [$this, 'require_services_cap'],
+                'args'                => [
+                    'slug'    => [
+                        'required'          => true,
+                        'type'              => 'string',
+                        'sanitize_callback' => 'sanitize_text_field',
+                    ],
+                    'exclude' => [
+                        'required' => false,
+                        'type'     => 'integer',
+                    ],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/services/(?P<sid>\d+)/fields/(?P<fid>\d+)',
             [
                 [
@@ -258,6 +279,16 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
                 'callback'            => [$this, 'route_templates_duplicate'],
+                'permission_callback' => [$this, 'require_templates_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/templates/(?P<id>\d+)/thumbnail',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_templates_thumbnail'],
                 'permission_callback' => [$this, 'require_templates_cap'],
             ]
         );
@@ -608,6 +639,35 @@ final class Eko_Sampa_Rest_Api {
         return new \WP_REST_Response((new Eko_Sampa_Service_Field())->list_for_service($sid));
     }
 
+    public function route_fields_check_slug(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $sid = (int) $request['id'];
+        if ($sid <= 0) {
+            return new \WP_Error('eko_sampa_bad_request', __('Invalid service id.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        $field      = new Eko_Sampa_Service_Field();
+        $normalized = $field->normalize_field_slug((string) $request->get_param('slug'));
+        if ($normalized === '') {
+            return new \WP_Error(
+                'eko_sampa_field_slug_required',
+                __('Provide a non-empty slug (letters, numbers, or hyphens).', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $exclude   = (int) $request->get_param('exclude');
+        $available = $field->slug_is_available($sid, $normalized, $exclude > 0 ? $exclude : null);
+        $conflict  = $available ? null : $field->find_field_id_by_service_slug($sid, $normalized);
+
+        return new \WP_REST_Response(
+            [
+                'slug'              => $normalized,
+                'available'         => $available,
+                'conflict_field_id' => $conflict,
+            ]
+        );
+    }
+
     public function route_fields_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $sid    = (int) $request['id'];
         $params = $this->json_params($request);
@@ -762,7 +822,26 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_list(\WP_REST_Request $request): \WP_REST_Response {
-        return new \WP_REST_Response((new Eko_Sampa_Template())->list($this->list_args($request)));
+        $rows = (new Eko_Sampa_Template())->list($this->list_args($request));
+
+        return new \WP_REST_Response($this->enrich_template_rows($rows));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function enrich_template_rows(array $rows): array {
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $out[] = Eko_Sampa_Template_Thumbnail::enrich_row($row);
+        }
+
+        return $out;
     }
 
     public function route_templates_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -781,7 +860,9 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Template())->get((int) $id), 201);
+        $row = (new Eko_Sampa_Template())->get((int) $id);
+
+        return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row, 201);
     }
 
     public function route_templates_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -791,7 +872,7 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        return new \WP_REST_Response($row);
+        return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
     }
 
     public function route_templates_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -811,7 +892,9 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Template())->get($id));
+        $row = (new Eko_Sampa_Template())->get($id);
+
+        return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row);
     }
 
     public function route_templates_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -824,6 +907,8 @@ final class Eko_Sampa_Rest_Api {
                 array_merge(['status' => 400], $this->wpdb_debug_data())
             );
         }
+
+        Eko_Sampa_Template_Thumbnail::delete($id);
 
         return new \WP_REST_Response(['deleted' => true]);
     }
@@ -839,7 +924,43 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Template())->get((int) $new), 201);
+        Eko_Sampa_Template_Thumbnail::copy($id, (int) $new);
+
+        $row = (new Eko_Sampa_Template())->get((int) $new);
+
+        return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row, 201);
+    }
+
+    public function route_templates_thumbnail(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id = (int) $request['id'];
+        if (! is_array((new Eko_Sampa_Template())->get($id))) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $params = $this->json_params($request);
+        $image  = isset($params['image']) ? (string) $params['image'] : '';
+        if ($image === '' && isset($params['dataUrl'])) {
+            $image = (string) $params['dataUrl'];
+        }
+        if ($image === '') {
+            return new \WP_Error('eko_sampa_thumb_missing', __('Thumbnail image required.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        Eko_Sampa_Template_Thumbnail::mark_generating($id);
+
+        $saved = Eko_Sampa_Template_Thumbnail::save_from_data_url($id, $image);
+        if ($saved instanceof \WP_Error) {
+            Eko_Sampa_Template_Thumbnail::clear_generating($id);
+
+            return $saved;
+        }
+
+        $row = (new Eko_Sampa_Template())->get($id);
+        if (! is_array($row)) {
+            return new \WP_REST_Response(['ok' => true], 200);
+        }
+
+        return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
     }
 
     public function route_templates_placeholders(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -955,12 +1076,7 @@ final class Eko_Sampa_Rest_Api {
         $rnd  = new Eko_Sampa_Template_Renderer();
         $html = $rnd->render($tpl, $ctx, true);
 
-        $els = $rnd->parse_elements_from_template_row($tpl);
-        $html['editorPreview'] = [
-            'width_mm'  => (int) ($tpl['width_mm'] ?? 210),
-            'height_mm' => (int) ($tpl['height_mm'] ?? 297),
-            'elements'  => $rnd->apply_context_to_elements($els, $ctx),
-        ];
+        $html['editorPreview']     = $rnd->build_editor_preview_payload($tpl, $ctx);
         $html['template_placeholders'] = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
 
         return new \WP_REST_Response($html);
@@ -993,12 +1109,7 @@ final class Eko_Sampa_Rest_Api {
         $rnd  = new Eko_Sampa_Template_Renderer();
         $html = $rnd->render($tpl, $ctx, true);
 
-        $els = $rnd->parse_elements_from_template_row($tpl);
-        $html['editorPreview'] = [
-            'width_mm'  => (int) ($tpl['width_mm'] ?? 210),
-            'height_mm' => (int) ($tpl['height_mm'] ?? 297),
-            'elements'  => $rnd->apply_context_to_elements($els, $ctx),
-        ];
+        $html['editorPreview']     = $rnd->build_editor_preview_payload($tpl, $ctx);
         $html['template_placeholders'] = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
 
         if (defined('WP_DEBUG') && WP_DEBUG) {

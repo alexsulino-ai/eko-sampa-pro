@@ -84,11 +84,12 @@ $eko_modal_body_path = EKO_SAMPA_PLUGIN_DIR . 'views/partials/service-field-form
                     autocomplete="off"
                 />
 
-                <ul class="divide-y divide-slate-100 text-sm" x-ref="fieldSortRoot" x-show="filteredFieldsList().length">
-                    <template x-for="f in filteredFieldsList()" :key="f.id">
-                        <li class="eko-field-row py-2" :class="isFieldExpanded(f.id) ? '' : 'is-collapsed'" :data-field-id="f.id">
+                <p class="text-xs text-amber-800" x-show="state.fieldSearch" x-cloak><?php echo esc_html__('Clear the filter to reorder fields.', 'eko-sampa'); ?></p>
+                <ul class="divide-y divide-slate-100 text-sm" x-ref="fieldSortRoot" x-show="state.fields.length" :class="state.fieldSearch ? 'opacity-80' : ''">
+                    <template x-for="f in state.fields" :key="f.id">
+                        <li :class="fieldRowClasses(f)" :data-field-id="f.id">
                             <div class="flex items-center gap-2">
-                                <button type="button" class="cursor-grab rounded-lg border border-transparent px-1.5 text-slate-400 hover:border-slate-200 hover:bg-slate-50" data-eko-field-drag="1" title="<?php echo esc_attr__('Drag to reorder', 'eko-sampa'); ?>">
+                                <button type="button" class="cursor-grab rounded-lg border border-transparent px-1.5 text-slate-400 hover:border-slate-200 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-eko-field-drag="1" :disabled="!!state.fieldSearch" title="<?php echo esc_attr__('Drag to reorder', 'eko-sampa'); ?>">
                                     <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" /></svg>
                                 </button>
                                 <button type="button" class="min-w-0 flex-1 text-left" @click="toggleFieldExpand(f.id)">
@@ -98,8 +99,8 @@ $eko_modal_body_path = EKO_SAMPA_PLUGIN_DIR . 'views/partials/service-field-form
                                 </button>
                                 <div class="flex shrink-0 gap-1">
                                     <?php
-                                    eko_sampa_crud_action('edit', ['click' => 'editField(f)', 'title' => __('Edit field', 'eko-sampa'), 'size' => 'sm', 'icon_only' => true]);
-                                    eko_sampa_crud_action('delete', ['click' => 'deleteField(f.id)', 'title' => __('Remove field', 'eko-sampa'), 'size' => 'sm', 'icon_only' => true]);
+                            eko_sampa_crud_action('edit', ['click' => 'editField(f)', 'title' => __('Edit field', 'eko-sampa'), 'size' => 'sm', 'icon_only' => true, 'can' => 'service.edit', 'policy' => 'disabled']);
+                            eko_sampa_crud_action('delete', ['click' => 'deleteField(f.id)', 'title' => __('Remove field', 'eko-sampa'), 'size' => 'sm', 'icon_only' => true, 'can' => 'service.delete', 'policy' => 'disabled']);
                                     ?>
                                 </div>
                             </div>

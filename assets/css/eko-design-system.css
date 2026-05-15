@@ -187,3 +187,103 @@ html.eko-modal-open body {
 .eko-field-row.is-collapsed .eko-field-row__detail {
     display: none;
 }
+
+.eko-field-row.is-syncing {
+    opacity: 0.65;
+    pointer-events: none;
+}
+
+.eko-field-row.is-sync-error {
+    background: #fef2f2;
+}
+
+/* Toasts */
+.eko-toast-host {
+    position: fixed;
+    right: var(--eko-space-4);
+    bottom: var(--eko-space-4);
+    z-index: var(--eko-z-toast);
+    display: flex;
+    flex-direction: column;
+    gap: var(--eko-space-2);
+    max-width: min(24rem, calc(100vw - 2rem));
+    pointer-events: none;
+}
+
+.eko-toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--eko-space-3);
+    padding: var(--eko-space-3) var(--eko-space-4);
+    border-radius: var(--eko-radius-lg);
+    border: 1px solid var(--eko-border);
+    background: var(--eko-surface);
+    box-shadow: 0 10px 25px rgb(15 23 42 / 0.12);
+    animation: eko-toast-in 0.2s ease-out;
+}
+
+@keyframes eko-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.eko-toast__icon {
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.eko-toast__title {
+    font-weight: 600;
+    font-size: var(--eko-text-sm);
+    color: var(--eko-text);
+}
+
+.eko-toast__message {
+    font-size: var(--eko-text-sm);
+    color: var(--eko-text-muted);
+}
+
+.eko-toast__close {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--eko-text-muted);
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.eko-toast--success .eko-toast__icon {
+    background: #d1fae5;
+    color: #047857;
+}
+.eko-toast--error .eko-toast__icon {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+.eko-toast--warning .eko-toast__icon {
+    background: #fef3c7;
+    color: #b45309;
+}
+.eko-toast--info .eko-toast__icon {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+.eko-toast--loading .eko-toast__icon {
+    background: #e2e8f0;
+    color: #475569;
+}

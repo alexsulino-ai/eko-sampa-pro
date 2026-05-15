@@ -6,6 +6,29 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.7.2] — 2026-05-15
+
+### Corrigido
+
+- Botões Ver/Editar/Duplicar sumiam nas listas: `sanitize_key()` quebrava chaves `service.view`; removido skip de render no PHP (gating só no Alpine).
+
+## [1.7.1] — 2026-05-15
+
+### Adicionado
+
+- Optimistic UI + toast para delete/reorder de dynamic fields.
+- `policy: 'disabled'` em actions destrutivas; REST `check-slug`; `ekoSampaStore`.
+
+## [1.7.0] — 2026-05-15
+
+### Adicionado
+
+- Toast global (`eko-toast.js`) com fila, variantes e bridge EventBus.
+- Optimistic UI em dynamic fields (snapshot, requestId, rollback).
+- Capabilities no REST localize + `ekoSampaCan()` + `can` nas action buttons.
+- `eko-field-registry.js`, `ekoSampaValidationEngine`, envelope `schema_version` em validação.
+- `docs/event-contracts.md`.
+
 ## [1.6.0] — 2026-05-15
 
 ### Adicionado

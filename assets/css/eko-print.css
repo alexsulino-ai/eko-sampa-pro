@@ -1,0 +1,115 @@
+/**
+ * Print page — isolated canvas, no admin chrome. Uses same DOM as editor preview.
+ */
+
+.eko-sampa-print-page {
+    margin: 0;
+    padding: 0;
+    background: #f1f5f9;
+}
+
+.eko-sampa-print-page .eko-sampa-print-outer {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.eko-sampa-print-mount {
+    display: flow-root;
+}
+
+.eko-sampa-print-root,
+.eko-sampa-print-root .eko-sampa-canvas,
+.eko-sampa-print-root .eko-sampa-canvas__element,
+.eko-sampa-print-root .eko-sampa-canvas__frame,
+.eko-sampa-print-root .eko-sampa-canvas__text,
+.eko-sampa-print-root .eko-sampa-canvas__img {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+}
+
+.eko-sampa-print-root .eko-sampa-canvas__img {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.eko-sampa-print-status {
+    font-size: 0.875rem;
+    color: #64748b;
+}
+
+/* Renderer debug (?eko_render_debug=1 or window.EKO_RENDER_DEBUG = true) */
+.eko-render-debug .eko-sampa-canvas__element {
+    outline: 1px dashed rgba(99, 102, 241, 0.65);
+    outline-offset: -1px;
+}
+
+.eko-render-debug .eko-sampa-canvas__element::after {
+    content: attr(data-eko-debug-index);
+    position: absolute;
+    top: 0;
+    left: 0;
+    font: 10px/1.2 ui-monospace, monospace;
+    color: #4338ca;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 1px 3px;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+.eko-sampa-canvas__img--failed {
+    opacity: 0.35;
+    background: repeating-linear-gradient(
+        -45deg,
+        #fee2e2,
+        #fee2e2 6px,
+        #fecaca 6px,
+        #fecaca 12px
+    );
+}
+
+.eko-sampa-canvas__img[data-eko-asset-state='timeout'],
+.eko-sampa-canvas__img[data-eko-asset-state='error'] {
+    outline: 2px solid #dc2626;
+}
+
+@media print {
+    @page {
+        margin: 0;
+    }
+
+    html,
+    body.eko-sampa-print-page {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+    }
+
+    .eko-sampa-print-page .print\:hidden {
+        display: none !important;
+    }
+
+    .eko-sampa-print-outer {
+        display: block !important;
+        width: auto !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .eko-sampa-print-card {
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: transparent !important;
+    }
+
+    .eko-sampa-print-root {
+        box-shadow: none !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+}

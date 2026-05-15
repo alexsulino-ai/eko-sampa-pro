@@ -73,6 +73,10 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
         return;
     }
 
+    // Capability gating is client-side only (ekoSampaCan + x-show/:disabled). Do not skip
+    // rendering in PHP — keys like service.view break under sanitize_key and SPA HTML
+    // must be the same for every logged-in user.
+
     $v         = $variants[ $type ];
     $label     = isset($args['label']) ? (string) $args['label'] : $v['label'];
     $title     = isset($args['title']) ? (string) $args['title'] : $v['title'];
@@ -83,6 +87,9 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
     $icon_sz   = $size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4';
     $base      = 'inline-flex items-center gap-1 rounded-lg border font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-slate-400/60 ' . $pad . ' ' . $text . ' ' . $v['btn'] . ' ' . $v['btn_hover'];
 
+    $is_button = ! empty($args['click']);
+    $tag       = $is_button ? 'button' : 'a';
+
     $attrs = [
         'class'      => $base,
         'title'      => $title,
@@ -92,15 +99,29 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
     if (! empty($args['show'])) {
         $attrs['x-show'] = (string) $args['show'];
     }
+    if (! empty($args['can'])) {
+        $can_expr = "ekoSampaCan('" . esc_attr((string) $args['can']) . "')";
+        $policy   = isset($args['policy']) ? (string) $args['policy'] : 'hidden';
+        if ($policy === 'disabled') {
+            if ($is_button) {
+                $attrs[':disabled'] = '!' . $can_expr;
+            } else {
+                $attrs[':class'] =
+                    "((" . $can_expr . ") ? '" . esc_attr($base) . "' : '" . esc_attr($base . ' opacity-40 pointer-events-none cursor-not-allowed') . "')";
+                $attrs[':aria-disabled'] = '!' . $can_expr;
+                unset($attrs['class']);
+            }
+        } else {
+            $existing         = isset($attrs['x-show']) ? (string) $attrs['x-show'] : '';
+            $attrs['x-show'] = $existing !== '' ? '(' . $existing . ') && ' . $can_expr : $can_expr;
+        }
+    }
     if (! empty($args['disabled'])) {
         $attrs[':disabled'] = (string) $args['disabled'];
     }
     if (! empty($args['loading'])) {
         $attrs['x-bind:class'] = "((" . (string) $args['loading'] . ") ? 'opacity-50 pointer-events-none' : '')";
     }
-
-    $is_button = ! empty($args['click']);
-    $tag       = $is_button ? 'button' : 'a';
 
     if ($is_button) {
         $attrs['type'] = 'button';

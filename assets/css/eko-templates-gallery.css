@@ -1,0 +1,305 @@
+/**
+ * Templates catalog — grid / list gallery.
+ */
+
+.eko-templates-catalog {
+    --eko-tpl-card-radius: 0.875rem;
+}
+
+.eko-templates-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem 1rem;
+}
+
+.eko-templates-view-toggle {
+    display: inline-flex;
+    border-radius: 0.625rem;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(248 250 252);
+    padding: 2px;
+}
+
+.eko-templates-view-toggle button {
+    border-radius: 0.5rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: rgb(100 116 139);
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.eko-templates-view-toggle button[aria-pressed='true'] {
+    background: #fff;
+    color: rgb(15 23 42);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+}
+
+.eko-templates-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+
+@media (min-width: 768px) {
+    .eko-templates-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1024px) {
+    .eko-templates-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.eko-template-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--eko-tpl-card-radius);
+    border: 1px solid rgb(226 232 240);
+    background: #fff;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s;
+}
+
+.eko-template-card:hover {
+    transform: translateY(-2px);
+    border-color: rgb(199 210 254);
+    box-shadow: 0 12px 28px -8px rgb(79 70 229 / 0.18);
+}
+
+.eko-template-card__thumb-wrap[data-eko-thumbnail-state='generating']::after,
+.eko-template-row__thumb-wrap[data-eko-thumbnail-state='generating']::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgb(255 255 255 / 0.55);
+    pointer-events: none;
+}
+
+.eko-template-card__thumb-wrap[data-eko-thumbnail-state='stale']::after,
+.eko-template-row__thumb-wrap[data-eko-thumbnail-state='stale']::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 3px;
+    background: rgb(245 158 11);
+    pointer-events: none;
+}
+
+.eko-template-card__thumb-wrap {
+    position: relative;
+    aspect-ratio: 1 / 1.12;
+    background: linear-gradient(145deg, rgb(248 250 252), rgb(241 245 249));
+    overflow: hidden;
+    cursor: zoom-in;
+}
+
+.eko-template-card__thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    padding: 0.5rem;
+    transition: transform 0.25s ease;
+}
+
+.eko-template-card:hover .eko-template-card__thumb {
+    transform: scale(1.02);
+}
+
+.eko-template-card__thumb--skeleton {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        rgb(241 245 249) 0%,
+        rgb(248 250 252) 50%,
+        rgb(241 245 249) 100%
+    );
+    background-size: 200% 100%;
+    animation: eko-tpl-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes eko-tpl-shimmer {
+    0% {
+        background-position: 100% 0;
+    }
+    100% {
+        background-position: -100% 0;
+    }
+}
+
+.eko-template-card__thumb-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 1rem;
+    text-align: center;
+    color: rgb(100 116 139);
+    font-size: 0.75rem;
+}
+
+.eko-template-card__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 0.35rem;
+    padding: 0.875rem 1rem 1rem;
+}
+
+.eko-template-card__title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: rgb(15 23 42);
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.eko-template-card__meta {
+    font-size: 0.75rem;
+    color: rgb(100 116 139);
+}
+
+.eko-template-card__actions {
+    margin-top: auto;
+    padding-top: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    justify-content: flex-end;
+}
+
+.eko-templates-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.eko-template-row {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+    border-radius: var(--eko-tpl-card-radius);
+    border: 1px solid rgb(226 232 240);
+    background: #fff;
+    padding: 0.75rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.eko-template-row:hover {
+    border-color: rgb(199 210 254);
+    box-shadow: 0 4px 14px -4px rgb(79 70 229 / 0.12);
+}
+
+.eko-template-row__thumb-wrap {
+    flex: 0 0 7rem;
+    width: 7rem;
+    aspect-ratio: 3 / 4;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background: rgb(248 250 252);
+    cursor: zoom-in;
+}
+
+.eko-template-row__thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.eko-template-row__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.eko-template-row__actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    align-self: center;
+}
+
+.eko-templates-empty {
+    border-radius: 1rem;
+    border: 1px dashed rgb(203 213 225);
+    background: rgb(248 250 252);
+    padding: 3rem 1.5rem;
+    text-align: center;
+}
+
+.eko-templates-zoom {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+
+.eko-templates-zoom__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgb(15 23 42 / 0.72);
+    backdrop-filter: blur(4px);
+}
+
+.eko-templates-zoom__panel {
+    position: relative;
+    max-width: min(96vw, 56rem);
+    max-height: min(92vh, 48rem);
+    animation: eko-tpl-zoom-in 0.2s ease;
+}
+
+@keyframes eko-tpl-zoom-in {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.eko-templates-zoom__img {
+    display: block;
+    max-width: 100%;
+    max-height: min(92vh, 48rem);
+    width: auto;
+    height: auto;
+    margin: 0 auto;
+    border-radius: 0.5rem;
+    box-shadow: 0 24px 48px rgb(0 0 0 / 0.35);
+    background: #fff;
+}
+
+.eko-templates-zoom__close {
+    position: absolute;
+    top: -0.5rem;
+    right: -0.5rem;
+    z-index: 2;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 9999px;
+    background: #fff;
+    color: rgb(51 65 85);
+    font-size: 1.25rem;
+    line-height: 1;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.2);
+}

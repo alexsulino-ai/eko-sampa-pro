@@ -54,9 +54,9 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('services', 'new');
                             <?php
                             eko_sampa_crud_actions_render(
                                 [
-                                    ['type' => 'view', 'href' => 'viewUrl(r.id)'],
-                                    ['type' => 'edit', 'href' => 'editUrl(r.id)'],
-                                    ['type' => 'delete', 'click' => 'remove(r.id)'],
+                                    ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'service.view'],
+                                    ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'service.edit'],
+                                    ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'service.delete', 'policy' => 'disabled'],
                                 ]
                             );
                             ?>

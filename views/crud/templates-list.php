@@ -1,6 +1,6 @@
 <?php
 /**
- * Templates � list only.
+ * Templates — visual catalog (grid / list).
  *
  * @package Eko_Sampa
  */
@@ -14,13 +14,17 @@ if (! defined('ABSPATH')) {
 $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
 
 ?>
-<div class="mx-auto max-w-6xl space-y-6" x-data="window.ekoTemplatesFactory()" x-init="init()">
-    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+<div class="eko-templates-catalog mx-auto max-w-[1400px] space-y-6" x-data="window.ekoTemplatesFactory()" x-init="init()" @keydown.escape.window="closeZoom()">
+    <div class="eko-templates-toolbar">
         <div class="space-y-1">
-            <h2 class="text-lg font-semibold text-slate-900"><?php echo esc_html__('Templates', 'eko-sampa'); ?></h2>
-            <p class="text-sm text-slate-500"><?php echo esc_html__('Design layouts in the visual editor.', 'eko-sampa'); ?></p>
+            <h2 class="text-xl font-semibold tracking-tight text-slate-900"><?php echo esc_html__('Template library', 'eko-sampa'); ?></h2>
+            <p class="text-sm text-slate-500"><?php echo esc_html__('Choose a layout by preview — open the editor to customize.', 'eko-sampa'); ?></p>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+            <div class="eko-templates-view-toggle" role="group" aria-label="<?php echo esc_attr__('View mode', 'eko-sampa'); ?>">
+                <button type="button" :aria-pressed="listView === 'grid'" @click="setListView('grid')"><?php echo esc_html__('Grid', 'eko-sampa'); ?></button>
+                <button type="button" :aria-pressed="listView === 'list'" @click="setListView('list')"><?php echo esc_html__('List', 'eko-sampa'); ?></button>
+            </div>
             <?php if (current_user_can('manage_options')) : ?>
                 <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.filterUserId" @change="state.page=1; load()">
                     <option value=""><?php echo esc_html__('All users', 'eko-sampa'); ?></option>
@@ -29,51 +33,131 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     </template>
                 </select>
             <?php endif; ?>
-            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Search�', 'eko-sampa'); ?>" />
+            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Search…', 'eko-sampa'); ?>" />
             <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="text" x-model="state.cat" @change="state.page=1; load()" placeholder="<?php echo esc_attr__('Category', 'eko-sampa'); ?>" />
-            <button type="button" class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800" @click="state.page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
-            <a class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700" href="<?php echo esc_url($new_url); ?>"><?php echo esc_html__('New template', 'eko-sampa'); ?></a>
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" @click="state.page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
+            <a class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700" href="<?php echo esc_url($new_url); ?>"><?php echo esc_html__('New template', 'eko-sampa'); ?></a>
         </div>
     </div>
-    <p class="text-sm text-red-600" x-show="error" x-text="error || ''"></p>
-    <p class="text-xs text-slate-500" x-show="loading" x-cloak><?php echo esc_html__('Loading�', 'eko-sampa'); ?></p>
-    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table class="min-w-full divide-y divide-slate-200 text-sm">
-            <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                <tr>
-                    <th class="px-4 py-3"><?php echo esc_html__('Name', 'eko-sampa'); ?></th>
-                    <th class="px-4 py-3"><?php echo esc_html__('Category', 'eko-sampa'); ?></th>
-                    <th class="px-4 py-3 text-right"><?php echo esc_html__('Actions', 'eko-sampa'); ?></th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-                <template x-for="r in state.rows" :key="r.id">
-                    <tr class="hover:bg-slate-50/80">
-                        <td class="px-4 py-3 font-medium text-slate-900" x-text="r.nome"></td>
-                        <td class="px-4 py-3 text-slate-600" x-text="r.categoria"></td>
-                        <td class="px-4 py-3 text-right whitespace-nowrap">
-                            <?php
-                            eko_sampa_crud_actions_render(
-                                [
-                                    ['type' => 'view', 'href' => 'viewUrl(r.id)'],
-                                    ['type' => 'edit', 'href' => 'editUrl(r.id)'],
-                                    ['type' => 'editor', 'href' => 'editorUrl(r.id)'],
-                                    ['type' => 'duplicate', 'click' => 'duplicate(r.id)'],
-                                    ['type' => 'delete', 'click' => 'remove(r.id)'],
-                                ]
-                            );
-                            ?>
-                        </td>
-                    </tr>
-                </template>
-            </tbody>
-        </table>
-        <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-600">
-            <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="state.page"></span></span>
-            <div class="flex gap-2">
-                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="state.page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
-                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!state.hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
+
+    <p class="text-sm text-red-600" x-show="error" x-text="error || ''" x-cloak></p>
+
+    <div class="eko-templates-grid" x-show="listView === 'grid' && !loading && state.rows.length" x-cloak>
+        <template x-for="r in state.rows" :key="r.id">
+            <article class="eko-template-card">
+                <div class="eko-template-card__thumb-wrap" @click="openZoom(r)" :title="<?php echo esc_attr__('Enlarge preview', 'eko-sampa'); ?>" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
+                    <div class="eko-template-card__thumb--skeleton" x-show="thumbnailSrc(r) && !thumbLoaded(r.id) && !thumbFailed(r.id)" x-cloak></div>
+                    <img
+                        class="eko-template-card__thumb"
+                        :src="thumbnailSrc(r)"
+                        :alt="r.nome"
+                        loading="lazy"
+                        decoding="async"
+                        x-show="thumbnailSrc(r) && !thumbFailed(r.id)"
+                        @load="markThumbLoaded(r.id)"
+                        @error="markThumbFailed(r.id)"
+                    />
+                    <div class="eko-template-card__thumb-fallback" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
+                        <svg class="mb-2 h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        <span x-text="formatDimensions(r)"></span>
+                    </div>
+                </div>
+                <div class="eko-template-card__body">
+                    <h3 class="eko-template-card__title" x-text="r.nome"></h3>
+                    <p class="eko-template-card__meta" x-text="formatDimensions(r)"></p>
+                    <p class="eko-template-card__meta" x-show="r.categoria" x-text="r.categoria"></p>
+                    <p class="eko-template-card__meta" x-text="formatUpdated(r)"></p>
+                    <div class="eko-template-card__actions">
+                        <?php
+                        eko_sampa_crud_actions_render(
+                            [
+                                ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm', 'icon_only' => true],
+                            ]
+                        );
+                        ?>
+                    </div>
+                </div>
+            </article>
+        </template>
+    </div>
+
+    <div class="eko-templates-list" x-show="listView === 'list' && !loading && state.rows.length" x-cloak>
+        <template x-for="r in state.rows" :key="'list-' + r.id">
+            <article class="eko-template-row">
+                <div class="eko-template-row__thumb-wrap" @click="openZoom(r)" :data-eko-thumbnail-state="r.thumbnail_state || 'missing'">
+                    <img
+                        x-show="thumbnailSrc(r) && !thumbFailed(r.id)"
+                        class="eko-template-row__thumb"
+                        :src="thumbnailSrc(r)"
+                        :alt="r.nome"
+                        loading="lazy"
+                        decoding="async"
+                        @load="markThumbLoaded(r.id)"
+                        @error="markThumbFailed(r.id)"
+                    />
+                    <div class="eko-template-card__thumb-fallback h-full" x-show="!thumbnailSrc(r) || thumbFailed(r.id)" x-cloak>
+                        <span class="text-[10px]" x-text="formatDimensions(r)"></span>
+                    </div>
+                </div>
+                <div class="eko-template-row__main">
+                    <h3 class="text-sm font-semibold text-slate-900" x-text="r.nome"></h3>
+                    <p class="text-xs text-slate-500" x-text="formatDimensions(r) + (r.categoria ? ' · ' + r.categoria : '')"></p>
+                    <p class="text-xs text-slate-400" x-text="formatUpdated(r)"></p>
+                </div>
+                <div class="eko-template-row__actions">
+                    <?php
+                    eko_sampa_crud_actions_render(
+                        [
+                            ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm'],
+                            ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm'],
+                            ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm'],
+                            ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm'],
+                            ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm'],
+                        ]
+                    );
+                    ?>
+                </div>
+            </article>
+        </template>
+    </div>
+
+    <div class="eko-templates-grid" x-show="loading" x-cloak>
+        <template x-for="i in 8" :key="'sk-' + i">
+            <article class="eko-template-card">
+                <div class="eko-template-card__thumb-wrap"><div class="eko-template-card__thumb--skeleton"></div></div>
+                <div class="eko-template-card__body">
+                    <div class="h-4 w-3/4 rounded bg-slate-200"></div>
+                    <div class="mt-2 h-3 w-1/2 rounded bg-slate-100"></div>
+                </div>
+            </article>
+        </template>
+    </div>
+
+    <div class="eko-templates-empty" x-show="!loading && !state.rows.length" x-cloak>
+        <p class="text-base font-medium text-slate-700"><?php echo esc_html__('No templates yet', 'eko-sampa'); ?></p>
+        <p class="mt-1 text-sm text-slate-500"><?php echo esc_html__('Create your first layout in the visual editor.', 'eko-sampa'); ?></p>
+        <a class="mt-4 inline-flex rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" href="<?php echo esc_url($new_url); ?>"><?php echo esc_html__('New template', 'eko-sampa'); ?></a>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600" x-show="state.rows.length || state.page > 1">
+        <span><?php echo esc_html__('Page', 'eko-sampa'); ?> <span x-text="state.page"></span></span>
+        <div class="flex gap-2">
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-40" @click="prevPage()" :disabled="state.page <= 1"><?php echo esc_html__('Previous', 'eko-sampa'); ?></button>
+            <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-40" @click="nextPage()" :disabled="!state.hasNext"><?php echo esc_html__('Next', 'eko-sampa'); ?></button>
+        </div>
+    </div>
+
+    <template x-teleport="body">
+        <div class="eko-templates-zoom" x-show="zoom.open" x-cloak x-transition.opacity @click.self="closeZoom()">
+            <div class="eko-templates-zoom__backdrop" @click="closeZoom()"></div>
+            <div class="eko-templates-zoom__panel" role="dialog" aria-modal="true" :aria-label="zoom.title">
+                <button type="button" class="eko-templates-zoom__close" @click="closeZoom()" aria-label="<?php echo esc_attr__('Close', 'eko-sampa'); ?>">&times;</button>
+                <img class="eko-templates-zoom__img" :src="zoom.src" :alt="zoom.title" />
             </div>
         </div>
-    </div>
+    </template>
 </div>

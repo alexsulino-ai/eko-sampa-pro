@@ -65,11 +65,11 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('orders', 'new');
                             <?php
                             eko_sampa_crud_actions_render(
                                 [
-                                    ['type' => 'view', 'href' => 'viewUrl(r.id)'],
-                                    ['type' => 'edit', 'href' => 'editUrl(r.id)'],
-                                    ['type' => 'print', 'href' => 'printUrl(r.id)', 'target' => '_blank'],
-                                    ['type' => 'duplicate', 'click' => 'dup(r.id)'],
-                                    ['type' => 'delete', 'click' => 'remove(r.id)'],
+                                    ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'order.view'],
+                                    ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'order.edit'],
+                                    ['type' => 'print', 'href' => 'printUrl(r.id)', 'target' => '_blank', 'can' => 'order.print'],
+                                    ['type' => 'duplicate', 'click' => 'dup(r.id)', 'can' => 'order.duplicate'],
+                                    ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'order.delete', 'policy' => 'disabled'],
                                 ]
                             );
                             ?>

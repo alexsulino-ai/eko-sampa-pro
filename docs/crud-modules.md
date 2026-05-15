@@ -196,6 +196,28 @@ this.openEkoModal({
 
 ---
 
+## Consistência de estado (v1.7.1)
+
+- **Delete / reorder** de fields: optimistic + toast + rollback (mesmo padrão do save).
+- **`policy: 'disabled'`** em ações sensíveis (delete) — botão visível mas inativo sem capability.
+- **`validateAsync()`** + `GET .../fields/check-slug` (slug remoto).
+- **`ekoSampaStore`** — cache fino (`service:{id}:fields`), separado do EventBus.
+
+---
+
+## Consistência de estado (v1.7.0)
+
+| Peça | API |
+|------|-----|
+| Toast | `window.ekoSampaToast.show({ type, message, duration, id })` |
+| Capabilities | `window.ekoSampaCan('service.edit')` + PHP `eko_sampa_user_can()` |
+| Field registry | `window.ekoSampaFieldRegistry` |
+| Validation | `window.ekoSampaValidationEngine` + `schema_version` em `validation_rules_json` |
+| Eventos | [event-contracts.md](event-contracts.md) |
+| Optimistic fields | snapshot + `requestId` + rollback em `saveField()` |
+
+---
+
 ## Infraestrutura UI (v1.6.0)
 
 ### Z-index centralizado

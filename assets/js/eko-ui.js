@@ -420,6 +420,7 @@
             return {
                 meta: { id: 0, service_id: sid, sort_order: sortOrder != null ? Number(sortOrder) : 0 },
                 definition: {
+                    schema_version: window.ekoSampaFieldSchemaVersion || 1,
                     label: '',
                     slug: '',
                     type: 'text',
@@ -452,9 +453,12 @@
             } else if (opt != null && typeof opt !== 'string') {
                 opt = String(opt);
             }
-            var vr = window.ekoSampaFieldValidation
-                ? window.ekoSampaFieldValidation.parseFieldRow(row)
-                : { validation: {}, _validationLegacyRaw: null };
+            var vr =
+                window.ekoSampaValidationEngine && window.ekoSampaValidationEngine.parseFieldRow
+                    ? window.ekoSampaValidationEngine.parseFieldRow(row)
+                    : window.ekoSampaFieldValidation
+                      ? window.ekoSampaFieldValidation.parseFieldRow(row)
+                      : { validation: {}, _validationLegacyRaw: null, schema_version: 1 };
             return {
                 meta: {
                     id: row.id != null ? Number(row.id) : 0,
@@ -462,6 +466,10 @@
                     sort_order: row.sort_order != null ? Number(row.sort_order) : 0,
                 },
                 definition: {
+                    schema_version:
+                        vr.schema_version != null
+                            ? Number(vr.schema_version)
+                            : window.ekoSampaFieldSchemaVersion || 1,
                     label: row.label != null ? String(row.label) : '',
                     slug: row.slug != null ? String(row.slug) : '',
                     type: row.type != null ? String(row.type) : 'text',

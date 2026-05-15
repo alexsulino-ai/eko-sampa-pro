@@ -81,11 +81,31 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_EKO_UI = 'eko-sampa-ui';
 
+    public const HANDLE_EKO_TOAST = 'eko-sampa-toast';
+
+    public const HANDLE_EKO_STORE = 'eko-sampa-store';
+
+    public const HANDLE_EKO_FIELD_REGISTRY = 'eko-sampa-field-registry';
+
     public const HANDLE_SORTABLE = 'eko-sampa-sortable';
 
     public const HANDLE_DESIGN_SYSTEM = 'eko-sampa-design-system';
 
     public const HANDLE_FRONTEND_STYLE = 'eko-sampa-frontend';
+
+    public const HANDLE_EKO_CANVAS_RENDERER = 'eko-sampa-canvas-renderer';
+
+    public const HANDLE_EKO_PRINT_MOUNT = 'eko-sampa-print-mount';
+
+    public const HANDLE_EKO_PRINT_CSS = 'eko-sampa-print';
+
+    public const HANDLE_EKO_THUMBNAIL_CONFIG = 'eko-sampa-thumbnail-config';
+
+    public const HANDLE_HTML_TO_IMAGE = 'html-to-image';
+
+    public const HANDLE_EKO_THUMBNAIL_EXPORT = 'eko-sampa-thumbnail-export';
+
+    public const HANDLE_EKO_TEMPLATES_GALLERY = 'eko-sampa-templates-gallery';
 
     public function register_hooks(): void {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin']);
@@ -132,6 +152,12 @@ final class Eko_Sampa_Assets {
             }
             if (wp_script_is(self::HANDLE_INTERACT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_INTERACT);
+            }
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
             }
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
@@ -223,6 +249,35 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        $store_rel = 'assets/js/eko-store.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $store_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_STORE,
+                $this->plugin_asset_url($store_rel),
+                [],
+                $this->plugin_asset_version($store_rel),
+                true
+            );
+        }
+
+        $toast_rel = 'assets/js/eko-toast.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $toast_rel)) {
+            $toast_deps = [];
+            if (wp_script_is(self::HANDLE_EKO_UI, 'registered')) {
+                $toast_deps[] = self::HANDLE_EKO_UI;
+            }
+            if (wp_script_is(self::HANDLE_EKO_STORE, 'registered')) {
+                $toast_deps[] = self::HANDLE_EKO_STORE;
+            }
+            wp_register_script(
+                self::HANDLE_EKO_TOAST,
+                $this->plugin_asset_url($toast_rel),
+                $toast_deps,
+                $this->plugin_asset_version($toast_rel),
+                true
+            );
+        }
+
         $fe_app_rel = 'assets/js/frontend-app.js';
         $fe_app     = EKO_SAMPA_PLUGIN_DIR . $fe_app_rel;
         if (is_readable($fe_app)) {
@@ -231,12 +286,29 @@ final class Eko_Sampa_Assets {
              * `Alpine.data(...)`. If Alpine runs first, `alpine:init` has already fired and CRUD
              * components never register (UI looks static; saves never run).
              */
-            $fe_deps = wp_script_is(self::HANDLE_EKO_UI, 'registered') ? [self::HANDLE_EKO_UI] : [];
+            $fe_deps = [];
+            if (wp_script_is(self::HANDLE_EKO_UI, 'registered')) {
+                $fe_deps[] = self::HANDLE_EKO_UI;
+            }
+            if (wp_script_is(self::HANDLE_EKO_TOAST, 'registered')) {
+                $fe_deps[] = self::HANDLE_EKO_TOAST;
+            }
             wp_register_script(
                 self::HANDLE_FRONTEND_APP,
                 $this->plugin_asset_url($fe_app_rel),
                 $fe_deps,
                 $this->plugin_asset_version($fe_app_rel),
+                true
+            );
+        }
+
+        $registry_rel = 'assets/js/eko-field-registry.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $registry_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_FIELD_REGISTRY,
+                $this->plugin_asset_url($registry_rel),
+                [self::HANDLE_FRONTEND_APP],
+                $this->plugin_asset_version($registry_rel),
                 true
             );
         }
@@ -257,6 +329,94 @@ final class Eko_Sampa_Assets {
             true
         );
 
+        wp_register_script(
+            self::HANDLE_HTML_TO_IMAGE,
+            'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js',
+            [],
+            '1.11.11',
+            true
+        );
+
+        $thumb_config_rel = 'assets/js/eko-thumbnail-config.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_config_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_THUMBNAIL_CONFIG,
+                $this->plugin_asset_url($thumb_config_rel),
+                [],
+                $this->plugin_asset_version($thumb_config_rel),
+                true
+            );
+        }
+
+        $renderer_rel = 'assets/js/eko-canvas-renderer.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $renderer_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_CANVAS_RENDERER,
+                $this->plugin_asset_url($renderer_rel),
+                [],
+                $this->plugin_asset_version($renderer_rel),
+                true
+            );
+        }
+
+        $print_mount_rel = 'assets/js/eko-print-mount.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $print_mount_rel)) {
+            $print_mount_deps = wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')
+                ? [self::HANDLE_EKO_CANVAS_RENDERER]
+                : [];
+            wp_register_script(
+                self::HANDLE_EKO_PRINT_MOUNT,
+                $this->plugin_asset_url($print_mount_rel),
+                $print_mount_deps,
+                $this->plugin_asset_version($print_mount_rel),
+                true
+            );
+        }
+
+        $print_css_rel = 'assets/css/eko-print.css';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $print_css_rel)) {
+            $print_css_deps = wp_style_is(self::HANDLE_DESIGN_SYSTEM, 'registered')
+                ? [self::HANDLE_DESIGN_SYSTEM]
+                : [];
+            wp_register_style(
+                self::HANDLE_EKO_PRINT_CSS,
+                $this->plugin_asset_url($print_css_rel),
+                $print_css_deps,
+                $this->plugin_asset_version($print_css_rel)
+            );
+        }
+
+        $thumb_export_rel = 'assets/js/eko-thumbnail-export.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_export_rel)) {
+            $thumb_deps = [];
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
+                $thumb_deps[] = self::HANDLE_EKO_THUMBNAIL_CONFIG;
+            }
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                $thumb_deps[] = self::HANDLE_EKO_CANVAS_RENDERER;
+            }
+            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
+                $thumb_deps[] = self::HANDLE_HTML_TO_IMAGE;
+            }
+            wp_register_script(
+                self::HANDLE_EKO_THUMBNAIL_EXPORT,
+                $this->plugin_asset_url($thumb_export_rel),
+                $thumb_deps,
+                $this->plugin_asset_version($thumb_export_rel),
+                true
+            );
+        }
+
+        $gallery_css_rel = 'assets/css/eko-templates-gallery.css';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $gallery_css_rel)) {
+            wp_register_style(
+                self::HANDLE_EKO_TEMPLATES_GALLERY,
+                $this->plugin_asset_url($gallery_css_rel),
+                [],
+                $this->plugin_asset_version($gallery_css_rel)
+            );
+        }
+
         $editor_js_rel = 'assets/js/editor-canvas.js';
         $editor_js     = EKO_SAMPA_PLUGIN_DIR . $editor_js_rel;
         if (is_readable($editor_js)) {
@@ -264,10 +424,17 @@ final class Eko_Sampa_Assets {
              * No Alpine handle in deps: this file must execute before Alpine so `alpine:init`
              * listeners are registered (same race as frontend-app.js).
              */
+            $editor_deps = [self::HANDLE_INTERACT, self::HANDLE_SORTABLE];
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                $editor_deps[] = self::HANDLE_EKO_CANVAS_RENDERER;
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
+                $editor_deps[] = self::HANDLE_EKO_THUMBNAIL_EXPORT;
+            }
             wp_register_script(
                 self::HANDLE_EDITOR_CANVAS,
                 $this->plugin_asset_url($editor_js_rel),
-                [self::HANDLE_INTERACT, self::HANDLE_SORTABLE],
+                $editor_deps,
                 $this->plugin_asset_version($editor_js_rel),
                 true
             );
@@ -330,6 +497,12 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EKO_UI, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_UI);
             }
+            if (wp_script_is(self::HANDLE_EKO_STORE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_STORE);
+            }
+            if (wp_script_is(self::HANDLE_EKO_TOAST, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_TOAST);
+            }
             $fe_app_path = EKO_SAMPA_PLUGIN_DIR . 'assets/js/frontend-app.js';
             if (wp_script_is(self::HANDLE_FRONTEND_APP, 'registered') && is_readable($fe_app_path)) {
                 wp_enqueue_script(self::HANDLE_FRONTEND_APP);
@@ -340,6 +513,9 @@ final class Eko_Sampa_Assets {
                         'root'           => esc_url_raw(rest_url('eko-sampa/v1/')),
                         'nonce'          => wp_create_nonce('wp_rest'),
                         'isAdmin'        => current_user_can('manage_options'),
+                        'capabilities'   => function_exists('eko_sampa_frontend_capabilities')
+                            ? eko_sampa_frontend_capabilities()
+                            : [],
                         'pluginVersion'  => EKO_SAMPA_VERSION,
                         'debugRest'      => (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG),
                         'urls'           => [
@@ -350,9 +526,36 @@ final class Eko_Sampa_Assets {
                     ]
                 );
             }
+            if (wp_script_is(self::HANDLE_EKO_FIELD_REGISTRY, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_FIELD_REGISTRY);
+            }
+        }
+
+        if ($this->is_frontend_templates_list_view()) {
+            if (wp_style_is(self::HANDLE_EKO_TEMPLATES_GALLERY, 'registered')) {
+                wp_enqueue_style(self::HANDLE_EKO_TEMPLATES_GALLERY);
+            }
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
+            }
+            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
+                wp_enqueue_script(self::HANDLE_HTML_TO_IMAGE);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_CONFIG);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
+            }
         }
 
         if ($this->is_frontend_editor_view()) {
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
+            }
+            if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
+            }
             if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {
                 wp_enqueue_script(self::HANDLE_SORTABLE);
             }
@@ -387,10 +590,31 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {
                 wp_enqueue_script(self::HANDLE_SORTABLE);
             }
+        } elseif ($this->is_frontend_print_view()) {
+            if (wp_style_is(self::HANDLE_EKO_PRINT_CSS, 'registered')) {
+                wp_enqueue_style(self::HANDLE_EKO_PRINT_CSS);
+            }
+            if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
+            }
+            if (wp_script_is(self::HANDLE_EKO_PRINT_MOUNT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_PRINT_MOUNT);
+                wp_localize_script(
+                    self::HANDLE_EKO_PRINT_MOUNT,
+                    'ekoSampaRender',
+                    [
+                        'schemaVersion' => Eko_Sampa_Render_Schema::VERSION,
+                        'units'         => Eko_Sampa_Render_Schema::units_meta(),
+                        'debug'         => (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG)
+                            || (isset($_GET['eko_render_debug']) && (string) $_GET['eko_render_debug'] === '1'),
+                    ]
+                );
+            }
         }
 
         // Alpine last: alpine:init listeners must already be attached (class docblock).
-        if (wp_script_is(self::HANDLE_ALPINE, 'registered')) {
+        // Print view uses vanilla mount script only (no Alpine components).
+        if (! $this->is_frontend_print_view() && wp_script_is(self::HANDLE_ALPINE, 'registered')) {
             wp_enqueue_script(self::HANDLE_ALPINE);
         }
     }
@@ -403,6 +627,10 @@ final class Eko_Sampa_Assets {
     public function filter_body_class(array $classes): array {
         if ($this->is_frontend_virtual_route()) {
             $classes[] = 'eko-sampa-route';
+        }
+
+        if ($this->is_frontend_print_view()) {
+            $classes[] = 'eko-sampa-print-page';
         }
 
         if ($this->singular_has_eko_shortcode()) {
@@ -534,6 +762,26 @@ final class Eko_Sampa_Assets {
         }
 
         return Eko_Sampa_Frontend_Router::current_action() === 'edit';
+    }
+
+    private function is_frontend_templates_list_view(): bool {
+        if (! $this->is_frontend_virtual_route()) {
+            return false;
+        }
+
+        if (sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) !== 'templates') {
+            return false;
+        }
+
+        return Eko_Sampa_Frontend_Router::current_action() === 'list';
+    }
+
+    private function is_frontend_print_view(): bool {
+        if (! $this->is_frontend_virtual_route()) {
+            return false;
+        }
+
+        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'print';
     }
 
     private function should_enqueue_admin(string $hook_suffix): bool {

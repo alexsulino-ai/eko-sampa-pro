@@ -646,6 +646,10 @@ function ekoEditorCanvasFactory() {
         },
 
         elementPositionStyle(item) {
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (R && typeof R.elementPositionStyle === 'function') {
+                return R.elementPositionStyle(item);
+            }
             if (!item || typeof item !== 'object') {
                 return 'position:absolute;left:0;top:0;width:100px;height:40px';
             }
@@ -661,6 +665,10 @@ function ekoEditorCanvasFactory() {
         },
 
         elementFrameCss(item) {
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (R && typeof R.elementFrameCss === 'function') {
+                return R.elementFrameCss(item);
+            }
             const t = item.type;
             const st = item.styles || {};
             const op = this._clampNum(st.opacity, 0, 1, 1);
@@ -696,6 +704,10 @@ function ekoEditorCanvasFactory() {
         },
 
         textContentCss(item) {
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (R && typeof R.textContentCss === 'function') {
+                return R.textContentCss(item, { forPrint: !!this.previewOnly });
+            }
             const st = item.styles || {};
             const d = this.defaultTextStyles();
             const ff = this._safeFontFamily(st.fontFamily || d.fontFamily);
@@ -735,6 +747,10 @@ function ekoEditorCanvasFactory() {
         },
 
         imageImgCss(item) {
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (R && typeof R.imageImgCss === 'function') {
+                return R.imageImgCss(item);
+            }
             const st = item.styles || {};
             const fit = String(st.objectFit || 'cover').toLowerCase();
             const f = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'cover';
@@ -1240,6 +1256,7 @@ function ekoEditorCanvasFactory() {
                 this.lastOkElementsJson = this.captureElementsJson();
                 this.savePending = false;
                 this.saveResult = 'Gravado';
+                this.scheduleThumbnail(templateIdAtStart);
                 if (this.captureElementsJson() !== sentJson) {
                     this.scheduleSave();
                 }
@@ -1257,6 +1274,35 @@ function ekoEditorCanvasFactory() {
                     this._persistQueued = false;
                     const t = this.persistToken;
                     this.$nextTick(() => this.persist(t));
+                }
+            }
+        },
+
+        scheduleThumbnail(templateId) {
+            this.generateThumbnail(templateId);
+        },
+
+        async generateThumbnail(templateId) {
+            const id = parseInt(String(templateId), 10);
+            const R = window.EkoCanvasRenderer;
+            const Ex = window.EkoThumbnailExport;
+            if (!id || !R || !Ex || typeof Ex.captureAndUpload !== 'function') {
+                return;
+            }
+            if (Number(this.cfg().templateId || 0) !== id) {
+                return;
+            }
+            try {
+                const payload = R.normalizePayload({
+                    width_mm: this.widthMm,
+                    height_mm: this.heightMm,
+                    elements: this.elements,
+                });
+                await Ex.captureAndUpload(id, payload, { source: 'editor_save', maxWidth: 520, quality: 0.85 });
+            } catch (e) {
+                if (window.EKO_RENDER_DEBUG || (R && R.isRenderDebug && R.isRenderDebug())) {
+                    // eslint-disable-next-line no-console
+                    console.warn('[EkoThumbnail] editor save', e);
                 }
             }
         },

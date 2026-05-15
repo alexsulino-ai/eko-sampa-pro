@@ -549,6 +549,7 @@ final class Eko_Sampa_Database {
                 'width_mm'      => 'int(11) NOT NULL DEFAULT 0',
                 'height_mm'     => 'int(11) NOT NULL DEFAULT 0',
                 'preview_image' => "varchar(500) NOT NULL DEFAULT ''",
+                'thumbnail_version' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
                 'json_data'     => 'longtext NULL',
                 'created_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 'updated_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',

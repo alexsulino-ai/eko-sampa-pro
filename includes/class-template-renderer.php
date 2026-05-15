@@ -30,50 +30,67 @@ final class Eko_Sampa_Template_Renderer {
     }
 
     /**
+     * Payload for EkoCanvasRenderer / order live preview (px canvas, tokens applied).
+     *
+     * @param array<string, mixed> $template_row
+     * @param array<string, string> $context
+     *
+     * @return array{width_mm: int, height_mm: int, elements: array<int, array<string, mixed>>}
+     */
+    public function build_editor_preview_payload(array $template_row, array $context): array {
+        $width_mm  = max(1, (int) ($template_row['width_mm'] ?? 210));
+        $height_mm = max(1, (int) ($template_row['height_mm'] ?? 297));
+
+        return Eko_Sampa_Render_Schema::envelope(
+            [
+                'width_mm'  => $width_mm,
+                'height_mm' => $height_mm,
+                'elements'  => $this->apply_context_to_elements(
+                    $this->parse_elements_from_template_row($template_row),
+                    $context
+                ),
+            ]
+        );
+    }
+
+    /**
      * @param array<string, mixed> $template_row Row from wp_eko_sampa_templates.
      * @param array<string, string> $context      Token => value (plain text).
      *
      * @return array{width_mm: int, height_mm: int, html: string}
      */
     public function render(array $template_row, array $context, bool $for_print = false): array {
-        $width_mm  = max(1, (int) ($template_row['width_mm'] ?? 210));
-        $height_mm = max(1, (int) ($template_row['height_mm'] ?? 297));
+        $preview   = $this->build_editor_preview_payload($template_row, $context);
+        $width_mm  = (int) $preview['width_mm'];
+        $height_mm = (int) $preview['height_mm'];
+        [ $canvas_w, $canvas_h ] = $this->design_canvas_px($width_mm, $height_mm);
 
-        $raw = $template_row['json_data'] ?? null;
-        $doc = [];
-        if (is_string($raw) && $raw !== '') {
-            $decoded = json_decode($raw, true);
-            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
-                $doc = $decoded;
-            }
-        }
-
-        $elements = [];
-        if (isset($doc['elements']) && is_array($doc['elements'])) {
-            $elements = $doc['elements'];
-        } elseif (isset($doc[0]) && is_array($doc[0])) {
-            $elements = $doc;
-        }
-
-        $frame_style = sprintf(
-            'position:relative;width:%dmm;height:%dmm;background:#fff;overflow:hidden;box-sizing:border-box;%s',
+        $print_adjust = '-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;';
+        $root_style   = sprintf(
+            'position:relative;width:%dmm;height:%dmm;%soverflow:hidden;box-sizing:border-box;background:#fff;',
             $width_mm,
             $height_mm,
-            $for_print ? '-webkit-print-color-adjust:exact;print-color-adjust:exact;' : ''
+            $for_print ? $print_adjust : ''
+        );
+        $surface_style = sprintf(
+            'width:%dpx;height:%dpx;position:relative;box-sizing:border-box;background:#fff;overflow:hidden;%s',
+            (int) $canvas_w,
+            (int) $canvas_h,
+            $for_print ? $print_adjust : ''
         );
 
-        [ $design_w, $design_h ] = $this->design_canvas_px($width_mm, $height_mm);
-
         $inner = '';
-        foreach ($elements as $el) {
+        foreach ($preview['elements'] as $el) {
             if (! is_array($el)) {
                 continue;
             }
-            $inner .= $this->render_element($el, $context, $for_print, $design_w, $design_h);
+            $inner .= $this->render_element($el, $for_print);
         }
 
         $wrap = $for_print ? 'eko-sampa-print-root' : 'eko-sampa-preview-root';
-        $html = '<div class="' . esc_attr($wrap) . '" style="' . esc_attr($frame_style) . '">' . $inner . '</div>';
+        $html = '<div class="' . esc_attr($wrap) . '" style="' . esc_attr($root_style) . '">'
+            . '<div class="eko-sampa-canvas" style="' . esc_attr($surface_style) . '">' . $inner . '</div>'
+            . '</div>';
 
         return [
             'width_mm'  => $width_mm,
@@ -142,33 +159,25 @@ final class Eko_Sampa_Template_Renderer {
 
     /**
      * @param array<string, mixed> $el
-     * @param array<string, string> $context
      */
-    private function render_element(array $el, array $context, bool $for_print, float $design_w, float $design_h): string {
+    private function render_element(array $el, bool $for_print): string {
         $x      = (float) ($el['x'] ?? 0);
         $y      = (float) ($el['y'] ?? 0);
-        $w      = (float) ($el['width'] ?? 1);
-        $h      = (float) ($el['height'] ?? 1);
+        $w      = (float) ($el['width'] ?? 10);
+        $h      = (float) ($el['height'] ?? 10);
         $type   = sanitize_key((string) ($el['type'] ?? 'text'));
         $styles = isset($el['styles']) && is_array($el['styles']) ? $el['styles'] : [];
 
-        $dw     = $design_w > 0.0 ? $design_w : 1.0;
-        $dh     = $design_h > 0.0 ? $design_h : 1.0;
-        $left   = max(0.0, min(100.0, ($x / $dw) * 100.0));
-        $top    = max(0.0, min(100.0, ($y / $dh) * 100.0));
-        $width  = max(0.0, min(100.0, ($w / $dw) * 100.0));
-        $height = max(0.0, min(100.0, ($h / $dh) * 100.0));
-
-        $base = sprintf(
-            'position:absolute;left:%F%%;top:%F%%;width:%F%%;height:%F%%;box-sizing:border-box;',
-            $left,
-            $top,
-            $width,
-            $height
+        $pos = sprintf(
+            'position:absolute;left:%Fpx;top:%Fpx;width:%Fpx;height:%Fpx;box-sizing:border-box;',
+            $x,
+            $y,
+            $w,
+            $h
         );
 
-        $frame_css = $this->build_frame_css($styles);
-        $inner_css = $this->build_text_inner_css($styles, $for_print);
+        $frame_css = $this->build_frame_css($styles, $type);
+        $text_css  = $this->build_text_inner_css($styles, $for_print);
 
         switch ($type) {
             case 'image':
@@ -178,30 +187,31 @@ final class Eko_Sampa_Template_Renderer {
                 }
                 $src = $this->resolve_public_url($raw_src);
                 if ($src === '') {
-                    return '<div style="' . esc_attr($base . 'background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>';
+                    return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                        . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css . ';background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>'
+                        . '</div>';
                 }
-
                 $img_css = $this->build_image_img_css($styles);
 
-                return '<div style="' . esc_attr($base . $frame_css) . '">'
-                    . '<img alt="" src="' . $src . '" style="' . esc_attr($img_css) . '" />'
-                    . '</div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '">'
+                    . '<img class="eko-sampa-canvas__img" alt="" src="' . $src . '" style="' . esc_attr($img_css) . '" loading="eager" decoding="sync" />'
+                    . '</div></div>';
 
             case 'rectangle':
-                $rect = $base . $frame_css . 'background:#f1f5f9;';
-
-                return '<div style="' . esc_attr($rect) . '"></div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '"></div>'
+                    . '</div>';
 
             case 'placeholder':
             case 'text':
             default:
-                $raw_content = (string) ($el['content'] ?? '');
-                $text        = Eko_Sampa_Placeholder_Tokens::replace_in_text($raw_content, $context);
-                $inner       = $base . $frame_css . 'box-sizing:border-box;';
+                $text = (string) ($el['content'] ?? '');
 
-                return '<div style="' . esc_attr($inner) . '">'
-                    . '<div style="' . esc_attr($inner_css) . '">' . esc_html($text) . '</div>'
-                    . '</div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '">'
+                    . '<span class="eko-sampa-canvas__text" style="' . esc_attr($text_css) . '">' . esc_html($text) . '</span>'
+                    . '</div></div>';
         }
     }
 
@@ -210,7 +220,7 @@ final class Eko_Sampa_Template_Renderer {
      *
      * @param array<string, mixed> $styles
      */
-    private function build_frame_css(array $styles): string {
+    private function build_frame_css(array $styles, string $type = ''): string {
         $opacity = isset($styles['opacity']) ? (float) $styles['opacity'] : 1.0;
         if ($opacity < 0.0) {
             $opacity = 0.0;
@@ -248,6 +258,10 @@ final class Eko_Sampa_Template_Renderer {
             $sh,
             $rot
         );
+
+        if ($type === 'rectangle') {
+            $css .= 'background:#f1f5f9;';
+        }
 
         return $css;
     }
@@ -310,7 +324,10 @@ final class Eko_Sampa_Template_Renderer {
             $fit = 'cover';
         }
 
-        return sprintf('width:100%%;height:100%%;display:block;object-fit:%s;', $fit);
+        return sprintf(
+            'width:100%%;height:100%%;max-width:100%%;max-height:100%%;display:block;object-fit:%s;-webkit-print-color-adjust:exact;print-color-adjust:exact;',
+            $fit
+        );
     }
 
     /**
