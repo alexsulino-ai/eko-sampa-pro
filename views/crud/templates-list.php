@@ -52,11 +52,15 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                         <td class="px-4 py-3 font-medium text-slate-900" x-text="r.nome"></td>
                         <td class="px-4 py-3 text-slate-600" x-text="r.categoria"></td>
                         <td class="px-4 py-3 text-right whitespace-nowrap">
-                            <a class="text-indigo-600 hover:underline" :href="viewUrl(r.id)"><?php echo esc_html__('View', 'eko-sampa'); ?></a>
-                            <a class="ml-3 text-indigo-600 hover:underline" :href="editUrl(r.id)"><?php echo esc_html__('Edit', 'eko-sampa'); ?></a>
-                            <a class="ml-3 text-slate-600 hover:underline" :href="editorUrl(r.id)"><?php echo esc_html__('Editor', 'eko-sampa'); ?></a>
-                            <button type="button" class="ml-3 text-slate-600 hover:underline" @click="duplicate(r.id)"><?php echo esc_html__('Duplicate', 'eko-sampa'); ?></button>
-                            <button type="button" class="ml-3 text-red-600 hover:underline" @click="remove(r.id)"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
+                            <?php
+                            eko_sampa_crud_actions_group_open();
+                            eko_sampa_crud_action('view', ['href' => 'viewUrl(r.id)']);
+                            eko_sampa_crud_action('edit', ['href' => 'editUrl(r.id)']);
+                            eko_sampa_crud_action('editor', ['href' => 'editorUrl(r.id)']);
+                            eko_sampa_crud_action('duplicate', ['click' => 'duplicate(r.id)']);
+                            eko_sampa_crud_action('delete', ['click' => 'remove(r.id)']);
+                            eko_sampa_crud_actions_group_close();
+                            ?>
                         </td>
                     </tr>
                 </template>

@@ -495,7 +495,7 @@ function ekoClientsFactory() {
 }
 
 function ekoServicesFactory() {
-    return Object.assign({}, ekoCrudMixin(), {
+    return Object.assign({}, ekoCrudMixin(), typeof window.ekoModalMixin === 'function' ? window.ekoModalMixin() : {}, {
         state: {
             rows: [],
             record: {},
@@ -529,6 +529,9 @@ function ekoServicesFactory() {
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
         async init() {
             this.initCrud();
+            if (typeof this.initEkoModalLayer === 'function') {
+                this.initEkoModalLayer();
+            }
             if (this.isAdmin) {
                 try {
                     this.state.users = await window.ekoSampaApi('users', { method: 'GET' });
@@ -570,7 +573,6 @@ function ekoServicesFactory() {
                     this.state.form = Object.assign({ is_global: 0 }, row);
                     this.state.form.id = parseInt(String(this.state.form.id || row.id || 0), 10) || 0;
                     await this.loadFields(this.state.form.id);
-                    this.newField();
                 }
             } catch (e) {
                 this.error = String(e.message || e);
@@ -682,7 +684,7 @@ function ekoServicesFactory() {
                 },
             });
         },
-        editField(f) {
+        populateFieldForm(f) {
             if (!f || !this.state.form.id) {
                 return;
             }
@@ -714,6 +716,38 @@ function ekoServicesFactory() {
                 validation: vr.validation,
                 _validationLegacyRaw: vr._validationLegacyRaw,
             };
+        },
+        editField(f) {
+            this.populateFieldForm(f);
+            this.openEkoModal({
+                title: 'Edit dynamic field',
+                saveLabel: 'Save field',
+                cancelLabel: 'Cancel',
+                onSave: () => this.saveField(true),
+                onCancel: () => this.newField(),
+            });
+        },
+        openAddFieldModal() {
+            if (!this.state.form.id) {
+                this.error = 'Save the service first before adding dynamic fields.';
+                return;
+            }
+            this.newField();
+            this.openEkoModal({
+                title: 'Add dynamic field',
+                saveLabel: 'Add field',
+                cancelLabel: 'Cancel',
+                onSave: () => this.saveField(true),
+                onCancel: () => this.newField(),
+            });
+        },
+        failField(message, fromModal) {
+            const msg = String(message || '');
+            if (fromModal) {
+                throw new Error(msg);
+            }
+            this.error = msg;
+            return false;
         },
         reset() {
             this.destroyFieldSortable();
@@ -793,20 +827,18 @@ function ekoServicesFactory() {
                 .replace(/[^a-z0-9]+/g, '-')
                 .replace(/^-+|-+$/g, '');
         },
-        async saveField() {
+        async saveField(fromModal) {
+            const modal = !!fromModal;
             const sid = parseInt(String(this.state.form.id || 0), 10);
             if (!sid) {
-                this.error = 'Save the service first before adding dynamic fields.';
-                return;
+                return this.failField('Save the service first before adding dynamic fields.', modal);
             }
             if (!this.state.fieldForm.label || !this.state.fieldForm.slug) {
-                this.error = 'Label and slug are required.';
-                return;
+                return this.failField('Label and slug are required.', modal);
             }
             const cand = this.slugifyFieldSlug(this.state.fieldForm.slug);
             if (!cand) {
-                this.error = 'Use a slug with letters or numbers (hyphens allowed).';
-                return;
+                return this.failField('Use a slug with letters or numbers (hyphens allowed).', modal);
             }
             const fid = Number(this.state.fieldForm.id) || 0;
             const dup = (this.state.fields || []).some((f) => {
@@ -817,11 +849,14 @@ function ekoServicesFactory() {
                 return existing === cand || this.slugifyFieldSlug(f.slug) === cand;
             });
             if (dup) {
-                this.error =
-                    'This slug is already used for another field in this service. Pick a different slug or edit the existing field.';
-                return;
+                return this.failField(
+                    'This slug is already used for another field in this service. Pick a different slug or edit the existing field.',
+                    modal
+                );
             }
-            this.error = null;
+            if (!modal) {
+                this.error = null;
+            }
             let optionsPayload = this.state.fieldForm.options_json;
             if (this.state.fieldForm.type === 'select') {
                 const raw = typeof optionsPayload === 'string' ? optionsPayload.trim() : '';
@@ -832,8 +867,10 @@ function ekoServicesFactory() {
                         const parsed = JSON.parse(raw);
                         optionsPayload = Array.isArray(parsed) ? parsed : [String(parsed)];
                     } catch (e) {
-                        this.error = 'Select options must be valid JSON (e.g. ["A","B"] or [{"value":"a","label":"A"}]).';
-                        return;
+                        return this.failField(
+                            'Select options must be valid JSON (e.g. ["A","B"] or [{"value":"a","label":"A"}]).',
+                            modal
+                        );
                     }
                 }
             } else {
@@ -854,9 +891,10 @@ function ekoServicesFactory() {
             );
             const vr = window.ekoSampaFieldValidation.buildRestValidationPayload(this.state.fieldForm);
             if (vr === false) {
-                this.error =
-                    'This field has stored validation rules that are not valid JSON. Fix or clear them in the database, then reload.';
-                return;
+                return this.failField(
+                    'This field has stored validation rules that are not valid JSON. Fix or clear them in the database, then reload.',
+                    modal
+                );
             }
             if (this.state.fieldForm.id) {
                 body.validation_rules_json = vr;
@@ -872,6 +910,9 @@ function ekoServicesFactory() {
                 await this.loadFields(sid);
                 this.newField();
             } catch (e) {
+                if (modal) {
+                    throw e;
+                }
                 this.error = String(e.message || e);
                 await this.loadFields(sid, { silent: true });
             }

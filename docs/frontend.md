@@ -72,14 +72,16 @@ Usar CSS variables:
 
 # Componentes
 
-Criar componentes reutilizáveis:
+Implementados (v1.5.0 — ver [crud-modules.md](crud-modules.md)):
 
-* buttons
-* cards
-* modals
+* **Modais**: `ekoSampaModalService` + `ekoModalMixin` + `views/partials/eko-base-modal.php`
+* **Action buttons CRUD**: `eko_sampa_crud_action()` em `includes/helpers-crud-ui.php`
+* **CRUD factories**: `eko*Factory()` + `ekoCrudMixin()` em `assets/js/frontend-app.js`
+* cards, tables, inputs (Tailwind nas views `views/crud/`)
+
+Planeados:
+
 * dropdowns
-* inputs
-* tables
 * badges
 * toasts
 

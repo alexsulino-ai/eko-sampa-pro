@@ -6,6 +6,22 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.5.0] — 2026-05-15
+
+### Adicionado
+
+- Modal reutilizável (`assets/js/eko-ui.js`, `views/partials/eko-base-modal.php`) para Dynamic Fields em Services.
+- Botões de ação CRUD padronizados (`includes/helpers-crud-ui.php`) nas listagens.
+- Documentação consolidada em `docs/crud-modules.md`.
+
+## [1.4.7] — 2026-05-15
+
+### Corrigido
+
+- `ensure_schema()` e `bin/eko-sampa-repair-db.php` para criar tabelas core em falta (ex. `eko_sampa_fields`).
+
+---
+
 ## [1.0.0] — 2026-05-12
 
 ### Adicionado

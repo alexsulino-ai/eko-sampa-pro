@@ -79,6 +79,8 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_FRONTEND_APP = 'eko-sampa-frontend-app';
 
+    public const HANDLE_EKO_UI = 'eko-sampa-ui';
+
     public const HANDLE_SORTABLE = 'eko-sampa-sortable';
 
     public const HANDLE_FRONTEND_STYLE = 'eko-sampa-frontend';
@@ -207,6 +209,18 @@ final class Eko_Sampa_Assets {
             true
         );
 
+        $ui_rel = 'assets/js/eko-ui.js';
+        $ui     = EKO_SAMPA_PLUGIN_DIR . $ui_rel;
+        if (is_readable($ui)) {
+            wp_register_script(
+                self::HANDLE_EKO_UI,
+                $this->plugin_asset_url($ui_rel),
+                [],
+                $this->plugin_asset_version($ui_rel),
+                true
+            );
+        }
+
         $fe_app_rel = 'assets/js/frontend-app.js';
         $fe_app     = EKO_SAMPA_PLUGIN_DIR . $fe_app_rel;
         if (is_readable($fe_app)) {
@@ -215,10 +229,11 @@ final class Eko_Sampa_Assets {
              * `Alpine.data(...)`. If Alpine runs first, `alpine:init` has already fired and CRUD
              * components never register (UI looks static; saves never run).
              */
+            $fe_deps = wp_script_is(self::HANDLE_EKO_UI, 'registered') ? [self::HANDLE_EKO_UI] : [];
             wp_register_script(
                 self::HANDLE_FRONTEND_APP,
                 $this->plugin_asset_url($fe_app_rel),
-                [],
+                $fe_deps,
                 $this->plugin_asset_version($fe_app_rel),
                 true
             );
@@ -298,6 +313,9 @@ final class Eko_Sampa_Assets {
         }
 
         if ($this->should_enqueue_frontend_rest_bundle()) {
+            if (wp_script_is(self::HANDLE_EKO_UI, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_UI);
+            }
             $fe_app_path = EKO_SAMPA_PLUGIN_DIR . 'assets/js/frontend-app.js';
             if (wp_script_is(self::HANDLE_FRONTEND_APP, 'registered') && is_readable($fe_app_path)) {
                 wp_enqueue_script(self::HANDLE_FRONTEND_APP);

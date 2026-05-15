@@ -325,6 +325,14 @@ Shortcodes opcionais para páginas no tema:
 
 Após instalar ou atualizar o plugin, salvar **links permanentes** uma vez se as rotas não resolverem (o `activation hook` executa `flush_rewrite_rules`).
 
+### CRUD frontend (Services, Orders, Templates, Clients)
+
+Padrão de rotas, listagem, visualização, edição, modais e botões de ação: **[docs/crud-modules.md](crud-modules.md)**.
+
+### Schema DB resiliente (v1.4.7+)
+
+`Eko_Sampa_Database::ensure_schema()` roda no boot do plugin: aplica migrações pendentes e recria tabelas core em falta (`eko_sampa_fields`, etc.) mesmo quando `eko_sampa_db_version` já está atualizado. Reparo manual: `bin/eko-sampa-repair-db.php`.
+
 ---
 
 # Controle de Permissões
