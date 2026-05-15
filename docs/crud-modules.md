@@ -196,13 +196,70 @@ this.openEkoModal({
 
 ---
 
+## Infraestrutura UI (v1.6.0)
+
+### Z-index centralizado
+
+CSS: `assets/css/eko-design-system.css` — variáveis `--eko-z-modal`, `--eko-z-dropdown`, `--eko-z-tooltip`, `--eko-z-toast`, etc.
+
+JS: `window.ekoSampaLayers.z('modal', stackOffset)` — modal aninhado sobe camada sem `z-[999999]`.
+
+### Modal (acessibilidade + persistência)
+
+- Scroll lock com compensação da scrollbar (`padding-right` no body).
+- Focus trap (Tab cicla no painel), foco inicial, restore ao fechar.
+- `role="dialog"`, `aria-modal`, `aria-labelledby`.
+- Dirty state: `isDirty` no `open()` + confirmação ao cancelar + `beforeunload`.
+- Anti double-submit: `saving` bloqueia botões e segundo `confirm`.
+- Evento: `eko:modal:saved` via `ekoSampaEventBus`.
+
+### Field Definition vs Instance
+
+`window.ekoSampaFieldSchema`:
+
+- **Definition** (`fieldDraft.definition`): label, slug, type, validation, defaults…
+- **Meta** (`fieldDraft.meta`): `id`, `service_id`, `sort_order` (persistência)
+- **Instance** = draft em edição no modal; lista `state.fields` = registos da API
+
+### Event bus
+
+`window.ekoSampaEventBus.on('eko:service:fields-changed', fn)` — desacoplamento entre módulos.
+
+### Action buttons por configuração
+
+```php
+eko_sampa_crud_actions_render([
+    ['type' => 'view', 'href' => 'viewUrl(r.id)'],
+    ['type' => 'edit', 'href' => 'editUrl(r.id)', 'show' => 'canEdit'],
+    ['type' => 'delete', 'click' => 'remove(r.id)', 'disabled' => 'loading'],
+]);
+```
+
+Variantes em `eko_sampa_crud_action_variants()` — extensível para `loading`, `disabled`, `show`.
+
+### Estados UI
+
+Partials: `ui-state-loading.php`, `ui-state-empty.php`, `ui-state-error.php` + classes `.eko-ui-*`.
+
+### Dynamic Fields (lista)
+
+- Drag-and-drop reorder (SortableJS)
+- Painel colapsável
+- Filtro por texto (`fieldSearch`)
+- Linhas expansíveis (detalhe)
+
+Próximos passos documentados (não implementados): categorias, presets, validation preview, schema preview.
+
+---
+
 ## Registo de ajustes recentes (memória operacional)
 
 | Versão | Ajuste |
 |--------|--------|
+| 1.6.0 | Design system CSS, z-layers, focus trap, field schema, event bus, UI states, actions config |
+| 1.5.0 | Modal global para dynamic fields; action buttons padronizados; documentação CRUD consolidada |
 | 1.4.7 | `ensure_schema()` / reparo de tabelas; fields REST com diagnóstico |
 | 1.0.3 | Colunas extended em fields + snapshot em orders |
-| 1.5.0 | Modal global para dynamic fields; action buttons padronizados; documentação CRUD consolidada |
 
 ---
 

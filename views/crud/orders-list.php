@@ -63,13 +63,15 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('orders', 'new');
                         <td class="px-4 py-3 text-slate-600" x-text="r.print_ready == 1 ? '<?php echo esc_js(__('Yes', 'eko-sampa')); ?>' : '<?php echo esc_js(__('No', 'eko-sampa')); ?>'"></td>
                         <td class="px-4 py-3 text-right whitespace-nowrap">
                             <?php
-                            eko_sampa_crud_actions_group_open();
-                            eko_sampa_crud_action('view', ['href' => 'viewUrl(r.id)']);
-                            eko_sampa_crud_action('edit', ['href' => 'editUrl(r.id)']);
-                            eko_sampa_crud_action('print', ['href' => 'printUrl(r.id)', 'target' => '_blank']);
-                            eko_sampa_crud_action('duplicate', ['click' => 'dup(r.id)']);
-                            eko_sampa_crud_action('delete', ['click' => 'remove(r.id)']);
-                            eko_sampa_crud_actions_group_close();
+                            eko_sampa_crud_actions_render(
+                                [
+                                    ['type' => 'view', 'href' => 'viewUrl(r.id)'],
+                                    ['type' => 'edit', 'href' => 'editUrl(r.id)'],
+                                    ['type' => 'print', 'href' => 'printUrl(r.id)', 'target' => '_blank'],
+                                    ['type' => 'duplicate', 'click' => 'dup(r.id)'],
+                                    ['type' => 'delete', 'click' => 'remove(r.id)'],
+                                ]
+                            );
                             ?>
                         </td>
                     </tr>

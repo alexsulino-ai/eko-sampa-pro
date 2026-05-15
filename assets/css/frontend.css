@@ -12,11 +12,3 @@
 [x-cloak] {
     display: none !important;
 }
-
-html.eko-modal-open {
-    overflow: hidden;
-}
-
-html.eko-modal-open body {
-    overflow: hidden;
-}

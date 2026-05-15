@@ -495,7 +495,13 @@ function ekoClientsFactory() {
 }
 
 function ekoServicesFactory() {
-    return Object.assign({}, ekoCrudMixin(), typeof window.ekoModalMixin === 'function' ? window.ekoModalMixin() : {}, {
+    var fieldSchema = window.ekoSampaFieldSchema;
+    return Object.assign(
+        {},
+        ekoCrudMixin(),
+        typeof window.ekoModalMixin === 'function' ? window.ekoModalMixin() : {},
+        typeof window.ekoUiStatesMixin === 'function' ? window.ekoUiStatesMixin() : {},
+        {
         state: {
             rows: [],
             record: {},
@@ -507,23 +513,13 @@ function ekoServicesFactory() {
             filterUserId: '',
             users: [],
             form: { id: 0, nome: '', descricao: '', is_global: 0 },
-            fieldForm: {
-                id: 0,
-                service_id: 0,
-                label: '',
-                slug: '',
-                type: 'text',
-                required: 0,
-                options_json: null,
-                sort_order: 0,
-                default_value: '',
-                placeholder: '',
-                show_in_template: 1,
-                validation: window.ekoSampaFieldValidation.emptyValidationState(),
-                _validationLegacyRaw: null,
-            },
+            fieldSearch: '',
+            fieldsPanelOpen: true,
+            expandedFieldIds: {},
+            fieldDraft: fieldSchema ? fieldSchema.emptyDraft(0, 0) : { meta: {}, definition: {} },
             _fieldSortable: null,
         },
+        _fieldDraftBaseline: '',
         loading: false,
         error: null,
         isAdmin: !!(window.ekoSampaRest && window.ekoSampaRest.isAdmin),
@@ -684,62 +680,80 @@ function ekoServicesFactory() {
                 },
             });
         },
-        populateFieldForm(f) {
-            if (!f || !this.state.form.id) {
+        filteredFieldsList() {
+            const q = String(this.state.fieldSearch || '')
+                .trim()
+                .toLowerCase();
+            const list = Array.isArray(this.state.fields) ? this.state.fields : [];
+            if (!q) {
+                return list;
+            }
+            return list.filter(function (f) {
+                if (!f) {
+                    return false;
+                }
+                const label = String(f.label || '').toLowerCase();
+                const slug = String(f.slug || '').toLowerCase();
+                const type = String(f.type || '').toLowerCase();
+                return label.indexOf(q) >= 0 || slug.indexOf(q) >= 0 || type.indexOf(q) >= 0;
+            });
+        },
+        toggleFieldsPanel() {
+            this.state.fieldsPanelOpen = !this.state.fieldsPanelOpen;
+        },
+        toggleFieldExpand(id) {
+            const k = String(id);
+            this.state.expandedFieldIds[k] = !this.state.expandedFieldIds[k];
+        },
+        isFieldExpanded(id) {
+            return !!this.state.expandedFieldIds[String(id)];
+        },
+        resetFieldDraft() {
+            if (!fieldSchema || !this.state.form.id) {
                 return;
             }
-            const req = f.required == null ? 0 : parseInt(String(f.required), 10) ? 1 : 0;
-            const sit = f.show_in_template == null ? 1 : parseInt(String(f.show_in_template), 10) ? 1 : 0;
-            let opt = f.options_json;
-            if (opt != null && opt !== '' && typeof opt === 'object') {
-                try {
-                    opt = JSON.stringify(opt);
-                } catch (e) {
-                    opt = '';
-                }
-            } else if (opt != null && typeof opt !== 'string') {
-                opt = String(opt);
+            this.state.fieldDraft = fieldSchema.emptyDraft(this.state.form.id, this.state.fields.length);
+            this._fieldDraftBaseline = fieldSchema.snapshot(this.state.fieldDraft);
+        },
+        loadFieldDraftFromRow(f) {
+            if (!fieldSchema || !f || !this.state.form.id) {
+                return;
             }
-            const vr = window.ekoSampaFieldValidation.parseFieldRow(f);
-            this.state.fieldForm = {
-                id: f.id,
-                service_id: this.state.form.id,
-                label: f.label != null ? String(f.label) : '',
-                slug: f.slug != null ? String(f.slug) : '',
-                type: f.type != null ? String(f.type) : 'text',
-                required: req,
-                options_json: opt != null && opt !== '' ? opt : f.type === 'select' ? '[]' : null,
-                sort_order: f.sort_order != null ? Number(f.sort_order) : 0,
-                default_value: f.default_value != null ? String(f.default_value) : '',
-                placeholder: f.placeholder != null ? String(f.placeholder) : '',
-                show_in_template: sit,
-                validation: vr.validation,
-                _validationLegacyRaw: vr._validationLegacyRaw,
-            };
+            this.state.fieldDraft = fieldSchema.fromApiRow(f, this.state.form.id);
+            this._fieldDraftBaseline = fieldSchema.snapshot(this.state.fieldDraft);
+        },
+        openFieldModal(title, saveLabel) {
+            var self = this;
+            if (!fieldSchema) {
+                return;
+            }
+            this._fieldDraftBaseline = fieldSchema.snapshot(this.state.fieldDraft);
+            this.openEkoModal({
+                title: title,
+                saveLabel: saveLabel,
+                cancelLabel: 'Cancel',
+                isDirty: function () {
+                    return fieldSchema.isDirty(self._fieldDraftBaseline, self.state.fieldDraft);
+                },
+                onSave: function () {
+                    return self.saveField(true);
+                },
+                onCancel: function () {
+                    self.resetFieldDraft();
+                },
+            });
         },
         editField(f) {
-            this.populateFieldForm(f);
-            this.openEkoModal({
-                title: 'Edit dynamic field',
-                saveLabel: 'Save field',
-                cancelLabel: 'Cancel',
-                onSave: () => this.saveField(true),
-                onCancel: () => this.newField(),
-            });
+            this.loadFieldDraftFromRow(f);
+            this.openFieldModal('Edit dynamic field', 'Save field');
         },
         openAddFieldModal() {
             if (!this.state.form.id) {
                 this.error = 'Save the service first before adding dynamic fields.';
                 return;
             }
-            this.newField();
-            this.openEkoModal({
-                title: 'Add dynamic field',
-                saveLabel: 'Add field',
-                cancelLabel: 'Cancel',
-                onSave: () => this.saveField(true),
-                onCancel: () => this.newField(),
-            });
+            this.resetFieldDraft();
+            this.openFieldModal('Add dynamic field', 'Add field');
         },
         failField(message, fromModal) {
             const msg = String(message || '');
@@ -793,24 +807,10 @@ function ekoServicesFactory() {
             }
         },
         newField() {
-            if (!this.state.form.id) {
-                return;
-            }
-            this.state.fieldForm = {
-                id: 0,
-                service_id: this.state.form.id,
-                label: '',
-                slug: '',
-                type: 'text',
-                required: 0,
-                options_json: null,
-                sort_order: this.state.fields.length,
-                default_value: '',
-                placeholder: '',
-                show_in_template: 1,
-                validation: window.ekoSampaFieldValidation.emptyValidationState(),
-                _validationLegacyRaw: null,
-            };
+            this.resetFieldDraft();
+        },
+        fieldDraftFlat() {
+            return fieldSchema ? fieldSchema.toFlat(this.state.fieldDraft) : {};
         },
         /**
          * Approximates WordPress {@see sanitize_title()} for duplicate checks (ASCII + Latin-1).
@@ -830,17 +830,19 @@ function ekoServicesFactory() {
         async saveField(fromModal) {
             const modal = !!fromModal;
             const sid = parseInt(String(this.state.form.id || 0), 10);
+            const def = this.state.fieldDraft && this.state.fieldDraft.definition ? this.state.fieldDraft.definition : {};
+            const meta = this.state.fieldDraft && this.state.fieldDraft.meta ? this.state.fieldDraft.meta : {};
             if (!sid) {
                 return this.failField('Save the service first before adding dynamic fields.', modal);
             }
-            if (!this.state.fieldForm.label || !this.state.fieldForm.slug) {
+            if (!def.label || !def.slug) {
                 return this.failField('Label and slug are required.', modal);
             }
-            const cand = this.slugifyFieldSlug(this.state.fieldForm.slug);
+            const cand = this.slugifyFieldSlug(def.slug);
             if (!cand) {
                 return this.failField('Use a slug with letters or numbers (hyphens allowed).', modal);
             }
-            const fid = Number(this.state.fieldForm.id) || 0;
+            const fid = Number(meta.id) || 0;
             const dup = (this.state.fields || []).some((f) => {
                 if (!f || Number(f.id) === fid) {
                     return false;
@@ -857,8 +859,8 @@ function ekoServicesFactory() {
             if (!modal) {
                 this.error = null;
             }
-            let optionsPayload = this.state.fieldForm.options_json;
-            if (this.state.fieldForm.type === 'select') {
+            let optionsPayload = def.options_json;
+            if (def.type === 'select') {
                 const raw = typeof optionsPayload === 'string' ? optionsPayload.trim() : '';
                 if (raw === '') {
                     optionsPayload = [];
@@ -878,37 +880,40 @@ function ekoServicesFactory() {
             }
             const body = JSON.parse(
                 JSON.stringify({
-                    label: this.state.fieldForm.label,
+                    label: def.label,
                     slug: cand,
-                    type: this.state.fieldForm.type,
-                    required: parseInt(String(this.state.fieldForm.required), 10) ? 1 : 0,
+                    type: def.type,
+                    required: parseInt(String(def.required), 10) ? 1 : 0,
                     options_json: optionsPayload,
-                    sort_order: Number(this.state.fieldForm.sort_order) || 0,
-                    default_value: this.state.fieldForm.default_value != null ? String(this.state.fieldForm.default_value) : '',
-                    placeholder: this.state.fieldForm.placeholder != null ? String(this.state.fieldForm.placeholder) : '',
-                    show_in_template: parseInt(String(this.state.fieldForm.show_in_template), 10) ? 1 : 0,
+                    sort_order: Number(meta.sort_order) || 0,
+                    default_value: def.default_value != null ? String(def.default_value) : '',
+                    placeholder: def.placeholder != null ? String(def.placeholder) : '',
+                    show_in_template: parseInt(String(def.show_in_template), 10) ? 1 : 0,
                 })
             );
-            const vr = window.ekoSampaFieldValidation.buildRestValidationPayload(this.state.fieldForm);
+            const vr = window.ekoSampaFieldValidation.buildRestValidationPayload(fieldSchema.toFlat(this.state.fieldDraft));
             if (vr === false) {
                 return this.failField(
                     'This field has stored validation rules that are not valid JSON. Fix or clear them in the database, then reload.',
                     modal
                 );
             }
-            if (this.state.fieldForm.id) {
+            if (meta.id) {
                 body.validation_rules_json = vr;
             } else if (vr !== null) {
                 body.validation_rules_json = vr;
             }
             try {
-                if (this.state.fieldForm.id) {
-                    await window.ekoSampaApi('services/' + sid + '/fields/' + this.state.fieldForm.id, { method: 'PATCH', body });
+                if (meta.id) {
+                    await window.ekoSampaApi('services/' + sid + '/fields/' + meta.id, { method: 'PATCH', body });
                 } else {
                     await window.ekoSampaApi('services/' + sid + '/fields', { method: 'POST', body });
                 }
                 await this.loadFields(sid);
-                this.newField();
+                this.resetFieldDraft();
+                if (window.ekoSampaEventBus) {
+                    window.ekoSampaEventBus.emit('eko:service:fields-changed', { serviceId: sid });
+                }
             } catch (e) {
                 if (modal) {
                     throw e;
@@ -928,7 +933,8 @@ function ekoServicesFactory() {
                 this.error = String(e.message || e);
             }
         },
-    });
+    }
+    );
 }
 
 function ekoTemplatesFactory() {

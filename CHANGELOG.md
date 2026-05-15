@@ -6,6 +6,15 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.6.0] — 2026-05-15
+
+### Adicionado
+
+- Design system (`assets/css/eko-design-system.css`): tokens, z-layers, botões, inputs, estados UI.
+- Modal: focus trap, scroll lock com gap da scrollbar, dirty state, `beforeunload`, z-index por stack.
+- `ekoSampaFieldSchema` (definition vs meta/instance), `ekoSampaEventBus`, `ekoSampaLayers`.
+- Dynamic fields: filtro, painel colapsável, linhas expansíveis; `eko_sampa_crud_actions_render()`.
+
 ## [1.5.0] — 2026-05-15
 
 ### Adicionado

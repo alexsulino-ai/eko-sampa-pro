@@ -92,6 +92,12 @@ function eko_sampa_crud_action(string $type, array $args = []): void {
     if (! empty($args['show'])) {
         $attrs['x-show'] = (string) $args['show'];
     }
+    if (! empty($args['disabled'])) {
+        $attrs[':disabled'] = (string) $args['disabled'];
+    }
+    if (! empty($args['loading'])) {
+        $attrs['x-bind:class'] = "((" . (string) $args['loading'] . ") ? 'opacity-50 pointer-events-none' : '')";
+    }
 
     $is_button = ! empty($args['click']);
     $tag       = $is_button ? 'button' : 'a';
@@ -142,4 +148,22 @@ function eko_sampa_crud_actions_group_open(): void {
 
 function eko_sampa_crud_actions_group_close(): void {
     echo '</div>';
+}
+
+/**
+ * Render a row of actions from configuration.
+ *
+ * @param list<array<string, mixed>> $actions Each item: type + optional href, click, show, disabled, loading, ...
+ */
+function eko_sampa_crud_actions_render(array $actions): void {
+    eko_sampa_crud_actions_group_open();
+    foreach ($actions as $action) {
+        if (! is_array($action) || empty($action['type'])) {
+            continue;
+        }
+        $type = sanitize_key((string) $action['type']);
+        unset($action['type']);
+        eko_sampa_crud_action($type, $action);
+    }
+    eko_sampa_crud_actions_group_close();
 }

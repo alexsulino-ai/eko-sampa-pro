@@ -83,6 +83,8 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_SORTABLE = 'eko-sampa-sortable';
 
+    public const HANDLE_DESIGN_SYSTEM = 'eko-sampa-design-system';
+
     public const HANDLE_FRONTEND_STYLE = 'eko-sampa-frontend';
 
     public function register_hooks(): void {
@@ -271,13 +273,25 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        $ds_css_rel = 'assets/css/eko-design-system.css';
+        $ds_css     = EKO_SAMPA_PLUGIN_DIR . $ds_css_rel;
+        if (is_readable($ds_css)) {
+            wp_register_style(
+                self::HANDLE_DESIGN_SYSTEM,
+                $this->plugin_asset_url($ds_css_rel),
+                [],
+                $this->plugin_asset_version($ds_css_rel)
+            );
+        }
+
         $fe_css_rel = 'assets/css/frontend.css';
         $fe_css     = EKO_SAMPA_PLUGIN_DIR . $fe_css_rel;
+        $fe_deps    = wp_style_is(self::HANDLE_DESIGN_SYSTEM, 'registered') ? [self::HANDLE_DESIGN_SYSTEM] : [];
         if (is_readable($fe_css)) {
             wp_register_style(
                 self::HANDLE_FRONTEND_STYLE,
                 $this->plugin_asset_url($fe_css_rel),
-                [],
+                $fe_deps,
                 $this->plugin_asset_version($fe_css_rel)
             );
         }
