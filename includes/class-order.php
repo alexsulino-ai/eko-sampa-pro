@@ -345,14 +345,53 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         $payload_service = absint((int) ( $data['service_id'] ?? 0 ));
 
         if ($tpl_service > 0) {
-            $data['service_id'] = $tpl_service;
+            if (( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $tpl_service)) {
+                $data['service_id'] = $tpl_service;
+            } else {
+                $data['service_id'] = 0;
+            }
         } elseif ($payload_service > 0) {
-            $data['service_id'] = $payload_service;
+            if (( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $payload_service)) {
+                $data['service_id'] = $payload_service;
+            } else {
+                $data['service_id'] = 0;
+            }
         }
 
         $data['template_id'] = $template_id;
 
         return $data;
+    }
+
+    /**
+     * API flags for order form (recovered/orphan service → template placeholder fields).
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    public function enrich_row_for_api(array $row): array {
+        $sid = absint((int) ( $row['service_id'] ?? 0 ));
+        $row['service_is_recovered']       = false;
+        $row['service_is_orphan']          = false;
+        $row['service_label']              = '';
+        $row['use_template_placeholders']  = false;
+
+        if ($sid > 0) {
+            $svc = ( new Eko_Sampa_Service() )->get_row_by_id($sid);
+            if (is_array($svc)) {
+                $row['service_label']         = (string) ( $svc['nome'] ?? '' );
+                $row['service_is_recovered']  = Eko_Sampa_Service::is_recovered_row($svc);
+                $row['use_template_placeholders'] = $row['service_is_recovered'];
+            } else {
+                $row['service_is_orphan']         = true;
+                $row['use_template_placeholders'] = true;
+            }
+        } elseif (absint((int) ( $row['template_id'] ?? 0 )) > 0) {
+            $row['use_template_placeholders'] = true;
+        }
+
+        return $row;
     }
 
     /**
@@ -406,37 +445,42 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
 
             $tpl_service = $this->template_service_id_from_row($template_row);
             if ($tpl_service > 0) {
-                $ids['service_id']      = $tpl_service;
-                $debug['service_id']    = $tpl_service;
-                $data['service_id']     = $tpl_service;
+                if (( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $tpl_service)) {
+                    $ids['service_id']   = $tpl_service;
+                    $debug['service_id'] = $tpl_service;
+                    $data['service_id']  = $tpl_service;
+                } else {
+                    $ids['service_id']   = 0;
+                    $debug['service_id'] = 0;
+                    $data['service_id']  = 0;
+                    $debug['template_service_orphan'] = $tpl_service;
+                }
             }
         }
 
-        if ($ids['template_id'] > 0 && $ids['service_id'] <= 0) {
-            $debug['failed_at'] = 'service_missing_for_template';
-
-            $this->last_relations_check = ['ok' => false, 'debug' => $debug];
-
-            return $this->last_relations_check;
-        }
-
         if ($ids['service_id'] > 0) {
-            $service_model = new Eko_Sampa_Service();
-            $debug['service_exists']            = ( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $ids['service_id']);
-            $debug['service_lookup_table']      = $GLOBALS['wpdb']->prefix . 'eko_sampa_services';
-            $debug['service_visible_in_scope']  = is_array($service_model->get($ids['service_id']));
-            $debug['service_visible_for_order'] = $this->service_visible_for_order(
-                $ids['service_id'],
-                $ids['template_id'],
-                is_array($template_row) ? $template_row : null
-            );
+            $svc_row     = ( new Eko_Sampa_Service() )->get_row_by_id($ids['service_id']);
+            $is_recovered = is_array($svc_row) && Eko_Sampa_Service::is_recovered_row($svc_row);
+            if ($is_recovered) {
+                $debug['service_is_recovered'] = true;
+            } else {
+                $service_model = new Eko_Sampa_Service();
+                $debug['service_exists']            = ( new Eko_Sampa_Database() )->row_exists('eko_sampa_services', $ids['service_id']);
+                $debug['service_lookup_table']      = $GLOBALS['wpdb']->prefix . 'eko_sampa_services';
+                $debug['service_visible_in_scope']  = is_array($service_model->get($ids['service_id']));
+                $debug['service_visible_for_order'] = $this->service_visible_for_order(
+                    $ids['service_id'],
+                    $ids['template_id'],
+                    is_array($template_row) ? $template_row : null
+                );
 
-            if (! $debug['service_visible_for_order']) {
-                $debug['failed_at'] = 'service_not_visible_for_order';
+                if (! $debug['service_visible_for_order']) {
+                    $debug['failed_at'] = 'service_not_visible_for_order';
 
-                $this->last_relations_check = ['ok' => false, 'debug' => $debug];
+                    $this->last_relations_check = ['ok' => false, 'debug' => $debug];
 
-                return $this->last_relations_check;
+                    return $this->last_relations_check;
+                }
             }
         }
 

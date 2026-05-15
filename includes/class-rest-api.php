@@ -631,16 +631,70 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_services_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id = (int) $request['id'];
-        $ok = (new Eko_Sampa_Service())->delete($id);
-        if (! $ok) {
+
+        $strict = in_array((string) $request->get_param('strict'), ['1', 'true', 'yes'], true);
+        $raw_ul = $request->get_param('unlink_refs');
+        $unlink = true;
+        if (null !== $raw_ul && '' !== (string) $raw_ul) {
+            $unlink = ! in_array($raw_ul, [0, '0', false, 'false', 'no'], true);
+        }
+
+        $repair_legacy = ! in_array((string) $request->get_param('repair_legacy'), ['0', 'false', 'no'], true);
+        $ensure_schema   = in_array((string) $request->get_param('ensure_schema'), ['1', 'true', 'yes'], true);
+
+        if (! function_exists('eko_sampa_safe_delete_service')) {
             return new \WP_Error(
                 'eko_sampa_delete_failed',
                 __('Could not delete service.', 'eko-sampa'),
-                array_merge(['status' => 400], $this->wpdb_debug_data())
+                array_merge(['status' => 500, 'debug' => ['failed_at' => 'helper_missing']], $this->wpdb_debug_data())
             );
         }
 
-        return new \WP_REST_Response(['deleted' => true]);
+        $result = eko_sampa_safe_delete_service(
+            $id,
+            [
+                'strict_block'  => $strict,
+                'unlink_refs'   => $unlink,
+                'repair_legacy' => $repair_legacy,
+                'ensure_schema' => $ensure_schema,
+            ]
+        );
+
+        if (! empty($result['ok'])) {
+            $payload = [
+                'deleted' => true,
+                'code'    => $result['code'] ?? 'deleted',
+            ];
+            if (! empty($result['debug']['repairs'])) {
+                $payload['repairs'] = $result['debug']['repairs'];
+            }
+
+            return new \WP_REST_Response($payload);
+        }
+
+        $code    = (string) ( $result['code'] ?? 'eko_sampa_delete_failed' );
+        $message = (string) ( $result['message'] ?? __('Could not delete service.', 'eko-sampa') );
+        $status  = $this->service_delete_error_status($code);
+
+        $data = array_merge(
+            [
+                'status' => $status,
+                'debug'  => is_array($result['debug'] ?? null) ? $result['debug'] : [],
+            ],
+            $this->wpdb_debug_data()
+        );
+
+        return new \WP_Error($code, $message, $data);
+    }
+
+    private function service_delete_error_status(string $code): int {
+        return match ($code) {
+            'eko_sampa_not_found' => 404,
+            'eko_sampa_delete_forbidden' => 403,
+            'eko_sampa_delete_blocked_dependencies' => 409,
+            'eko_sampa_bad_request' => 400,
+            default => 400,
+        };
     }
 
     public function route_fields_list(\WP_REST_Request $request): \WP_REST_Response {
@@ -1046,9 +1100,6 @@ final class Eko_Sampa_Rest_Api {
         $params = $order->prepare_create_data($raw);
 
         $relations = $order->relations_validate($params, null);
-        if (! $relations['ok']) {
-            $relations = $this->maybe_repair_orphan_template_service_for_order($raw, $params, $order, $relations);
-        }
 
         if (! $relations['ok']) {
             $failed = isset($relations['debug']['failed_at']) ? (string) $relations['debug']['failed_at'] : 'unknown';
@@ -1061,7 +1112,7 @@ final class Eko_Sampa_Rest_Api {
                 && empty($relations['debug']['service_exists'])
                 && ! empty($relations['debug']['template_id'])) {
                 $msg .= ' ' . __(
-                    'The template references a service that does not exist in the database. Open Eko Sampa → Diagnostics and run repair, or re-link the service on the template.',
+                    'The template references a missing service. Edit the template to link a real service, or create the order with template placeholders only (service left empty).',
                     'eko-sampa'
                 );
             }
@@ -1090,17 +1141,23 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response($order->get((int) $id), 201);
+        $created = $order->get((int) $id);
+
+        return new \WP_REST_Response(
+            is_array($created) ? $order->enrich_row_for_api($created) : ['id' => $id],
+            201
+        );
     }
 
     public function route_orders_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id  = (int) $request['id'];
-        $row = (new Eko_Sampa_Order())->get($id);
+        $id    = (int) $request['id'];
+        $model = new Eko_Sampa_Order();
+        $row   = $model->get($id);
         if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        return new \WP_REST_Response($row);
+        return new \WP_REST_Response($model->enrich_row_for_api($row));
     }
 
     public function route_orders_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1114,7 +1171,11 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Order())->get($id));
+        $fresh = (new Eko_Sampa_Order())->get($id);
+
+        return new \WP_REST_Response(
+            is_array($fresh) ? ( new Eko_Sampa_Order() )->enrich_row_for_api($fresh) : ['id' => $id]
+        );
     }
 
     public function route_orders_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1221,9 +1282,11 @@ final class Eko_Sampa_Rest_Api {
 
         return new \WP_REST_Response(
             [
-                'clients'   => (new Eko_Sampa_Client())->list($args),
-                'services'  => (new Eko_Sampa_Service())->list($args),
-                'templates' => (new Eko_Sampa_Template())->list($args),
+                'clients'   => array_values((new Eko_Sampa_Client())->list($args)),
+                'services'  => array_values((new Eko_Sampa_Service())->list($args)),
+                'templates' => array_values(
+                    $this->enrich_template_rows((new Eko_Sampa_Template())->list($args))
+                ),
             ]
         );
     }
@@ -1297,56 +1360,6 @@ final class Eko_Sampa_Rest_Api {
         }
 
         return new \WP_Error($code, $msg, $data);
-    }
-
-    /**
-     * When template points at a missing service row, create service + re-link once, then re-validate.
-     *
-     * @param array<string, mixed> $raw
-     * @param array<string, mixed> $params
-     * @param array{ok: bool, debug: array<string, mixed>} $relations
-     *
-     * @return array{ok: bool, debug: array<string, mixed>}
-     */
-    private function maybe_repair_orphan_template_service_for_order(
-        array $raw,
-        array $params,
-        Eko_Sampa_Order $order,
-        array $relations
-    ): array {
-        if ($relations['ok']) {
-            return $relations;
-        }
-
-        $failed = (string) ( $relations['debug']['failed_at'] ?? '' );
-        if ($failed !== 'service_not_visible_for_order' || ! empty($relations['debug']['service_exists'])) {
-            return $relations;
-        }
-
-        $template_id = absint((int) ( $params['template_id'] ?? 0 ));
-        $service_id  = absint((int) ( $params['service_id'] ?? 0 ));
-        if ($template_id <= 0 || $service_id <= 0) {
-            return $relations;
-        }
-
-        $integrity = new Eko_Sampa_Database_Integrity();
-        $integrity->repair_orphan_template_services(
-            [
-                [
-                    'template_id' => $template_id,
-                    'service_id'  => $service_id,
-                    'user_id'     => 0,
-                ],
-            ]
-        );
-
-        $params    = $order->prepare_create_data($raw);
-        $relations = $order->relations_validate($params, null);
-        if ($relations['ok']) {
-            $relations['debug']['repaired_orphan_service'] = true;
-        }
-
-        return $relations;
     }
 
     /**

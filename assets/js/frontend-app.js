@@ -139,6 +139,54 @@ function ekoCrudMixin() {
  * @param {string} raw
  * @returns {string}
  */
+
+/**
+ * WordPress / REST sometimes returns numeric collections as JSON objects; coerce to array.
+ *
+ * @param {unknown} val
+ * @returns {object[]}
+ */
+function ekoNormalizeRestList(val) {
+    if (Array.isArray(val)) {
+        return val.filter(function (x) {
+            return x != null && typeof x === 'object';
+        });
+    }
+    if (val && typeof val === 'object') {
+        return Object.keys(val)
+            .filter(function (k) {
+                return /^\d+$/.test(k);
+            })
+            .sort(function (a, b) {
+                return Number(a) - Number(b);
+            })
+            .map(function (k) {
+                return val[k];
+            })
+            .filter(function (x) {
+                return x != null && typeof x === 'object';
+            });
+    }
+    return [];
+}
+
+/**
+ * Coerce checkbox / REST booleans to 0|1 for PHP absint paths (Alpine may bind true/false).
+ *
+ * @param {unknown} v
+ * @returns {0|1}
+ */
+function ekoSampaBool01(v) {
+    if (v === true || v === 1) {
+        return 1;
+    }
+    if (v === false || v === 0 || v === '' || v == null) {
+        return 0;
+    }
+    const n = parseInt(String(v), 10);
+    return n === 1 ? 1 : 0;
+}
+
 function ekoSampaNormalizeDynamicKey(raw) {
     let s = String(raw == null ? '' : raw).trim();
     try {
@@ -1010,12 +1058,12 @@ function ekoServicesFactory() {
                     label: def.label,
                     slug: cand,
                     type: def.type,
-                    required: parseInt(String(def.required), 10) ? 1 : 0,
+                    required: ekoSampaBool01(def.required),
                     options_json: optionsPayload,
                     sort_order: Number(meta.sort_order) || 0,
                     default_value: def.default_value != null ? String(def.default_value) : '',
                     placeholder: def.placeholder != null ? String(def.placeholder) : '',
-                    show_in_template: parseInt(String(def.show_in_template), 10) ? 1 : 0,
+                    show_in_template: ekoSampaBool01(def.show_in_template),
                 })
             );
             const flat = fieldSchema.toFlat(this.state.fieldDraft);
@@ -1426,19 +1474,36 @@ function ekoTemplatesFactory() {
             } else if (this.mode === 'edit') {
                 this.state.form = Object.assign({}, this.state.form, t);
             }
-            const sid = parseInt(String(t.service_id || 0), 10);
-            if (!sid) {
-                const msg = 'Link a service to this template before creating an order.';
-                this.error = msg;
-                if (window.ekoSampaToast) {
-                    window.ekoSampaToast.show({ type: 'error', message: msg, duration: 6000 });
+            let sid = parseInt(String(t.service_id || 0), 10);
+            if (sid > 0) {
+                try {
+                    await window.ekoSampaApi('services/' + sid + '/fields', { method: 'GET' });
+                } catch (e) {
+                    sid = 0;
                 }
-                return null;
+            }
+            if (!sid) {
+                let keys = [];
+                try {
+                    const ph = await window.ekoSampaApi('templates/' + tid + '/placeholders', { method: 'GET' });
+                    keys = ph && Array.isArray(ph.placeholders) ? ph.placeholders : [];
+                } catch (e) {
+                    keys = [];
+                }
+                if (!keys.length) {
+                    const msg =
+                        'Link a service to this template, or add {{placeholders}} to the layout before creating an order.';
+                    this.error = msg;
+                    if (window.ekoSampaToast) {
+                        window.ekoSampaToast.show({ type: 'error', message: msg, duration: 6000 });
+                    }
+                    return null;
+                }
             }
             return {
                 client_id: 0,
                 template_id: tid,
-                service_id: sid,
+                service_id: sid || 0,
                 status: 'pending',
                 dynamic_data_json: {},
             };
@@ -1738,8 +1803,11 @@ function ekoOrdersFactory() {
             hasNext: false,
             clients: [],
             services: [],
+            allTemplates: [],
             templates: [],
+            templatesFilterBroadened: false,
             serviceFields: [],
+            useTemplatePlaceholderFields: false,
             templatePlaceholderSet: {},
             q: '',
             status: '',
@@ -1771,6 +1839,9 @@ function ekoOrdersFactory() {
             );
         },
         fieldAffectsPreview(f) {
+            if (parseInt(String(f && f.show_in_template != null ? f.show_in_template : 1), 10) === 0) {
+                return false;
+            }
             const slug = f && f.slug != null ? String(f.slug) : '';
             const k = ekoSampaNormalizeDynamicKey(slug);
             if (!k) {
@@ -1778,6 +1849,58 @@ function ekoOrdersFactory() {
             }
             const set = this.state.templatePlaceholderSet || {};
             return !!set[k];
+        },
+        /**
+         * Normalized template→service link for filtering (handles "", NaN, legacy servico_id).
+         * 0 = generic / unlinked template (shown for every service).
+         *
+         * @param {object|null|undefined} t
+         * @returns {number}
+         */
+        templateRowServiceId(t) {
+            if (!t || typeof t !== 'object') {
+                return 0;
+            }
+            let raw = t.service_id;
+            if (raw === undefined || raw === null || raw === '') {
+                raw = t.servico_id;
+            }
+            if (raw === undefined || raw === null || raw === '') {
+                return 0;
+            }
+            const n = parseInt(String(raw), 10);
+            return Number.isFinite(n) && n > 0 ? n : 0;
+        },
+        /** Stable Alpine :key for template options (avoid `&&` inside HTML attributes — breaks some parsers). */
+        orderTemplateSelectKey(t, idx) {
+            const i = typeof idx === 'number' ? idx : parseInt(String(idx), 10);
+            const safeIdx = Number.isFinite(i) ? i : 0;
+            const id = t && typeof t === 'object' && t.id != null ? t.id : '';
+            return 'order-form-tpl-' + safeIdx + '-' + String(id);
+        },
+        syncTemplateFilterForService() {
+            const all = Array.isArray(this.state.allTemplates) ? this.state.allTemplates : [];
+            const sid = parseInt(String(this.state.form.service_id || 0), 10);
+            let filtered =
+                sid > 0
+                    ? all.filter((t) => {
+                          const ts = this.templateRowServiceId(t);
+                          return ts === 0 || ts === sid;
+                      })
+                    : all.slice();
+            let broadened = false;
+            /* Never leave the template dropdown empty when a service is chosen but templates exist elsewhere */
+            if (sid > 0 && filtered.length === 0 && all.length > 0) {
+                filtered = all.slice();
+                broadened = true;
+            }
+            this.state.templatesFilterBroadened = broadened;
+            /* New array reference helps Alpine x-for refresh reliably */
+            this.state.templates = filtered.slice();
+            const tid = parseInt(String(this.state.form.template_id || 0), 10);
+            if (tid > 0 && !filtered.some((t) => parseInt(String(t && t.id != null ? t.id : 0), 10) === tid)) {
+                this.state.form.template_id = '';
+            }
         },
         printServiceFields() {
             const list = Array.isArray(this.state.serviceFields) ? this.state.serviceFields : [];
@@ -1839,6 +1962,7 @@ function ekoOrdersFactory() {
             if (this.mode === 'new') {
                 await this.loadLookups();
                 this.reset();
+                this.syncTemplateFilterForService();
                 this.bindFormWatchers();
                 return;
             }
@@ -1856,11 +1980,9 @@ function ekoOrdersFactory() {
             }
         },
         bindFormWatchers() {
-            this.$watch('state.form.service_id', () => {
-                this.onServiceChange();
-            });
+            /* Template watcher only (also fires when sync clears template_id). Service uses @change to avoid double async loads. */
             this.$watch('state.form.template_id', () => {
-                this.schedulePreviewDraft();
+                this.onTemplateChange();
             });
             this.$watch('state.form.client_id', () => {
                 this.schedulePreviewDraft();
@@ -1914,12 +2036,136 @@ function ekoOrdersFactory() {
                 this.loading = false;
             }
         },
+        ekoPlaceholderFieldLabel(slug) {
+            const s = String(slug || '').trim();
+            if (!s) {
+                return '';
+            }
+            return s.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        },
+        async loadTemplatePlaceholderFields(templateId) {
+            const tid = templateId || parseInt(String(this.state.form.template_id || 0), 10);
+            if (!tid) {
+                return false;
+            }
+            try {
+                const ph = await window.ekoSampaApi('templates/' + tid + '/placeholders', { method: 'GET' });
+                const keys = ph && Array.isArray(ph.placeholders) ? ph.placeholders : [];
+                if (!keys.length) {
+                    this.state.useTemplatePlaceholderFields = false;
+                    return false;
+                }
+                const fields = keys.map((slug, idx) => ({
+                    id: 'tpl-ph-' + idx,
+                    slug: String(slug || '').trim(),
+                    label: this.ekoPlaceholderFieldLabel(slug),
+                    type: 'text',
+                    required: 0,
+                    show_in_template: 1,
+                    is_template_placeholder: true,
+                    options_json: null,
+                }));
+                this.state.serviceFields = fields.filter((f) => f.slug);
+                const set = {};
+                keys.forEach((k) => {
+                    const key = String(k || '').trim();
+                    if (key) {
+                        set[key] = true;
+                    }
+                });
+                this.state.templatePlaceholderSet = set;
+                this.state.useTemplatePlaceholderFields = true;
+                const d = Object.assign({}, this.state.form.dynamic_data_json || {});
+                fields.forEach((f) => {
+                    const sk = String(f.slug || '').trim();
+                    if (sk && !(sk in d)) {
+                        d[sk] = '';
+                    }
+                });
+                this.state.form.dynamic_data_json = d;
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+        ensureGhostServiceOption() {
+            const sid = parseInt(String(this.state.form.service_id || 0), 10);
+            if (!sid) {
+                return;
+            }
+            if (!this.state.form.service_is_recovered && !this.state.form.service_is_orphan) {
+                return;
+            }
+            const label =
+                String(this.state.form.service_label || '').trim() ||
+                'Template placeholders';
+            const exists = (this.state.services || []).some(
+                (s) => parseInt(String(s && s.id != null ? s.id : 0), 10) === sid
+            );
+            if (!exists) {
+                this.state.services = [{ id: sid, nome: label + ' (' + sid + ')' }].concat(
+                    Array.isArray(this.state.services) ? this.state.services : []
+                );
+            }
+        },
+        async ensureTemplatePlaceholderFields() {
+            const recovered = !!this.state.form.service_is_recovered;
+            const orphan = !!this.state.form.service_is_orphan;
+            /* Plain “New order” flow always uses real service fields from REST — never synthetic placeholders. */
+            if (this.mode === 'new' && !recovered && !orphan) {
+                this.state.useTemplatePlaceholderFields = false;
+                return;
+            }
+            /* Edit: normal orders use service fields unless API flagged placeholder-only mode. */
+            if (this.mode === 'edit' && !recovered && !orphan && !this.state.form.use_template_placeholders) {
+                this.state.useTemplatePlaceholderFields = false;
+                return;
+            }
+
+            const tid = parseInt(String(this.state.form.template_id || 0), 10);
+            if (!tid) {
+                this.state.useTemplatePlaceholderFields = false;
+                return;
+            }
+
+            await this.loadTemplatePlaceholderFields(tid);
+        },
+        async onTemplateChange() {
+            const tid = parseInt(String(this.state.form.template_id || 0), 10);
+            const sid = parseInt(String(this.state.form.service_id || 0), 10);
+            if (tid > 0 && sid <= 0 && !this.state.form.service_is_recovered) {
+                const all = Array.isArray(this.state.allTemplates) ? this.state.allTemplates : [];
+                const tpl = all.find((t) => parseInt(String(t && t.id != null ? t.id : 0), 10) === tid);
+                const ts = tpl ? this.templateRowServiceId(tpl) : 0;
+                if (ts > 0) {
+                    this.state.form.service_id = ts;
+                    await this.onServiceChange();
+                    return;
+                }
+            }
+            const recovered = !!this.state.form.service_is_recovered;
+            const orphan = !!this.state.form.service_is_orphan;
+            if (sid > 0 && !recovered && !orphan) {
+                this.state.useTemplatePlaceholderFields = false;
+            } else if (tid > 0) {
+                await this.ensureTemplatePlaceholderFields();
+            }
+            this.schedulePreviewDraft();
+        },
         async applyOrderRow(row) {
             const r = Object.assign({}, row);
             r.woo_order_id = r.woo_order_id != null ? parseInt(String(r.woo_order_id), 10) : 0;
             r.print_ready = parseInt(String(r.print_ready != null ? r.print_ready : 0), 10) ? 1 : 0;
             r.client_id = r.client_id != null && String(r.client_id) !== '' ? parseInt(String(r.client_id), 10) : 0;
+            r.service_is_recovered = !!row.service_is_recovered;
+            r.service_is_orphan = !!row.service_is_orphan;
+            r.service_label = row.service_label != null ? String(row.service_label) : '';
+            r.use_template_placeholders = !!row.use_template_placeholders;
+            if (r.service_is_orphan && !r.service_is_recovered) {
+                r.service_id = 0;
+            }
             this.state.form = r;
+            this.state.useTemplatePlaceholderFields = !!r.use_template_placeholders;
             let d = {};
             if (typeof this.state.form.dynamic_data_json === 'string' && this.state.form.dynamic_data_json) {
                 try {
@@ -1932,6 +2178,7 @@ function ekoOrdersFactory() {
             }
             this.state.form.dynamic_data_json = d;
             await this.$nextTick();
+            this.ensureGhostServiceOption();
             await this.onServiceChange();
             this.schedulePreviewDraft();
         },
@@ -1942,13 +2189,35 @@ function ekoOrdersFactory() {
                     qs.set('filter_user_id', this.state.filterUserId);
                 }
                 const b = await window.ekoSampaApi('lookups/order-form?' + qs.toString(), { method: 'GET' });
-                this.state.clients = Array.isArray(b.clients) ? b.clients : [];
-                this.state.services = Array.isArray(b.services) ? b.services : [];
-                this.state.templates = Array.isArray(b.templates) ? b.templates : [];
+                this.state.clients = ekoNormalizeRestList(b && b.clients != null ? b.clients : []);
+                this.state.services = ekoNormalizeRestList(b && b.services != null ? b.services : []);
+                let tpl = ekoNormalizeRestList(b && b.templates != null ? b.templates : []);
+                if (tpl.length === 0) {
+                    try {
+                        const raw = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
+                        const alt = ekoNormalizeRestList(raw);
+                        if (alt.length > 0) {
+                            tpl = alt;
+                        }
+                    } catch (e2) {
+                        void e2;
+                    }
+                }
+                this.state.allTemplates = tpl;
+                this.syncTemplateFilterForService();
             } catch (e) {
                 this.state.clients = [];
                 this.state.services = [];
+                this.state.allTemplates = [];
                 this.state.templates = [];
+                try {
+                    const qs = new URLSearchParams({ limit: '500' });
+                    const raw = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
+                    this.state.allTemplates = ekoNormalizeRestList(raw);
+                    this.syncTemplateFilterForService();
+                } catch (e2) {
+                    void e2;
+                }
             }
         },
         async load() {
@@ -2007,8 +2276,13 @@ function ekoOrdersFactory() {
                 user_id: '',
                 woo_order_id: 0,
                 print_ready: 0,
+                service_is_recovered: false,
+                service_is_orphan: false,
+                service_label: '',
+                use_template_placeholders: false,
             };
             this.state.serviceFields = [];
+            this.state.useTemplatePlaceholderFields = false;
             this.state.previewSrcdoc = '';
             this.state.templatePlaceholderSet = {};
             try {
@@ -2016,10 +2290,13 @@ function ekoOrdersFactory() {
             } catch (e) {
                 void e;
             }
+            this.state.templatesFilterBroadened = false;
         },
         async onServiceChange() {
             const sid = parseInt(String(this.state.form.service_id || 0), 10);
+            this.syncTemplateFilterForService();
             this.state.serviceFields = [];
+            this.state.useTemplatePlaceholderFields = false;
             if (!sid) {
                 this.schedulePreviewDraft();
                 return;
@@ -2046,6 +2323,7 @@ function ekoOrdersFactory() {
             } catch (e) {
                 this.state.serviceFields = [];
             }
+            await this.ensureTemplatePlaceholderFields();
             this.schedulePreviewDraft();
         },
         schedulePreviewDraft() {
@@ -2133,6 +2411,18 @@ function ekoOrdersFactory() {
         },
         async save() {
             this.error = null;
+            const tidReq = parseInt(String(this.state.form.template_id || 0), 10);
+            if (!tidReq) {
+                const msg =
+                    typeof window !== 'undefined' &&
+                    window.ekoSampaRest &&
+                    window.ekoSampaRest.strings &&
+                    window.ekoSampaRest.strings.orderTemplateRequired
+                        ? String(window.ekoSampaRest.strings.orderTemplateRequired)
+                        : 'Select a template for this order.';
+                this.error = msg;
+                return;
+            }
             const dyn = JSON.parse(JSON.stringify(this.state.form.dynamic_data_json && typeof this.state.form.dynamic_data_json === 'object' ? this.state.form.dynamic_data_json : {}));
             const payload = {
                 client_id: parseInt(String(this.state.form.client_id != null && this.state.form.client_id !== '' ? this.state.form.client_id : 0), 10),

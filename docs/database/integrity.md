@@ -34,6 +34,10 @@ Campos principais:
 
 **Bloqueador de create order:** `templates_missing_service` (e validação em `relations_validate`).
 
+## Repair por serviço (legado)
+
+Função `eko_sampa_repair_service_relations($service_id)` (`helpers-service-delete.php`): zera `servico_id` em templates/orders quando essa coluna ainda existe e apontava para o id — usada antes do delete seguro. Não substitui o repair batch de templates órfãos acima.
+
 ## Repair: `repair_orphan_template_services`
 
 Para cada órfão:

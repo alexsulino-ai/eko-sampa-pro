@@ -590,13 +590,17 @@ final class Eko_Sampa_Database {
             $wpdb,
             $table,
             [
-                'service_id'  => 'bigint(20) unsigned NOT NULL DEFAULT 0',
-                'label'       => "varchar(255) NOT NULL DEFAULT ''",
-                'slug'        => "varchar(191) NOT NULL DEFAULT ''",
-                'type'        => "varchar(20) NOT NULL DEFAULT 'text'",
-                'required'    => 'tinyint(1) NOT NULL DEFAULT 0',
-                'options_json' => 'longtext NULL',
-                'sort_order'  => 'int(11) NOT NULL DEFAULT 0',
+                'service_id'            => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'label'                 => "varchar(255) NOT NULL DEFAULT ''",
+                'slug'                  => "varchar(191) NOT NULL DEFAULT ''",
+                'type'                  => "varchar(20) NOT NULL DEFAULT 'text'",
+                'required'              => 'tinyint(1) NOT NULL DEFAULT 0',
+                'options_json'          => 'longtext NULL',
+                'sort_order'            => 'int(11) NOT NULL DEFAULT 0',
+                'default_value'         => "varchar(500) NOT NULL DEFAULT ''",
+                'placeholder'           => "varchar(255) NOT NULL DEFAULT ''",
+                'show_in_template'      => 'tinyint(1) NOT NULL DEFAULT 1',
+                'validation_rules_json' => 'longtext NULL',
             ]
         );
 

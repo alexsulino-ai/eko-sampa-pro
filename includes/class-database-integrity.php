@@ -282,15 +282,23 @@ final class Eko_Sampa_Database_Integrity {
     }
 
     /**
-     * Create missing services for templates and re-link template.service_id.
+     * Clear orphan template.service_id (does not insert catalog services).
      *
      * @param list<array<string, int>> $orphans
      *
      * @return list<array<string, int>>
      */
     public function repair_orphan_template_services(array $orphans): array {
+        return $this->unlink_orphan_template_services($orphans);
+    }
+
+    /**
+     * @param list<array<string, int>> $orphans
+     *
+     * @return list<array<string, int>>
+     */
+    public function unlink_orphan_template_services(array $orphans): array {
         $fixed = [];
-        global $wpdb;
 
         foreach ($orphans as $row) {
             $template_id = (int) ( $row['template_id'] ?? 0 );
@@ -299,57 +307,20 @@ final class Eko_Sampa_Database_Integrity {
                 continue;
             }
 
-            $template = (new Eko_Sampa_Template())->get_row_by_id($template_id);
-            if (! is_array($template)) {
-                continue;
-            }
-
             if ($old_sid > 0 && $this->database->row_exists('eko_sampa_services', $old_sid)) {
-                continue;
-            }
-
-            $uid = absint((int) ( $template['user_id'] ?? 0 ));
-            if ($uid <= 0) {
-                $uid = get_current_user_id();
-            }
-
-            $nome = sprintf(
-                /* translators: %d: former orphan service id */
-                __('Recovered service (was #%d)', 'eko-sampa'),
-                $old_sid > 0 ? $old_sid : $template_id
-            );
-
-            $table = $wpdb->prefix . 'eko_sampa_services';
-            $inserted = $wpdb->insert(
-                $table,
-                [
-                    'user_id'   => $uid,
-                    'nome'      => $nome,
-                    'descricao' => '',
-                    'is_global' => 0,
-                ],
-                ['%d', '%s', '%s', '%d']
-            );
-
-            if (! $inserted) {
-                continue;
-            }
-
-            $new_id = (int) $wpdb->insert_id;
-            if ($new_id <= 0) {
                 continue;
             }
 
             $ok = (new Eko_Sampa_Template())->update(
                 $template_id,
-                ['service_id' => $new_id]
+                ['service_id' => 0]
             );
 
             if ($ok) {
                 $fixed[] = [
-                    'template_id'     => $template_id,
-                    'old_service_id'  => $old_sid,
-                    'new_service_id'  => $new_id,
+                    'template_id'    => $template_id,
+                    'old_service_id' => $old_sid,
+                    'new_service_id' => 0,
                 ];
             }
         }

@@ -271,7 +271,7 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
             return null;
         }
 
-        return $row;
+        return $this->normalize_field_row($row);
     }
 
     /**
@@ -337,7 +337,13 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         if (! $this->fields_table_available()) {
             return true;
         }
-        if ($service_id <= 0 || ! $this->actor_may_touch_service($service_id)) {
+        if ($service_id <= 0) {
+            return false;
+        }
+
+        $svc_model = $this->service_model();
+        $svc_row   = $svc_model->get_row_by_id($service_id);
+        if (! is_array($svc_row) || ! $svc_model->can_actor_mutate_existing_row($svc_row)) {
             return false;
         }
 
@@ -371,7 +377,26 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         $prep = $this->prepare($sql, [$service_id, $limit, $offset]);
         $rows = $this->db()->get_results($prep, ARRAY_A);
 
-        return is_array($rows) ? $rows : [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        return array_map([$this, 'normalize_field_row'], $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    public function normalize_field_row(array $row): array {
+        if (! array_key_exists('show_in_template', $row)) {
+            $row['show_in_template'] = 1;
+        } else {
+            $row['show_in_template'] = (int) (bool) absint((int) $row['show_in_template']);
+        }
+
+        return $row;
     }
 
     /**
@@ -431,6 +456,17 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * @param mixed $v REST JSON may send booleans.
+     */
+    private function normalize_toggle_field(mixed $v): int {
+        if (is_bool($v)) {
+            return $v ? 1 : 0;
+        }
+
+        return (int) (bool) absint((int) $v);
+    }
+
+    /**
      * @param array<string, mixed> $data
      *
      * @return array<string, mixed>
@@ -453,7 +489,9 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
             $out['type'] = in_array($type, $this->allowed_types(), true) ? $type : 'text';
         }
         if (! $partial || array_key_exists('required', $data)) {
-            $out['required'] = isset($data['required']) ? (int) (bool) absint((int) $data['required']) : 0;
+            $out['required'] = isset($data['required'])
+                ? $this->normalize_toggle_field($data['required'])
+                : 0;
         }
         if (! $partial || array_key_exists('options_json', $data)) {
             $out['options_json'] = $this->normalize_options($data['options_json'] ?? null);
@@ -472,7 +510,7 @@ final class Eko_Sampa_Service_Field extends Eko_Sampa_Model_Base {
         }
         if (! $partial || array_key_exists('show_in_template', $data)) {
             $out['show_in_template'] = isset($data['show_in_template'])
-                ? (int) (bool) absint((int) $data['show_in_template'])
+                ? $this->normalize_toggle_field($data['show_in_template'])
                 : 1;
         }
         if (! $partial || array_key_exists('validation_rules_json', $data)) {

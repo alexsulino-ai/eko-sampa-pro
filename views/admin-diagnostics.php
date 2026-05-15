@@ -6,12 +6,25 @@
  *
  * @var string               $notice
  * @var array<string, mixed> $report
+ * @var array<string, mixed>|null $inspect_snapshot
+ * @var int                         $inspect_sid
+ * @var list<array<string, mixed>>  $delete_audit
  */
 
 declare(strict_types=1);
 
 if (! defined('ABSPATH')) {
     exit;
+}
+
+if (! isset($delete_audit) || ! is_array($delete_audit)) {
+    $delete_audit = [];
+}
+if (! isset($inspect_sid)) {
+    $inspect_sid = 0;
+}
+if (! isset($inspect_snapshot)) {
+    $inspect_snapshot = null;
 }
 
 $orphan_tpl = isset($report['orphans']['templates_missing_service']) && is_array($report['orphans']['templates_missing_service'])
@@ -38,7 +51,7 @@ $orphan_counts = [
     <?php endif; ?>
 
     <p class="description">
-        <?php echo esc_html__('Validates tables, columns, and foreign-key-like relations. Orphan template→service rows block “Create order” until repaired.', 'eko-sampa'); ?>
+        <?php echo esc_html__('Validates tables, columns, and foreign-key-like relations. Orphan template→service links are cleared (no auto-created catalog services).', 'eko-sampa'); ?>
     </p>
 
     <form method="post" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0;">
@@ -47,9 +60,60 @@ $orphan_counts = [
             <?php echo esc_html__('Run integrity check', 'eko-sampa'); ?>
         </button>
         <button type="submit" class="button button-primary" name="eko_sampa_integrity_action" value="repair_orphans">
-            <?php echo esc_html__('Repair orphan template services', 'eko-sampa'); ?>
+            <?php echo esc_html__('Unlink orphan template services', 'eko-sampa'); ?>
         </button>
+        <span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;">
+            <label for="eko_sampa_inspect_service_id" class="screen-reader-text"><?php echo esc_html__('Service ID to inspect', 'eko-sampa'); ?></label>
+            <input
+                id="eko_sampa_inspect_service_id"
+                name="service_id"
+                type="number"
+                min="1"
+                step="1"
+                class="small-text"
+                placeholder="<?php echo esc_attr__('Service ID', 'eko-sampa'); ?>"
+                value="<?php echo $inspect_sid > 0 ? esc_attr((string) $inspect_sid) : ''; ?>"
+            />
+            <button type="submit" class="button" name="eko_sampa_integrity_action" value="inspect_service_delete">
+                <?php echo esc_html__('Inspect service (delete readiness)', 'eko-sampa'); ?>
+            </button>
+        </span>
     </form>
+
+    <h2><?php echo esc_html__('Service delete diagnostics', 'eko-sampa'); ?></h2>
+    <p class="description">
+        <?php echo esc_html__('Shows template/order/field counts, legacy servico_id usage, and API visibility flags for a single service id. Use after a failed REST DELETE or before bulk cleanup.', 'eko-sampa'); ?>
+    </p>
+    <?php if (is_array($inspect_snapshot)) : ?>
+        <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:360px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($inspect_snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+    <?php endif; ?>
+
+    <?php if ($delete_audit !== []) : ?>
+        <h3><?php echo esc_html__('Recent service delete audit (last attempts)', 'eko-sampa'); ?></h3>
+        <p class="description"><?php echo esc_html__('Stored server-side (ids and outcomes only).', 'eko-sampa'); ?></p>
+        <table class="widefat striped" style="max-width:960px;">
+            <thead>
+                <tr>
+                    <th><?php echo esc_html__('When (UTC)', 'eko-sampa'); ?></th>
+                    <th><?php echo esc_html__('User', 'eko-sampa'); ?></th>
+                    <th><?php echo esc_html__('Service ID', 'eko-sampa'); ?></th>
+                    <th><?php echo esc_html__('OK', 'eko-sampa'); ?></th>
+                    <th><?php echo esc_html__('Code / outcome', 'eko-sampa'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach (array_reverse(array_slice($delete_audit, -15)) as $entry) : ?>
+                    <tr>
+                        <td><code><?php echo esc_html((string) ( $entry['at'] ?? '' )); ?></code></td>
+                        <td><?php echo esc_html((string) ( $entry['by'] ?? '' )); ?></td>
+                        <td><?php echo esc_html((string) ( $entry['service_id'] ?? '' )); ?></td>
+                        <td><?php echo ! empty($entry['ok']) ? esc_html__('Yes', 'eko-sampa') : esc_html__('No', 'eko-sampa'); ?></td>
+                        <td><code><?php echo esc_html((string) ( $entry['code'] ?? $entry['outcome'] ?? '' )); ?></code></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
 
     <h2><?php echo esc_html__('Summary', 'eko-sampa'); ?></h2>
     <table class="widefat striped" style="max-width:640px;">
@@ -91,7 +155,7 @@ $orphan_counts = [
 
     <?php if ($orphan_tpl !== []) : ?>
         <h2><?php echo esc_html__('Templates referencing missing services', 'eko-sampa'); ?></h2>
-        <p><?php echo esc_html__('These templates store a service_id with no matching row in wp_eko_sampa_services. Create order will fail until repaired.', 'eko-sampa'); ?></p>
+        <p><?php echo esc_html__('These templates store a service_id with no matching row. Unlink clears service_id so orders use template placeholders only.', 'eko-sampa'); ?></p>
         <table class="widefat striped">
             <thead>
                 <tr>

@@ -558,6 +558,9 @@ final class Eko_Sampa_Assets {
                             'print'  => Eko_Sampa_Frontend_Router::get_url('print'),
                             'orders' => Eko_Sampa_Frontend_Router::get_resource_url('orders', 'list'),
                         ],
+                        'strings'        => [
+                            'orderTemplateRequired' => __('Select a template for this order.', 'eko-sampa'),
+                        ],
                         'crud'           => Eko_Sampa_Frontend_Router::current_crud_context(),
                     ]
                 );

@@ -14,6 +14,7 @@
 |-------|-------------|--------|
 | Run integrity check | `run_check` | `ensure_schema()` + `integrity->run(false)` |
 | Repair orphan template services | `repair_orphans` | `ensure_schema()` + `integrity->run(true)` |
+| Inspect service (delete readiness) | `inspect_service_delete` | `Eko_Sampa_Service_Relations_Inspector::inspect(service_id)` (POST campo `service_id`) |
 
 Nonce: `eko_sampa_integrity`
 
@@ -21,6 +22,7 @@ Nonce: `eko_sampa_integrity`
 
 - Option: `eko_sampa_integrity_last_report`
 - Mostra: timestamps, versões, contadores de órfãos, tabela template→service, **repair history**, JSON raw
+- **Service delete:** snapshot JSON por id + option `eko_sampa_service_delete_audit` (últimas tentativas de DELETE via API / modelo)
 
 ## Histórico de repairs
 

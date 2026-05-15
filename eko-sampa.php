@@ -39,6 +39,7 @@ define('EKO_SAMPA_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-crud-ui.php';
 require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-capabilities.php';
+require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-service-delete.php';
 
 /**
  * PSR-4–style autoload for Eko_Sampa_* classes in includes/class-*.php.

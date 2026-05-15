@@ -105,6 +105,8 @@ final class Eko_Sampa_Router {
         $database  = new Eko_Sampa_Database();
         $integrity = new Eko_Sampa_Database_Integrity($database);
         $notice    = '';
+        $inspect_snapshot = null;
+        $inspect_sid        = 0;
 
         if (isset($_POST['eko_sampa_integrity_action'])
             && check_admin_referer('eko_sampa_integrity', 'eko_sampa_integrity_nonce')) {
@@ -117,7 +119,15 @@ final class Eko_Sampa_Router {
             } elseif ($action === 'repair_orphans') {
                 $database->ensure_schema();
                 $integrity->run(true);
-                $notice = __('Orphan template→service links were repaired where possible.', 'eko-sampa');
+                $notice = __('Orphan template→service links were cleared (service_id set to 0).', 'eko-sampa');
+            } elseif ($action === 'inspect_service_delete') {
+                $inspect_sid = absint((int) wp_unslash($_POST['service_id'] ?? 0));
+                if ($inspect_sid > 0) {
+                    $inspect_snapshot = Eko_Sampa_Service_Relations_Inspector::inspect($inspect_sid);
+                    $notice           = __('Service delete inspection completed.', 'eko-sampa');
+                } else {
+                    $notice = __('Enter a valid numeric service ID.', 'eko-sampa');
+                }
             }
         }
 
@@ -128,6 +138,10 @@ final class Eko_Sampa_Router {
 
         $view = EKO_SAMPA_PLUGIN_DIR . 'views/admin-diagnostics.php';
         if (is_readable($view)) {
+            $delete_audit = get_option('eko_sampa_service_delete_audit', []);
+            if (! is_array($delete_audit)) {
+                $delete_audit = [];
+            }
             require $view;
         }
     }

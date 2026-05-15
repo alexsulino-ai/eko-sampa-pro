@@ -28,20 +28,37 @@ if (! defined('ABSPATH')) {
         </select>
     </label>
     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Service', 'eko-sampa'); ?>
-        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.service_id" @change="onServiceChange()">
+        <select
+            class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm"
+            x-model="state.form.service_id"
+            @change="onServiceChange()"
+            :disabled="state.form.service_is_recovered"
+        >
             <option value="">—</option>
             <template x-for="s in state.services" :key="s.id">
                 <option :value="s.id" x-text="s.nome + ' (' + s.id + ')'"></option>
             </template>
         </select>
+        <span class="mt-1 block text-[11px] text-amber-800" x-show="state.form.service_is_recovered" x-cloak>
+            <?php echo esc_html__('Legacy recovered service: fields come from the template layout, not the services catalog.', 'eko-sampa'); ?>
+        </span>
     </label>
     <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Template', 'eko-sampa'); ?>
-        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.template_id" @change="schedulePreviewDraft()">
+        <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.template_id">
             <option value="">—</option>
-            <template x-for="t in state.templates" :key="t.id">
-                <option :value="t.id" x-text="t.nome + ' (' + t.id + ')'"></option>
+            <template x-for="(t, idx) in state.templates" :key="orderTemplateSelectKey(t, idx)">
+                <option :value="t.id" x-text="(t.nome || '') + ' (' + (t.id != null ? t.id : '') + ')'"></option>
             </template>
         </select>
+        <span class="mt-1 block text-[11px] text-slate-500" x-show="parseInt(String(state.form.service_id || 0), 10) > 0 && !state.templatesFilterBroadened" x-cloak>
+            <?php echo esc_html__('Showing templates linked to this service (or with no service).', 'eko-sampa'); ?>
+        </span>
+        <span class="mt-1 block text-[11px] text-amber-800" x-show="parseInt(String(state.form.service_id || 0), 10) > 0 && state.templatesFilterBroadened" x-cloak>
+            <?php echo esc_html__('No templates are linked to this service; showing all templates. Link templates to the service where appropriate.', 'eko-sampa'); ?>
+        </span>
+        <span class="mt-1 block text-[11px] text-slate-500" x-show="!parseInt(String(state.form.service_id || 0), 10)" x-cloak>
+            <?php echo esc_html__('All templates are listed until you pick a service.', 'eko-sampa'); ?>
+        </span>
     </label>
     <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('Status', 'eko-sampa'); ?>
         <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.status">
@@ -60,7 +77,10 @@ if (! defined('ABSPATH')) {
     </label>
 </div>
 <div class="mt-4 border-t border-slate-100 pt-3" x-show="state.serviceFields && state.serviceFields.length > 0">
-    <p class="text-xs font-medium text-slate-600"><?php echo esc_html__('Service fields', 'eko-sampa'); ?></p>
+    <p class="text-xs font-medium text-slate-600" x-text="state.useTemplatePlaceholderFields ? '<?php echo esc_js(__('Template fields (live preview)', 'eko-sampa')); ?>' : '<?php echo esc_js(__('Service fields', 'eko-sampa')); ?>'"></p>
+    <p class="mt-1 text-[11px] text-slate-500" x-show="!state.useTemplatePlaceholderFields && parseInt(String(state.form.service_id || 0), 10) > 0">
+        <?php echo esc_html__('Print fields update the live preview only when their slug exists in the template. Operational-only fields are stored but not shown on the layout.', 'eko-sampa'); ?>
+    </p>
     <p class="mt-1 text-[11px] leading-snug text-slate-500"><?php echo esc_html__('Only tokens present in the template (e.g. {{slug}}) update the live preview. Other values are stored for production.', 'eko-sampa'); ?></p>
     <div class="mt-3 space-y-4">
         <div x-show="printServiceFields().length > 0">
@@ -109,6 +129,7 @@ if (! defined('ABSPATH')) {
     </div>
 </div>
 <div class="mt-3 border-t border-slate-100 pt-3" x-show="!state.serviceFields || state.serviceFields.length === 0">
-    <p class="text-xs text-slate-500"><?php echo esc_html__('Select a service to load dynamic fields.', 'eko-sampa'); ?></p>
+    <p class="text-xs text-slate-500" x-show="parseInt(String(state.form.template_id || 0), 10) > 0"><?php echo esc_html__('Select a service, or choose a template with {{placeholders}} to fill fields here.', 'eko-sampa'); ?></p>
+    <p class="text-xs text-slate-500" x-show="!parseInt(String(state.form.template_id || 0), 10)"><?php echo esc_html__('Select a template or service to load dynamic fields.', 'eko-sampa'); ?></p>
 </div>
 <button type="button" class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" @click="save()" :disabled="loading"><?php echo esc_html__('Save', 'eko-sampa'); ?></button>

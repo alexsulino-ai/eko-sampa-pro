@@ -10,8 +10,10 @@
 ## Relação com templates
 
 - Template guarda `service_id` (FK lógica).
-- Delete de service **não** cascade automático para templates — risco de órfão.
-- Integrity detecta; repair cria novo service e relinka template.
+- Delete de serviço passa por `eko_sampa_safe_delete_service()` (unlink de `service_id` em templates/orders, repair opcional de `servico_id`, delete de fields, audit).
+- Modo **strict** (`DELETE ...?strict=1`): bloqueia se ainda houver vínculos em vez de desviar automaticamente.
+- Contrato detalhado: [service-delete.md](service-delete.md).
+- Integrity detecta órfãos globais; repair em massa continua no admin Diagnostics.
 
 ## Fields
 

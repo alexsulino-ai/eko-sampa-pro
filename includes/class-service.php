@@ -16,6 +16,48 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
 
+    /** Legacy auto-repair label prefix — hidden from catalog lists, not counted as user-created. */
+    public const RECOVERED_NAME_PREFIX = 'Recovered service';
+
+    /**
+     * Align REST capability (`manage_eko_services`) with model scope for services only.
+     */
+    protected function is_unrestricted(): bool {
+        return parent::is_unrestricted() || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES);
+    }
+
+    /**
+     * @param array<string, mixed> $row Row from {@see get_row_by_id()} or {@see get()}.
+     */
+    public function can_actor_mutate_existing_row(array $row): bool {
+        return $this->actor_may_mutate_row($row);
+    }
+
+    /**
+     * Final DELETE after fields/templates/orders were handled (used by {@see eko_sampa_safe_delete_service()}).
+     */
+    public function delete_service_row_only(int $id): bool {
+        if ($id <= 0) {
+            return false;
+        }
+
+        if ($this->is_unrestricted()) {
+            $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d';
+            $prep = $this->prepare($sql, [$id]);
+        } else {
+            $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d AND user_id = %d';
+            $prep = $this->prepare($sql, [$id, $this->current_user_id()]);
+        }
+
+        $ok = $this->db()->query($prep);
+        if (false === $ok && defined('WP_DEBUG') && WP_DEBUG) {
+            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+            error_log('[eko-sampa] delete_service_row_only failed id=' . $id . ' sql=' . $prep . ' last_error=' . $this->db()->last_error);
+        }
+
+        return false !== $ok;
+    }
+
     /**
      * @return array<int, string>
      */
@@ -131,49 +173,13 @@ final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
     }
 
     public function delete(int $id): bool {
-        if ($id <= 0) {
+        if (! function_exists('eko_sampa_safe_delete_service')) {
             return false;
         }
 
-        $existing = $this->get($id);
-        if (! is_array($existing)) {
-            return false;
-        }
+        $result = eko_sampa_safe_delete_service($id, []);
 
-        if (! $this->actor_may_mutate_row($existing)) {
-            return false;
-        }
-
-        $field_model = new Eko_Sampa_Service_Field();
-        if (! $field_model->delete_all_for_service($id)) {
-            if (defined('WP_DEBUG') && WP_DEBUG) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log('[eko-sampa] service_delete: delete_all_for_service returned false for service_id=' . $id . ' last_error=' . $this->db()->last_error);
-            }
-
-            return false;
-        }
-
-        $tpl_table = $this->db()->prefix . 'eko_sampa_templates';
-        $this->db()->update($tpl_table, ['service_id' => 0], ['service_id' => $id], ['%d'], ['%d']);
-        $ord_table = $this->db()->prefix . 'eko_sampa_orders';
-        $this->db()->update($ord_table, ['service_id' => 0], ['service_id' => $id], ['%d'], ['%d']);
-
-        if ($this->is_unrestricted()) {
-            $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d';
-            $prep = $this->prepare($sql, [$id]);
-        } else {
-            $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d AND user_id = %d';
-            $prep = $this->prepare($sql, [$id, $this->current_user_id()]);
-        }
-
-        $ok = $this->db()->query($prep);
-        if (false === $ok && defined('WP_DEBUG') && WP_DEBUG) {
-            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-            error_log('[eko-sampa] service_delete_failed id=' . $id . ' sql=' . $prep . ' last_error=' . $this->db()->last_error);
-        }
-
-        return false !== $ok;
+        return ! empty($result['ok']);
     }
 
     /**
@@ -206,7 +212,50 @@ final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
         $prep = $this->prepare($sql, array_merge($own, $search_vals, [$limit, $offset]));
         $rows = $this->db()->get_results($prep, ARRAY_A);
 
-        return is_array($rows) ? $rows : [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        return $this->filter_catalog_rows($rows);
+    }
+
+    /**
+     * System / legacy repair rows must not appear in user service catalogs.
+     *
+     * @param array<string, mixed>|null $row
+     */
+    public static function is_recovered_row(?array $row): bool {
+        if (! is_array($row)) {
+            return false;
+        }
+
+        $nome = trim((string) ( $row['nome'] ?? '' ));
+        if ($nome === '') {
+            return false;
+        }
+
+        if (str_starts_with($nome, self::RECOVERED_NAME_PREFIX)) {
+            return true;
+        }
+
+        return str_contains($nome, '(was #');
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function filter_catalog_rows(array $rows): array {
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || self::is_recovered_row($row)) {
+                continue;
+            }
+            $out[] = $row;
+        }
+
+        return $out;
     }
 
     /**

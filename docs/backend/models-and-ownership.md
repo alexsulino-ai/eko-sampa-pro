@@ -10,7 +10,7 @@ Cada entidade extends `Eko_Sampa_Model_Base`:
 - `ownership_predicate()` — tipicamente `['user_id = %d', [$uid]]`
 - `get($id)` — SELECT com ownership
 - `get_row_by_id($id)` — **sem** ownership (uso interno / integrity)
-- `is_unrestricted()` — `current_user_can('manage_options')`
+- `is_unrestricted()` — `current_user_can('manage_options')` (exceção: em **`Eko_Sampa_Service`** também `manage_eko_services`, alinhado ao REST de serviços — ver [../business-rules/service-delete.md](../business-rules/service-delete.md))
 
 ## Listagens
 
