@@ -2,7 +2,7 @@
 /**
  * Centralized paths and filesystem helpers for Eko Sampa uploads (incremental rollout).
  *
- * Legacy dirs remain authoritative until migrated; new user-scoped dirs are preferred for writes.
+ * All destructive or cross-path operations must pass {@see self::safe_path_guard()}.
  *
  * @package Eko_Sampa
  */
@@ -25,6 +25,8 @@ final class Eko_Sampa_Storage_Manager {
 
     /** Legacy gallery segment (Portuguese) — still scanned for reads. */
     public const LEGACY_GALLERY_SUBDIR = 'eko-sampa/galeria';
+
+    private const STAGING_DIRNAME = '_staging';
 
     /**
      * @return array{basedir: string, baseurl: string, error: string|false}
@@ -80,7 +82,16 @@ final class Eko_Sampa_Storage_Manager {
     public static function user_completed_orders_root_abs(int $user_id): string {
         $base = self::user_root_abs($user_id);
 
-        return $base === '' ? '' : trailingslashit($base) . 'completed-orders';
+        return $base === '' ? '' : trailingslashit((string) $base) . 'completed-orders';
+    }
+
+    /**
+     * Hidden workspace for atomic snapshot builds (never served as public URLs).
+     */
+    public static function completed_orders_staging_root_abs(int $user_id): string {
+        $co = self::user_completed_orders_root_abs($user_id);
+
+        return $co === '' ? '' : trailingslashit($co) . self::STAGING_DIRNAME;
     }
 
     public static function completed_order_dir_abs(int $user_id, int $order_id): string {
@@ -143,26 +154,83 @@ final class Eko_Sampa_Storage_Manager {
     }
 
     /**
+     * Hard boundary: path must resolve under `uploads/eko-sampa/` (or uploads only when $eko_required is false).
+     * Aborts on doubt (symlink escape, missing realpath for existing nodes, traversal).
+     *
+     * @param 'read'|'write'|'delete_tree' $operation
+     *
+     * @return true|\WP_Error
+     */
+    public static function safe_path_guard(string $path, string $operation = 'read', bool $eko_required = true): bool|\WP_Error {
+        if ($path === '') {
+            return new \WP_Error('eko_sampa_path_empty', __('Empty path rejected.', 'eko-sampa'));
+        }
+        if (str_contains($path, '..')) {
+            return new \WP_Error('eko_sampa_path_traversal', __('Path traversal rejected.', 'eko-sampa'));
+        }
+
+        $d = self::upload_dirs();
+        if ($d['error'] || $d['basedir'] === '' || $d['basedir'] === '/') {
+            return new \WP_Error('eko_sampa_upload_dir', __('Upload directory unavailable.', 'eko-sampa'));
+        }
+
+        $base_root = wp_normalize_path(trailingslashit($d['basedir']));
+        $eko_root  = wp_normalize_path(trailingslashit(self::eko_root_abs()));
+        if ($eko_root === '/') {
+            return new \WP_Error('eko_sampa_eko_root', __('Eko root unavailable.', 'eko-sampa'));
+        }
+
+        $norm = wp_normalize_path($path);
+        if (! str_starts_with($norm, $base_root)) {
+            return new \WP_Error('eko_sampa_path_outside_uploads', __('Path outside uploads rejected.', 'eko-sampa'));
+        }
+        if ($eko_required && ! str_starts_with($norm, $eko_root)) {
+            return new \WP_Error('eko_sampa_path_outside_eko', __('Path outside eko-sampa rejected.', 'eko-sampa'));
+        }
+
+        if (is_link($path)) {
+            $rp = @realpath($path);
+            if (! is_string($rp) || $rp === '') {
+                return new \WP_Error('eko_sampa_symlink', __('Unresolved symlink rejected.', 'eko-sampa'));
+            }
+            $rp_n = wp_normalize_path($rp);
+            if (! str_starts_with($rp_n, $eko_required ? $eko_root : $base_root)) {
+                return new \WP_Error('eko_sampa_symlink_escape', __('Symlink outside allowed root rejected.', 'eko-sampa'));
+            }
+        }
+
+        if (file_exists($path) || is_dir($path)) {
+            $rp = @realpath($path);
+            if (is_string($rp) && $rp !== '') {
+                $rp_n = wp_normalize_path($rp);
+                if (! str_starts_with($rp_n, $base_root)) {
+                    return new \WP_Error('eko_sampa_realpath_escape', __('Realpath outside uploads rejected.', 'eko-sampa'));
+                }
+                if ($eko_required && ! str_starts_with($rp_n, $eko_root)) {
+                    return new \WP_Error('eko_sampa_realpath_eko', __('Realpath outside eko-sampa rejected.', 'eko-sampa'));
+                }
+            }
+        }
+
+        // Prevent catastrophic deletes of the entire tree root as target.
+        if ($operation === 'delete_tree') {
+            if ($norm === rtrim($eko_root, '/') || $norm === rtrim($base_root, '/')) {
+                return new \WP_Error('eko_sampa_delete_root', __('Refusing to delete storage root.', 'eko-sampa'));
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * True if $path is inside wp uploads basedir (and eko-sampa root when $require_eko is set).
      */
     public static function is_path_in_uploads(string $path, bool $require_eko = true): bool {
-        $d = self::upload_dirs();
-        $base = wp_normalize_path($d['basedir']);
-        $p    = wp_normalize_path($path);
-        if ($base === '' || $p === '' || ! str_starts_with($p, $base)) {
-            return false;
-        }
-        if (! $require_eko) {
-            return true;
-        }
-
-        $eko = wp_normalize_path(trailingslashit($d['basedir']) . self::EKO_ROOT);
-
-        return str_starts_with($p, $eko);
+        return true === self::safe_path_guard($path, 'read', $require_eko);
     }
 
     public static function ensure_dir(string $abs): bool {
-        if ($abs === '' || ! self::is_path_in_uploads(dirname($abs), false)) {
+        if (true !== self::safe_path_guard($abs, 'write', false)) {
             return false;
         }
 
@@ -170,7 +238,10 @@ final class Eko_Sampa_Storage_Manager {
     }
 
     public static function safe_unlink(string $abs): bool {
-        if ($abs === '' || ! is_file($abs) || ! self::is_path_in_uploads($abs, false)) {
+        if (true !== self::safe_path_guard($abs, 'write', false)) {
+            return false;
+        }
+        if (! is_file($abs)) {
             return false;
         }
 
@@ -181,18 +252,47 @@ final class Eko_Sampa_Storage_Manager {
      * @return true|\WP_Error
      */
     public static function safe_copy(string $from, string $to): bool|\WP_Error {
-        if ($from === '' || $to === '' || ! is_readable($from) || ! self::is_path_in_uploads($from, false)) {
-            return new \WP_Error('eko_sampa_storage_copy', __('Invalid source path.', 'eko-sampa'));
+        $g1 = self::safe_path_guard($from, 'read', false);
+        if (true !== $g1) {
+            return $g1;
         }
         $dir = dirname($to);
+        if (true !== self::safe_path_guard($dir, 'write', false)) {
+            return new \WP_Error('eko_sampa_storage_dest', __('Invalid destination directory.', 'eko-sampa'));
+        }
+        if (true !== self::safe_path_guard($to, 'write', false)) {
+            return new \WP_Error('eko_sampa_storage_dest', __('Invalid destination path.', 'eko-sampa'));
+        }
         if (! self::ensure_dir($dir)) {
             return new \WP_Error('eko_sampa_storage_mkdir', __('Could not create destination directory.', 'eko-sampa'));
         }
-        if (! self::is_path_in_uploads($to, false)) {
-            return new \WP_Error('eko_sampa_storage_dest', __('Invalid destination path.', 'eko-sampa'));
-        }
         if (! @copy($from, $to)) {
             return new \WP_Error('eko_sampa_storage_copy_failed', __('Copy failed.', 'eko-sampa'));
+        }
+
+        $g2 = self::safe_path_guard($to, 'read', false);
+        if (true !== $g2) {
+            self::safe_unlink($to);
+
+            return new \WP_Error('eko_sampa_storage_copy_verify', __('Destination failed path guard after copy.', 'eko-sampa'));
+        }
+
+        return true;
+    }
+
+    /**
+     * Verify copied file size matches source (lightweight checksum).
+     *
+     * @return true|\WP_Error
+     */
+    public static function verify_copy_bytes(string $from, string $to): bool|\WP_Error {
+        if (! is_readable($from) || ! is_readable($to)) {
+            return new \WP_Error('eko_sampa_verify', __('Cannot verify copy.', 'eko-sampa'));
+        }
+        $a = filesize($from);
+        $b = filesize($to);
+        if (! is_int($a) || ! is_int($b) || $a !== $b || $a <= 0) {
+            return new \WP_Error('eko_sampa_verify_size', __('Copy size mismatch.', 'eko-sampa'));
         }
 
         return true;
@@ -202,9 +302,9 @@ final class Eko_Sampa_Storage_Manager {
      * Remove a directory tree only under the Eko root inside uploads.
      */
     public static function delete_tree_under_eko(string $abs): bool {
-        $root = wp_normalize_path(trailingslashit(self::eko_root_abs()));
-        $path = wp_normalize_path($abs);
-        if ($root === '/' || $path === '' || ! str_starts_with($path, $root)) {
+        if (true !== self::safe_path_guard($abs, 'delete_tree', true)) {
+            Eko_Sampa_Storage_Audit::append('delete_tree_blocked', ['path' => $abs]);
+
             return false;
         }
         if (! is_dir($abs)) {
@@ -215,6 +315,10 @@ final class Eko_Sampa_Storage_Manager {
     }
 
     private static function delete_tree_recursive(string $dir): bool {
+        if (true !== self::safe_path_guard($dir, 'delete_tree', true)) {
+            return false;
+        }
+
         $items = @scandir($dir);
         if (! is_array($items)) {
             return false;
@@ -224,12 +328,25 @@ final class Eko_Sampa_Storage_Manager {
                 continue;
             }
             $p = trailingslashit($dir) . $item;
+            if (is_link($p)) {
+                if (true !== self::safe_path_guard($p, 'delete_tree', true)) {
+                    return false;
+                }
+                // Remove symlink itself (do not follow).
+                if (! @unlink($p)) {
+                    return false;
+                }
+
+                continue;
+            }
             if (is_dir($p)) {
                 if (! self::delete_tree_recursive($p)) {
                     return false;
                 }
             } else {
-                wp_delete_file($p);
+                if (! self::safe_unlink($p)) {
+                    return false;
+                }
             }
         }
 
@@ -286,14 +403,16 @@ final class Eko_Sampa_Storage_Manager {
      */
     public static function build_storage_integrity_report(): array {
         global $wpdb;
-        $d     = self::upload_dirs();
-        $out   = [
-            'checked_at' => gmdate('c'),
-            'upload_error' => $d['error'],
+        $d   = self::upload_dirs();
+        $out = [
+            'checked_at'                  => gmdate('c'),
+            'upload_error'                => $d['error'],
             'legacy_template_jpg_orphans' => [],
-            'completed_without_snapshot' => [],
-            'completed_snapshot_dirs'    => 0,
-            'legacy_templates_dir'       => '',
+            'completed_without_snapshot'  => [],
+            'completed_snapshot_dirs'     => 0,
+            'legacy_templates_dir'        => '',
+            'findings'                    => [],
+            'staging_dirs_found'          => 0,
         ];
         if ($d['error']) {
             return $out;
@@ -335,12 +454,24 @@ final class Eko_Sampa_Storage_Manager {
                 if ($oid <= 0 || $uid <= 0) {
                     continue;
                 }
-                $snap_dir = self::completed_order_dir_abs($uid, $oid);
-                $ready    = $snap_dir !== ''
-                    && is_readable($snap_dir . '/template-snapshot.json')
-                    && is_readable($snap_dir . '/order.json');
-                if (! $ready) {
+                if (! Eko_Sampa_Order_Completed_Snapshot::is_ready($uid, $oid)) {
                     $out['completed_without_snapshot'][] = ['order_id' => $oid, 'user_id' => $uid];
+                    $out['findings'][]                   = [
+                        'severity' => 'CRITICAL',
+                        'code'     => 'completed_order_missing_production_snapshot',
+                        'order_id' => $oid,
+                        'user_id'  => $uid,
+                        'detail'   => 'Completed order has no render-ready snapshot (manifest + payloads).',
+                    ];
+                } elseif (Eko_Sampa_Order_Completed_Snapshot::is_ready($uid, $oid)
+                    && ! Eko_Sampa_Order_Completed_Snapshot::has_self_contained_manifest($uid, $oid)) {
+                    $out['findings'][] = [
+                        'severity' => 'WARNING',
+                        'code'     => 'legacy_snapshot_manifest',
+                        'order_id' => $oid,
+                        'user_id'  => $uid,
+                        'detail'   => 'Snapshot exists but predates manifest.json contract; consider regenerating on next template touch or manual repair.',
+                    ];
                 }
             }
         }
@@ -354,6 +485,16 @@ final class Eko_Sampa_Storage_Manager {
                 }
                 $co = glob(trailingslashit($ud) . 'completed-orders/order-*') ?: [];
                 $out['completed_snapshot_dirs'] += count($co);
+                $st = glob(trailingslashit($ud) . 'completed-orders/' . self::STAGING_DIRNAME . '/*') ?: [];
+                $out['staging_dirs_found'] += count($st);
+                foreach ($st as $sd) {
+                    $out['findings'][] = [
+                        'severity' => 'WARNING',
+                        'code'     => 'snapshot_staging_present',
+                        'path'     => $sd,
+                        'detail'   => 'Staging workspace exists; may be abandoned if a previous snapshot build failed.',
+                    ];
+                }
             }
         }
 

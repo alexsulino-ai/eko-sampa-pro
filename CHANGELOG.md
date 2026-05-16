@@ -6,6 +6,20 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.7.4] — 2026-05-16
+
+### Adicionado / Endurecimento
+
+- Snapshots concluídos: `manifest.json` com `snapshot_schema_version`, inventário de assets (hash, mime, tamanho), estados de integridade; build em `_staging/order-{id}-{uniq}/` e publicação atómica (rename com fallback a cópia).
+- Locks: snapshot por OS (`add_option` + TTL, evita corrida de transients); migração silenciosa de thumbnail com transient + verificação byte-a-byte após cópia e audit em falha.
+- REST `GET /orders/{id}/render`: campos `render_warning`, `integrity_warning`, `snapshot_missing`, `legacy_snapshot_without_manifest` alinhados ao `render_source` (incl. `live_template_pre_snapshot_fallback`).
+- `Eko_Sampa_Storage_Audit`: trilho limitado para falhas de snapshot/migração; relatório de integridade marca OS `completed` sem snapshot pronto como **CRITICAL** em `findings`.
+- `Eko_Sampa_Storage_Manager`: validação de paths (`safe_path_guard`) e deletes sob fronteira `uploads/eko-sampa/`; deteção de pastas de staging abandonadas no relatório.
+
+### Documentação
+
+- `docs/storage/storage-architecture.md`: ciclo de vida do snapshot, manifesto, locks, invariantes e riscos do fallback ao template vivo.
+
 ## [1.7.3] — 2026-05-16
 
 ### Adicionado

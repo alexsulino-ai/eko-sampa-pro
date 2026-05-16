@@ -201,6 +201,14 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
                     if (is_wp_error($snap)) {
                         // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
                         error_log('[eko-sampa] completed snapshot failed: ' . $snap->get_error_message());
+                        Eko_Sampa_Storage_Audit::append(
+                            'snapshot_failed_after_order_complete',
+                            [
+                                'order_id' => $id,
+                                'code'     => $snap->get_error_code(),
+                                'message'  => $snap->get_error_message(),
+                            ]
+                        );
                     }
                 }
             }
@@ -275,15 +283,28 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
      * Fork a completed order into a new pending order (same visual inputs; new production cycle).
      */
     public function duplicate_as_revision(int $id): int|false {
+        $lock_key = 'eko_sampa_order_dup_lock_' . $id;
+        if (get_transient($lock_key)) {
+            return false;
+        }
+        set_transient($lock_key, '1', 90);
+
         $source = $this->get($id);
         if (! is_array($source)) {
+            delete_transient($lock_key);
+
             return false;
         }
         if (($source['status'] ?? '') !== self::STATUS_COMPLETED) {
+            delete_transient($lock_key);
+
             return false;
         }
 
-        return $this->duplicate($id);
+        $new = $this->duplicate($id);
+        delete_transient($lock_key);
+
+        return $new;
     }
 
     /**

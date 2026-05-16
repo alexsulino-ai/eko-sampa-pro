@@ -101,6 +101,34 @@ $orphan_counts = [
     <?php if (is_array($storage_report)) : ?>
         <h2><?php echo esc_html__('Storage integrity (filesystem, dry-run)', 'eko-sampa'); ?></h2>
         <p class="description"><?php echo esc_html__('Read-only scan: legacy JPG orphans, completed orders missing snapshot manifest, snapshot directory count.', 'eko-sampa'); ?></p>
+        <?php
+        $storage_critical = 0;
+        if (isset($storage_report['findings']) && is_array($storage_report['findings'])) {
+            foreach ($storage_report['findings'] as $f) {
+                if (is_array($f) && ( $f['severity'] ?? '' ) === 'CRITICAL') {
+                    ++$storage_critical;
+                }
+            }
+        }
+        ?>
+        <?php if ($storage_critical > 0) : ?>
+            <div class="notice notice-error inline"><p>
+                <?php
+                echo esc_html(
+                    sprintf(
+                        /* translators: %d: number of CRITICAL findings */
+                        _n(
+                            '%d CRITICAL storage finding — completed orders may be rendering without a production snapshot.',
+                            '%d CRITICAL storage findings — completed orders may be rendering without a production snapshot.',
+                            $storage_critical,
+                            'eko-sampa'
+                        ),
+                        $storage_critical
+                    )
+                );
+                ?>
+            </p></div>
+        <?php endif; ?>
         <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:360px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($storage_report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
     <?php endif; ?>
 

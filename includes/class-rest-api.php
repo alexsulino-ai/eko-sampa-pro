@@ -1270,6 +1270,10 @@ final class Eko_Sampa_Rest_Api {
                 $html['editorPreview']          = $rnd->build_editor_preview_payload($tpl, $ctx);
                 $html['template_placeholders']  = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
                 $html['render_source']          = 'completed_snapshot';
+                $html                           = array_merge(
+                    $html,
+                    Eko_Sampa_Order_Completed_Snapshot::render_integrity_hints($uid, $oid, (string) ($order['status'] ?? ''))
+                );
 
                 return new \WP_REST_Response($html);
             }
@@ -1290,6 +1294,14 @@ final class Eko_Sampa_Rest_Api {
         $html['render_source']          = (($order['status'] ?? '') === 'completed')
             ? 'live_template_pre_snapshot_fallback'
             : 'live_template';
+        $html = array_merge(
+            $html,
+            Eko_Sampa_Order_Completed_Snapshot::render_integrity_hints(
+                $uid,
+                $oid,
+                (string) ($order['status'] ?? '')
+            )
+        );
 
         return new \WP_REST_Response($html);
     }

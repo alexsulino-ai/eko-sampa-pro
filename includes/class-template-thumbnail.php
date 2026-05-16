@@ -471,21 +471,44 @@ final class Eko_Sampa_Template_Thumbnail {
         if (! apply_filters('eko_sampa_storage_silent_migrate_thumbnail', true, $template_id, $owner_user_id)) {
             return;
         }
+        $lock_key = 'eko_sampa_thumb_migrate_lock_' . $template_id;
+        if (get_transient($lock_key)) {
+            return;
+        }
+        set_transient($lock_key, '1', 60);
+
         $dest = Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
         if ($dest === '' || is_readable($dest)) {
+            delete_transient($lock_key);
+
             return;
         }
         if (true !== Eko_Sampa_Storage_Manager::safe_copy($legacy_abs, $dest)) {
+            delete_transient($lock_key);
+            Eko_Sampa_Storage_Audit::append('thumbnail_migrate_failed', ['template_id' => $template_id, 'step' => 'copy']);
+
+            return;
+        }
+        if (true !== Eko_Sampa_Storage_Manager::verify_copy_bytes($legacy_abs, $dest)) {
+            Eko_Sampa_Storage_Manager::safe_unlink($dest);
+            delete_transient($lock_key);
+            Eko_Sampa_Storage_Audit::append('thumbnail_migrate_failed', ['template_id' => $template_id, 'step' => 'verify']);
+
             return;
         }
         $rel = Eko_Sampa_Storage_Manager::relative_from_abs($dest);
         if ($rel === '') {
+            Eko_Sampa_Storage_Manager::safe_unlink($dest);
+            delete_transient($lock_key);
+
             return;
         }
         global $wpdb;
         $table = $wpdb->prefix . 'eko_sampa_templates';
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $wpdb->update($table, ['preview_image' => $rel], ['id' => $template_id], ['%s'], ['%d']);
+        delete_transient($lock_key);
         Eko_Sampa_Storage_Manager::audit('thumbnail_silent_migrated', ['template_id' => $template_id, 'user_id' => $owner_user_id]);
+        Eko_Sampa_Storage_Audit::append('thumbnail_migrated', ['template_id' => $template_id, 'user_id' => $owner_user_id]);
     }
 }
