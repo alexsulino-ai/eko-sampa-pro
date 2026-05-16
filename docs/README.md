@@ -2,7 +2,7 @@
 
 Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/v1`, Alpine CRUD). Objetivo: blindar o domínio contra regressões — cada regra crítica tem arquivo, contrato e ponto de código rastreável.
 
-**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php`  
+**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (1.7.3+)  
 **Versão do schema (código):** `EKO_SAMPA_DB_VERSION` = `1.0.5`  
 **Opção WordPress:** `eko_sampa_db_version`
 
@@ -21,13 +21,22 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 
 ## Índice
 
+### Segurança e permissões
+
+- [permission-matrix.md](security/permission-matrix.md) — REST ↔ models, drift, `explain_row_visibility`
+
 ### Arquitetura
 
 - [overview.md](architecture/overview.md) — camadas, bootstrap, fluxos principais
 - [plugin-layout.md](architecture/plugin-layout.md) — pastas e classes
 - [domain-contracts.md](architecture/domain-contracts.md) — contratos Template / Order / Service / Client
 - [lessons-learned.md](architecture/lessons-learned.md) — bugs reais e como não repetir
+- [safe-delete-pattern.md](architecture/safe-delete-pattern.md) — padrão `safe_delete` multi-entidade (roadmap)
 - [onboarding.md](architecture/onboarding.md) — setup local e primeiros passos
+
+### Armazenamento e snapshots
+
+- [storage-architecture.md](storage/storage-architecture.md) — `Eko_Sampa_Storage_Manager`, thumbnails, snapshots de OS concluída, compatibilidade legada
 
 ### Banco e integridade
 
@@ -41,6 +50,7 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [templates.md](business-rules/templates.md)
 - [orders.md](business-rules/orders.md)
 - [services.md](business-rules/services.md)
+- [service-delete.md](business-rules/service-delete.md) — contrato DELETE + safe delete
 - [clients.md](business-rules/clients.md)
 
 ### Frontend

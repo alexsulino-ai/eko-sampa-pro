@@ -6,6 +6,18 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.7.3] — 2026-05-16
+
+### Adicionado
+
+- `Eko_Sampa_Storage_Manager`: paths centralizados, cópia/remoção segura sob `uploads/eko-sampa/`, relatório dry-run de integridade filesystem.
+- Galeria: novos uploads em `eko-sampa/users/user-{id}/gallery/` com listagem merged com legado `eko-sampa/galeria/user-{id}/`.
+- Thumbnails de template: escrita preferencial em `users/user-{id}/templates/{id}.jpg` com leitura fallback no path legado; migração silenciosa opcional (`eko_sampa_storage_silent_migrate_thumbnail`).
+- Snapshot filesystem ao concluir OS (`completed-orders/order-{id}/`); render via snapshot quando disponível; OS `completed` imutáveis em `update`; `POST /orders/{id}/duplicate-revision`.
+- Safe delete: `eko_sampa_safe_delete_template`, `eko_sampa_safe_delete_order`; inspectors `Template`, `Order`, `Client`; `DELETE /templates/{id}` com `?strict=1`.
+- Diagnostics: botão **Storage integrity report (dry-run)**.
+- Documentação: `docs/storage/storage-architecture.md`, atualizações em `orders`, REST orders, safe-delete-pattern, diagnostics.
+
 ## [1.7.2] — 2026-05-15
 
 ### Corrigido

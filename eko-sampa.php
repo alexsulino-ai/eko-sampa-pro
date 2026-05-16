@@ -3,7 +3,7 @@
  * Plugin Name:       Eko Sampa
  * Plugin URI:        https://example.com/eko-sampa
  * Description:       Sistema modular de templates de impressão para WordPress e WooCommerce.
- * Version:           1.7.2
+ * Version:           1.7.3
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            Eko Sampa
@@ -23,7 +23,7 @@ if (version_compare(PHP_VERSION, '8.0.0', '<')) {
     return;
 }
 
-define('EKO_SAMPA_VERSION', '1.7.2');
+define('EKO_SAMPA_VERSION', '1.7.3');
 define('EKO_SAMPA_DB_VERSION', '1.0.5');
 
 if (! defined('EKO_SAMPA_DEBUG')) {
@@ -39,7 +39,9 @@ define('EKO_SAMPA_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-crud-ui.php';
 require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-capabilities.php';
+require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-permission-contract.php';
 require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-service-delete.php';
+require_once EKO_SAMPA_PLUGIN_DIR . 'includes/helpers-entity-storage-delete.php';
 
 /**
  * PSR-4–style autoload for Eko_Sampa_* classes in includes/class-*.php.

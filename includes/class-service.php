@@ -21,9 +21,55 @@ final class Eko_Sampa_Service extends Eko_Sampa_Model_Base {
 
     /**
      * Align REST capability (`manage_eko_services`) with model scope for services only.
+     *
+     * @see eko_sampa_services_actor_has_elevated_scope() Single source shared with REST.
      */
     protected function is_unrestricted(): bool {
-        return parent::is_unrestricted() || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES);
+        return eko_sampa_services_actor_has_elevated_scope();
+    }
+
+    /**
+     * Distinguish "row missing" vs "row exists but hidden by ownership scope" (never infer from plain {@see get()} alone).
+     *
+     * @return array<string, mixed>
+     */
+    public function explain_row_visibility(int $id): array {
+        if ($id <= 0) {
+            return [
+                'service_id'         => $id,
+                'exists_in_db'       => false,
+                'visible_to_actor'   => false,
+                'blocked_by_scope'   => false,
+                'owner_user_id'      => 0,
+                'is_global'          => 0,
+                'elevated_scope'     => function_exists('eko_sampa_services_actor_has_elevated_scope')
+                    && eko_sampa_services_actor_has_elevated_scope(),
+                'hint'               => 'invalid_id',
+            ];
+        }
+
+        $row    = $this->get_row_by_id($id);
+        $exists = is_array($row);
+        $visible = is_array($this->get($id));
+
+        $hint = 'ok';
+        if (! $exists) {
+            $hint = 'not_in_database';
+        } elseif (! $visible) {
+            $hint = 'hidden_by_ownership_scope_use_get_row_by_id_or_elevated_scope';
+        }
+
+        return [
+            'service_id'         => $id,
+            'exists_in_db'       => $exists,
+            'visible_to_actor'   => $visible,
+            'blocked_by_scope'   => $exists && ! $visible,
+            'owner_user_id'      => $exists ? (int) ( $row['user_id'] ?? 0 ) : 0,
+            'is_global'          => $exists ? (int) ( $row['is_global'] ?? 0 ) : 0,
+            'elevated_scope'     => function_exists('eko_sampa_services_actor_has_elevated_scope')
+                && eko_sampa_services_actor_has_elevated_scope(),
+            'hint'               => $hint,
+        ];
     }
 
     /**

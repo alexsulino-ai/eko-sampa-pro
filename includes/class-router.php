@@ -107,6 +107,9 @@ final class Eko_Sampa_Router {
         $notice    = '';
         $inspect_snapshot = null;
         $inspect_sid        = 0;
+        $permission_report  = null;
+
+        $storage_report = null;
 
         if (isset($_POST['eko_sampa_integrity_action'])
             && check_admin_referer('eko_sampa_integrity', 'eko_sampa_integrity_nonce')) {
@@ -128,6 +131,9 @@ final class Eko_Sampa_Router {
                 } else {
                     $notice = __('Enter a valid numeric service ID.', 'eko-sampa');
                 }
+            } elseif ($action === 'storage_integrity_report') {
+                $storage_report = Eko_Sampa_Storage_Manager::build_storage_integrity_report();
+                $notice           = __('Storage integrity report generated (read-only).', 'eko-sampa');
             }
         }
 

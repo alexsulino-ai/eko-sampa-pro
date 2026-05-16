@@ -24,6 +24,7 @@ Qualquer alteração que mude **comportamento observável** do Eko Sampa deve at
 
 - [ ] `docs/rest-api/overview.md` ou rota específica
 - [ ] Códigos de erro `eko_sampa_*` documentados em troubleshooting, se novos
+- [ ] Se alterar `require_*_cap` ou `is_unrestricted()` em qualquer model: `docs/security/permission-matrix.md` + correr **Diagnostics → Run permission consistency check**
 
 ### Repairs / integridade
 

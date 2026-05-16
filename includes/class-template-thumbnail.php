@@ -2,6 +2,9 @@
 /**
  * Persisted JPG thumbnails for templates (one file per template id).
  *
+ * Storage: prefers {@see Eko_Sampa_Storage_Manager::user_template_thumbnail_abs()} and falls back to
+ * legacy `{uploads}/eko-sampa/templates/{id}.jpg` for reads and old installs.
+ *
  * @package Eko_Sampa
  */
 
@@ -12,7 +15,7 @@ if (! defined('ABSPATH')) {
 }
 
 /**
- * Storage: {uploads}/eko-sampa/templates/{id}.jpg — single file, replaced atomically.
+ * Thumbnail files: user-scoped when owner known; legacy global path retained as fallback.
  */
 final class Eko_Sampa_Template_Thumbnail {
 
@@ -42,14 +45,70 @@ final class Eko_Sampa_Template_Thumbnail {
     }
 
     public static function file_path(int $template_id): string {
-        $upload = wp_upload_dir();
-        $base   = trailingslashit((string) ( $upload['basedir'] ?? '' ) );
-        if ($base === '' || $upload['error'] ?? false) {
+        $uid = self::template_owner_id($template_id);
+
+        return self::readable_abs($template_id, $uid);
+    }
+
+    /**
+     * Absolute path used for reads (prefers user-scoped file, then legacy).
+     */
+    public static function readable_abs(int $template_id, int $owner_user_id = 0): string {
+        if ($template_id <= 0) {
             return '';
         }
+        if ($owner_user_id <= 0) {
+            $owner_user_id = self::template_owner_id($template_id);
+        }
 
-        return $base . Eko_Sampa_Template_Thumbnail_Config::SUBDIR . '/'
-            . sprintf(Eko_Sampa_Template_Thumbnail_Config::FILENAME_PATTERN, max(0, $template_id));
+        $min = Eko_Sampa_Template_Thumbnail_Config::MIN_FILE_BYTES;
+
+        if ($owner_user_id > 0) {
+            $user_path = Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
+            if ($user_path !== '' && is_readable($user_path) && filesize($user_path) > $min) {
+                return $user_path;
+            }
+        }
+
+        $legacy = Eko_Sampa_Storage_Manager::legacy_template_thumbnail_abs($template_id);
+        if ($legacy !== '' && is_readable($legacy) && filesize($legacy) > $min) {
+            self::maybe_silent_migrate_legacy($template_id, $owner_user_id, $legacy);
+            if ($owner_user_id > 0) {
+                $user_after = Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
+                if ($user_after !== '' && is_readable($user_after) && filesize($user_after) > $min) {
+                    return $user_after;
+                }
+            }
+
+            return $legacy;
+        }
+
+        if ($owner_user_id > 0) {
+            return Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
+        }
+
+        return $legacy;
+    }
+
+    /**
+     * Target path for new writes (user-scoped when owner exists, else legacy).
+     */
+    public static function writable_abs(int $template_id, int $owner_user_id = 0): string {
+        if ($template_id <= 0) {
+            return '';
+        }
+        if ($owner_user_id <= 0) {
+            $owner_user_id = self::template_owner_id($template_id);
+        }
+
+        if ($owner_user_id > 0) {
+            $p = Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
+            if ($p !== '') {
+                return $p;
+            }
+        }
+
+        return Eko_Sampa_Storage_Manager::legacy_template_thumbnail_abs($template_id);
     }
 
     public static function file_version(int $template_id): int {
@@ -118,18 +177,20 @@ final class Eko_Sampa_Template_Thumbnail {
             return '';
         }
 
-        $upload = wp_upload_dir();
-        if (! empty($upload['error'])) {
+        $dirs = Eko_Sampa_Storage_Manager::upload_dirs();
+        if ($dirs['error'] || $dirs['baseurl'] === '') {
             return '';
         }
 
-        $url = trailingslashit((string) ( $upload['baseurl'] ?? '' ) );
-        if ($url === '/') {
-            return '';
+        $read = self::file_path($template_id);
+        $rel  = Eko_Sampa_Storage_Manager::relative_from_abs($read);
+        if ($rel === '') {
+            // Fallback legacy URL shape.
+            $file = sprintf(Eko_Sampa_Template_Thumbnail_Config::FILENAME_PATTERN, $template_id);
+            $path = trailingslashit($dirs['baseurl']) . Eko_Sampa_Template_Thumbnail_Config::SUBDIR . '/' . $file;
+        } else {
+            $path = trailingslashit($dirs['baseurl']) . str_replace('\\', '/', $rel);
         }
-
-        $file = sprintf(Eko_Sampa_Template_Thumbnail_Config::FILENAME_PATTERN, $template_id);
-        $path = $url . Eko_Sampa_Template_Thumbnail_Config::SUBDIR . '/' . $file;
 
         $ver = $version > 0 ? $version : self::file_version($template_id);
         if ($ver > 0) {
@@ -193,13 +254,14 @@ final class Eko_Sampa_Template_Thumbnail {
             return $valid;
         }
 
-        $path = self::file_path($template_id);
+        $owner = self::template_owner_id($template_id);
+        $path  = self::writable_abs($template_id, $owner);
         if ($path === '') {
             return new \WP_Error('eko_sampa_thumb_dir', __('Upload directory unavailable.', 'eko-sampa'), ['status' => 500]);
         }
 
         $dir = dirname($path);
-        if (! wp_mkdir_p($dir)) {
+        if (! Eko_Sampa_Storage_Manager::ensure_dir($dir)) {
             return new \WP_Error('eko_sampa_thumb_dir', __('Could not create thumbnail directory.', 'eko-sampa'), ['status' => 500]);
         }
 
@@ -221,8 +283,11 @@ final class Eko_Sampa_Template_Thumbnail {
         }
 
         $version = self::file_version($template_id);
-        $rel     = Eko_Sampa_Template_Thumbnail_Config::SUBDIR . '/'
-            . sprintf(Eko_Sampa_Template_Thumbnail_Config::FILENAME_PATTERN, $template_id);
+        $rel     = Eko_Sampa_Storage_Manager::relative_from_abs($path);
+        if ($rel === '') {
+            $rel = Eko_Sampa_Template_Thumbnail_Config::SUBDIR . '/'
+                . sprintf(Eko_Sampa_Template_Thumbnail_Config::FILENAME_PATTERN, $template_id);
+        }
 
         global $wpdb;
         $table = $wpdb->prefix . 'eko_sampa_templates';
@@ -289,11 +354,21 @@ final class Eko_Sampa_Template_Thumbnail {
         }
 
         self::clear_generating($template_id);
-        $path = self::file_path($template_id);
-        if ($path !== '' && is_readable($path)) {
-            wp_delete_file($path);
+        $owner = self::template_owner_id($template_id);
+        $paths = array_unique(
+            array_filter(
+                [
+                    Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner, $template_id),
+                    Eko_Sampa_Storage_Manager::legacy_template_thumbnail_abs($template_id),
+                ]
+            )
+        );
+        foreach ($paths as $path) {
+            if ($path !== '' && is_readable($path)) {
+                wp_delete_file($path);
+            }
+            self::purge_legacy_variants($template_id, $path);
         }
-        self::purge_legacy_variants($template_id, $path);
 
         global $wpdb;
         $table = $wpdb->prefix . 'eko_sampa_templates';
@@ -368,10 +443,49 @@ final class Eko_Sampa_Template_Thumbnail {
             $row['thumbnail_visual_hash'] = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
         }
 
-        if ($state === self::STATE_READY && $version > 0 && is_readable(self::file_path($id))) {
-            $row['thumbnail_bytes'] = (int) filesize(self::file_path($id));
+        $read = self::file_path($id);
+        if ($state === self::STATE_READY && $version > 0 && $read !== '' && is_readable($read)) {
+            $row['thumbnail_bytes'] = (int) filesize($read);
         }
 
         return $row;
+    }
+
+    private static function template_owner_id(int $template_id): int {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $safe  = preg_replace('/[^a-z0-9_]/i', '', $table);
+        if ($safe === '' || $safe !== $table) {
+            return 0;
+        }
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $uid = $wpdb->get_var($wpdb->prepare("SELECT user_id FROM `{$safe}` WHERE id = %d LIMIT 1", $template_id));
+
+        return absint((int) $uid);
+    }
+
+    private static function maybe_silent_migrate_legacy(int $template_id, int $owner_user_id, string $legacy_abs): void {
+        if ($owner_user_id <= 0) {
+            return;
+        }
+        if (! apply_filters('eko_sampa_storage_silent_migrate_thumbnail', true, $template_id, $owner_user_id)) {
+            return;
+        }
+        $dest = Eko_Sampa_Storage_Manager::user_template_thumbnail_abs($owner_user_id, $template_id);
+        if ($dest === '' || is_readable($dest)) {
+            return;
+        }
+        if (true !== Eko_Sampa_Storage_Manager::safe_copy($legacy_abs, $dest)) {
+            return;
+        }
+        $rel = Eko_Sampa_Storage_Manager::relative_from_abs($dest);
+        if ($rel === '') {
+            return;
+        }
+        global $wpdb;
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $wpdb->update($table, ['preview_image' => $rel], ['id' => $template_id], ['%s'], ['%d']);
+        Eko_Sampa_Storage_Manager::audit('thumbnail_silent_migrated', ['template_id' => $template_id, 'user_id' => $owner_user_id]);
     }
 }

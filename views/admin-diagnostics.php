@@ -9,6 +9,7 @@
  * @var array<string, mixed>|null $inspect_snapshot
  * @var int                         $inspect_sid
  * @var list<array<string, mixed>>  $delete_audit
+ * @var array<string, mixed>|null     $storage_report Result of {@see Eko_Sampa_Storage_Manager::build_storage_integrity_report()}
  */
 
 declare(strict_types=1);
@@ -26,6 +27,14 @@ if (! isset($inspect_sid)) {
 if (! isset($inspect_snapshot)) {
     $inspect_snapshot = null;
 }
+
+if (! isset($storage_report)) {
+    $storage_report = null;
+}
+
+$permission_violations = is_array($permission_report) && ! empty($permission_report['violations'])
+    ? $permission_report['violations']
+    : [];
 
 $orphan_tpl = isset($report['orphans']['templates_missing_service']) && is_array($report['orphans']['templates_missing_service'])
     ? $report['orphans']['templates_missing_service']
@@ -47,7 +56,13 @@ $orphan_counts = [
     <h1><?php echo esc_html__('Eko Sampa — Diagnostics', 'eko-sampa'); ?></h1>
 
     <?php if ($notice !== '') : ?>
-        <div class="notice notice-success is-dismissible"><p><?php echo esc_html($notice); ?></p></div>
+        <?php
+        $notice_class = 'notice-success';
+        if (is_array($permission_report) && $permission_violations !== []) {
+            $notice_class = 'notice-warning';
+        }
+        ?>
+        <div class="notice <?php echo esc_attr($notice_class); ?> is-dismissible"><p><?php echo esc_html($notice); ?></p></div>
     <?php endif; ?>
 
     <p class="description">
@@ -78,9 +93,25 @@ $orphan_counts = [
                 <?php echo esc_html__('Inspect service (delete readiness)', 'eko-sampa'); ?>
             </button>
         </span>
+        <button type="submit" class="button" name="eko_sampa_integrity_action" value="storage_integrity_report" style="margin-left:8px;">
+            <?php echo esc_html__('Storage integrity report (dry-run)', 'eko-sampa'); ?>
+        </button>
     </form>
 
-    <h2><?php echo esc_html__('Service delete diagnostics', 'eko-sampa'); ?></h2>
+    <?php if (is_array($storage_report)) : ?>
+        <h2><?php echo esc_html__('Storage integrity (filesystem, dry-run)', 'eko-sampa'); ?></h2>
+        <p class="description"><?php echo esc_html__('Read-only scan: legacy JPG orphans, completed orders missing snapshot manifest, snapshot directory count.', 'eko-sampa'); ?></p>
+        <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:360px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($storage_report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+    <?php endif; ?>
+
+    <?php if (is_array($permission_report)) : ?>
+        <h2><?php echo esc_html__('REST ↔ model permission consistency', 'eko-sampa'); ?></h2>
+        <p class="description"><?php echo esc_html__('Structural checks to catch permission drift (e.g. REST allows manage_eko_services but the service model no longer calls the shared contract helper).', 'eko-sampa'); ?></p>
+        <?php if ($permission_violations !== []) : ?>
+            <div class="notice notice-error inline"><p><?php echo esc_html__('Violations detected — fix before release.', 'eko-sampa'); ?></p></div>
+        <?php endif; ?>
+        <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:420px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($permission_report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+    <?php endif; ?>
     <p class="description">
         <?php echo esc_html__('Shows template/order/field counts, legacy servico_id usage, and API visibility flags for a single service id. Use after a failed REST DELETE or before bulk cleanup.', 'eko-sampa'); ?>
     </p>

@@ -161,3 +161,35 @@ JS throw em init; CRUD não monta.
 ### Solução
 
 Fallback `(typeof window.ekoSampaCan === 'function' ? ... : true)` e helper PHP `eko_sampa_alpine_can_expr`.
+
+---
+
+## 9. REST ↔ model permission drift (DELETE de serviços)
+
+### Sintoma
+
+- `DELETE /services/{id}` → `eko_sampa_delete_failed` genérico ou falha antes do SQL final.
+- `Service::get($id)` → `null` mesmo com row em BD.
+- Utilizador com `manage_eko_services` via REST; model ainda usava `is_unrestricted()` = só `manage_options`.
+
+### Causa raiz
+
+**Permission drift:** gate REST (`require_services_cap`) e scope do model (`Eko_Sampa_Service::get` / `Service_Field::delete_all_for_service`) divergiram — o domínio negou silenciosamente o que a API autorizou.
+
+### Impacto
+
+Impossível apagar serviços “antigos” ou alheios; diagnóstico confundido com corrupção de dados.
+
+### Solução definitiva
+
+1. Helper único `eko_sampa_services_actor_has_elevated_scope()` (`helpers-permission-contract.php`) usado por **REST** e **`Eko_Sampa_Service::is_unrestricted()`**.
+2. `eko_sampa_safe_delete_service()` + inspector + erros semânticos + audit.
+3. `Eko_Sampa_Service::explain_row_visibility()` + campo `visibility` no inspector para nunca confundir “não existe” com “fora do scope”.
+4. `Eko_Sampa_Permission_Consistency_Validator::run()` + botão em Diagnostics.
+5. Documentação: [../security/permission-matrix.md](../security/permission-matrix.md), [../business-rules/service-delete.md](../business-rules/service-delete.md).
+
+### Evitar regressão
+
+- Qualquer novo `require_*_cap` com capability Eko **tem** de ter contrato espelhado no model ou documentação explícita de excepção na matriz de permissões.
+- Nunca interpretar só `get()` null como “not found” em pipelines mutáveis.
+

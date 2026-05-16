@@ -77,3 +77,12 @@ Se falha `service_not_visible_for_order` e `service_exists === false`:
 - Campos: `failed_at`, `debug`
 
 Ver [../troubleshooting/create-order-400.md](../troubleshooting/create-order-400.md).
+
+## Pedidos concluídos (`completed`)
+
+- **`Eko_Sampa_Order::update`**: após transição para `completed`, o sistema grava snapshot em disco (`Eko_Sampa_Order_Completed_Snapshot`) com layout e dados congelados.
+- **Imutabilidade**: pedidos em `completed` **não** aceitam `update` via REST/model (resposta `409` `eko_sampa_order_immutable`).
+- **Nova revisão de produção:** `POST /orders/{id}/duplicate-revision` — só a partir de `completed`; cria nova OS `pending` (`duplicate_as_revision`).
+- **Render:** `GET /orders/{id}/render` usa snapshot quando `Order_Completed_Snapshot::is_ready`; pedidos `completed` legados sem snapshot usam template vivo com `render_source: live_template_pre_snapshot_fallback` (compatibilidade).
+
+Ver [../storage/storage-architecture.md](../storage/storage-architecture.md).

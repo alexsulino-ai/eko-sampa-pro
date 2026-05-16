@@ -149,6 +149,10 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             return false;
         }
 
+        if (($existing['status'] ?? '') === self::STATUS_COMPLETED) {
+            return false;
+        }
+
         if (! $this->relations_visible($data, $existing)) {
             return false;
         }
@@ -184,13 +188,39 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             $wfmt
         );
 
-        return false !== $result;
+        $ok = false !== $result;
+        if ($ok) {
+            $fresh = $this->get_row_by_id($id);
+            if (is_array($fresh)
+                && ($existing['status'] ?? '') !== self::STATUS_COMPLETED
+                && ($fresh['status'] ?? '') === self::STATUS_COMPLETED) {
+                $tid = (int) ($fresh['template_id'] ?? 0);
+                $tpl = $tid > 0 ? ( new Eko_Sampa_Template() )->get_row_by_id($tid) : null;
+                if (is_array($tpl)) {
+                    $snap = Eko_Sampa_Order_Completed_Snapshot::create($fresh, $tpl);
+                    if (is_wp_error($snap)) {
+                        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                        error_log('[eko-sampa] completed snapshot failed: ' . $snap->get_error_message());
+                    }
+                }
+            }
+        }
+
+        return $ok;
     }
 
     public function delete(int $id): bool {
         if ($id <= 0) {
             return false;
         }
+
+        $row = $this->get($id);
+        if (! is_array($row)) {
+            return false;
+        }
+
+        $uid = (int) ($row['user_id'] ?? 0);
+        Eko_Sampa_Order_Completed_Snapshot::delete_for_order($uid, $id);
 
         [$extra, $own] = $this->ownership_sql();
         $sql  = 'DELETE FROM ' . $this->table() . ' WHERE id = %d' . $extra;
@@ -239,6 +269,21 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         $rows = $this->db()->get_results($prep, ARRAY_A);
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Fork a completed order into a new pending order (same visual inputs; new production cycle).
+     */
+    public function duplicate_as_revision(int $id): int|false {
+        $source = $this->get($id);
+        if (! is_array($source)) {
+            return false;
+        }
+        if (($source['status'] ?? '') !== self::STATUS_COMPLETED) {
+            return false;
+        }
+
+        return $this->duplicate($id);
     }
 
     /**

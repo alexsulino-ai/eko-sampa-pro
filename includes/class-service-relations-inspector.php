@@ -13,19 +13,28 @@ if (! defined('ABSPATH')) {
 
 /**
  * Central read-only inspection used by safe delete, REST errors, and admin diagnostics.
+ *
+ * Extends {@see Eko_Sampa_Entity_Relations_Inspector}; sibling inspectors: templates, orders, clients.
  */
-final class Eko_Sampa_Service_Relations_Inspector {
+final class Eko_Sampa_Service_Relations_Inspector extends Eko_Sampa_Entity_Relations_Inspector {
 
     /**
      * @return array<string, mixed>
      */
     public static function inspect(int $service_id): array {
+        return (new self())->inspect($service_id);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function inspect_entity(int $service_id): array {
         global $wpdb;
 
         if ($service_id <= 0) {
             return [
-                'service_id'   => $service_id,
-                'valid_id'     => false,
+                'service_id'    => $service_id,
+                'valid_id'      => false,
                 'failed_reason' => 'invalid_service_id',
             ];
         }
@@ -39,37 +48,38 @@ final class Eko_Sampa_Service_Relations_Inspector {
         $fld_suffix = 'eko_sampa_fields';
 
         $tpl_have = $database->table_exists_for_suffix($tpl_suffix)
-            ? self::column_presence_map($wpdb->prefix . $tpl_suffix)
+            ? $this->column_presence_map($wpdb->prefix . $tpl_suffix)
             : [];
         $ord_have = $database->table_exists_for_suffix($ord_suffix)
-            ? self::column_presence_map($wpdb->prefix . $ord_suffix)
+            ? $this->column_presence_map($wpdb->prefix . $ord_suffix)
             : [];
 
+        $sid = absint($service_id);
+
         $out = [
-            'service_id'              => $service_id,
-            'valid_id'                => true,
-            'service_exists'          => is_array($row),
-            'owner_user_id'           => is_array($row) ? (int) ( $row['user_id'] ?? 0 ) : 0,
-            'is_global'               => is_array($row) ? (int) ( $row['is_global'] ?? 0 ) : 0,
-            'actor_may_mutate'        => is_array($row) ? $svc->can_actor_mutate_existing_row($row) : false,
-            'service_visible_in_api'  => is_array($svc->get($service_id)),
-            'templates_count'         => 0,
-            'orders_count'            => 0,
-            'fields_count'            => 0,
-            'templates_servico_only'  => 0,
-            'orders_servico_only'     => 0,
-            'legacy_columns'          => [
+            'service_id'             => $service_id,
+            'valid_id'               => true,
+            'service_exists'         => is_array($row),
+            'owner_user_id'          => is_array($row) ? (int) ( $row['user_id'] ?? 0 ) : 0,
+            'is_global'              => is_array($row) ? (int) ( $row['is_global'] ?? 0 ) : 0,
+            'actor_may_mutate'       => is_array($row) ? $svc->can_actor_mutate_existing_row($row) : false,
+            'service_visible_in_api' => is_array($svc->get($sid)),
+            'visibility'             => $svc->explain_row_visibility($sid),
+            'templates_count'        => 0,
+            'orders_count'           => 0,
+            'fields_count'           => 0,
+            'templates_servico_only' => 0,
+            'orders_servico_only'    => 0,
+            'legacy_columns'         => [
                 'templates_has_servico_id' => isset($tpl_have['servico_id']) && $tpl_have['servico_id'],
                 'orders_has_servico_id'    => isset($ord_have['servico_id']) && $ord_have['servico_id'],
             ],
-            'orphan_relations'        => [
+            'orphan_relations'       => [
                 'fields_missing_parent' => 0,
             ],
-            'sample_template_ids'     => [],
-            'sample_order_ids'        => [],
+            'sample_template_ids'    => [],
+            'sample_order_ids'       => [],
         ];
-
-        $sid = absint($service_id);
 
         if ($database->table_exists_for_suffix($tpl_suffix)) {
             $tpl_table = $wpdb->prefix . $tpl_suffix;
@@ -154,7 +164,7 @@ final class Eko_Sampa_Service_Relations_Inspector {
     /**
      * @return array<string, bool>
      */
-    private static function column_presence_map(string $table): array {
+    private function column_presence_map(string $table): array {
         global $wpdb;
 
         $safe = preg_replace('/[^a-z0-9_]/i', '', $table);

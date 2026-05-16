@@ -39,10 +39,17 @@ Se `failed_at === service_not_visible_for_order` e `service_exists === false`, m
 ## GET/PATCH/DELETE `/orders/{id}`
 
 - Ownership via `Eko_Sampa_Order::get`
-- PATCH não documenta aqui validação extra — ver `update()` no model
+- **`PUT/PATCH` em `completed`:** bloqueado — `eko_sampa_order_immutable` (409)
+- **`DELETE`:** `eko_sampa_safe_delete_order()` — remove snapshot em `completed-orders/order-{id}/` quando existir
+
+## POST `/orders/{id}/duplicate-revision`
+
+- Só para OS `completed`; caso contrário `eko_sampa_duplicate_revision_failed` (400)
+- Equivalente a novo ciclo: nova linha `pending`, `woo_order_id` zerado
 
 ## POST `/orders/{id}/render`
 
-- Render print — `class-template-renderer.php`
+- Se `completed` + snapshot válido → `render_source: completed_snapshot`
+- Caso contrário → `live_template` ou `live_template_pre_snapshot_fallback`
 
-Ver [../tutorials/create-order-step-by-step.md](../tutorials/create-order-step-by-step.md).
+Ver [../tutorials/create-order-step-by-step.md](../tutorials/create-order-step-by-step.md) e [../storage/storage-architecture.md](../storage/storage-architecture.md).

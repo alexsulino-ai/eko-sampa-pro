@@ -296,7 +296,7 @@ function eko_sampa_safe_delete_service(int $service_id, array $options = []): ar
 }
 
 /**
- * Exposed for helpers; {@see Eko_Sampa_Service::public_table()} on the model.
+ * Exposed for helpers; column existence probe for legacy repair paths.
  */
 function eko_sampa_db_table_has_column(string $table, string $column): bool {
     global $wpdb;
@@ -319,4 +319,29 @@ function eko_sampa_db_table_has_column(string $table, string $column): bool {
     }
 
     return false;
+}
+
+/**
+ * Dispatch safe delete by entity key (extensible).
+ *
+ * @param string               $entity One of: service(s), template(s), order(s).
+ * @param array<string, mixed> $options Passed to the matching safe delete helper when applicable.
+ *
+ * @return array<string, mixed>
+ */
+function eko_sampa_safe_delete_entity(string $entity, int $id, array $options = []): array {
+    $key = strtolower(trim($entity));
+
+    return match ($key) {
+        'service', 'services' => eko_sampa_safe_delete_service($id, $options),
+        'template', 'templates' => eko_sampa_safe_delete_template($id, $options),
+        'order', 'orders' => eko_sampa_safe_delete_order($id, $options),
+        default => [
+            'ok'      => false,
+            'code'    => 'eko_sampa_unsupported_entity',
+            'message' => __('This entity type does not support safe delete yet.', 'eko-sampa'),
+            'debug'   => ['entity' => $entity, 'id' => $id],
+            'audit'   => [],
+        ],
+    };
 }

@@ -374,6 +374,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/orders/(?P<id>\d+)/duplicate-revision',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_orders_duplicate_revision'],
+                'permission_callback' => [$this, 'require_orders_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/orders/(?P<id>\d+)/render',
             [
                 'methods'             => \WP_REST_Server::READABLE,
@@ -436,7 +446,8 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function require_services_cap(): bool {
-        return current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES);
+        return function_exists('eko_sampa_services_actor_has_elevated_scope')
+            && eko_sampa_services_actor_has_elevated_scope();
     }
 
     public function require_templates_cap(): bool {
@@ -970,19 +981,24 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (int) $request['id'];
-        $ok = (new Eko_Sampa_Template())->delete($id);
-        if (! $ok) {
+        $id     = (int) $request['id'];
+        $strict = in_array((string) $request->get_param('strict'), ['1', 'true', 'yes'], true);
+        $res    = eko_sampa_safe_delete_template($id, ['strict' => $strict]);
+        if (empty($res['ok'])) {
+            $status = match ($res['code'] ?? '') {
+                'eko_sampa_delete_forbidden' => 403,
+                'eko_sampa_delete_blocked_dependencies' => 409,
+                default => 400,
+            };
+
             return new \WP_Error(
-                'eko_sampa_delete_failed',
-                __('Could not delete template.', 'eko-sampa'),
-                array_merge(['status' => 400], $this->wpdb_debug_data())
+                (string) ( $res['code'] ?? 'eko_sampa_delete_failed' ),
+                (string) ( $res['message'] ?? __('Could not delete template.', 'eko-sampa') ),
+                array_merge(['status' => $status], ['debug' => $res['debug'] ?? []])
             );
         }
 
-        Eko_Sampa_Template_Thumbnail::delete($id);
-
-        return new \WP_REST_Response(['deleted' => true]);
+        return new \WP_REST_Response(['deleted' => true, 'debug' => $res['debug'] ?? []]);
     }
 
     public function route_templates_duplicate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1162,6 +1178,15 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_orders_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id = (int) $request['id'];
+        $cur = (new Eko_Sampa_Order())->get($id);
+        if (is_array($cur) && ($cur['status'] ?? '') === 'completed') {
+            return new \WP_Error(
+                'eko_sampa_order_immutable',
+                __('Completed orders are immutable. Duplicate as revision to continue production.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
         $ok = (new Eko_Sampa_Order())->update($id, $this->json_params($request));
         if (! $ok) {
             return new \WP_Error(
@@ -1179,17 +1204,33 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_orders_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (int) $request['id'];
-        $ok = (new Eko_Sampa_Order())->delete($id);
-        if (! $ok) {
+        $id  = (int) $request['id'];
+        $res = eko_sampa_safe_delete_order($id);
+        if (empty($res['ok'])) {
+            $status = 'eko_sampa_delete_forbidden' === ( $res['code'] ?? '' ) ? 403 : 400;
+
             return new \WP_Error(
-                'eko_sampa_delete_failed',
-                __('Could not delete order.', 'eko-sampa'),
+                (string) ( $res['code'] ?? 'eko_sampa_delete_failed' ),
+                (string) ( $res['message'] ?? __('Could not delete order.', 'eko-sampa') ),
+                array_merge(['status' => $status], ['debug' => $res['debug'] ?? []])
+            );
+        }
+
+        return new \WP_REST_Response(['deleted' => true, 'debug' => $res['debug'] ?? []]);
+    }
+
+    public function route_orders_duplicate_revision(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id  = (int) $request['id'];
+        $new = (new Eko_Sampa_Order())->duplicate_as_revision($id);
+        if (! $new) {
+            return new \WP_Error(
+                'eko_sampa_duplicate_revision_failed',
+                __('Only completed orders can be duplicated as a new revision.', 'eko-sampa'),
                 array_merge(['status' => 400], $this->wpdb_debug_data())
             );
         }
 
-        return new \WP_REST_Response(['deleted' => true]);
+        return new \WP_REST_Response((new Eko_Sampa_Order())->get((int) $new), 201);
     }
 
     public function route_orders_duplicate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1213,6 +1254,27 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
+        $uid = (int) ($order['user_id'] ?? 0);
+        $oid = (int) ($order['id'] ?? 0);
+        if (($order['status'] ?? '') === 'completed'
+            && $uid > 0
+            && $oid > 0
+            && Eko_Sampa_Order_Completed_Snapshot::is_ready($uid, $oid)) {
+            $bundle = Eko_Sampa_Order_Completed_Snapshot::load_render_bundle($order);
+            if (is_array($bundle)) {
+                $tpl  = $bundle['template_row'];
+                $ctx  = $bundle['context'];
+                $rnd  = new Eko_Sampa_Template_Renderer();
+                $html = $rnd->render($tpl, $ctx, true);
+
+                $html['editorPreview']          = $rnd->build_editor_preview_payload($tpl, $ctx);
+                $html['template_placeholders']  = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
+                $html['render_source']          = 'completed_snapshot';
+
+                return new \WP_REST_Response($html);
+            }
+        }
+
         $tid = (int) ($order['template_id'] ?? 0);
         $tpl = (new Eko_Sampa_Template())->get($tid);
         if (! is_array($tpl)) {
@@ -1225,6 +1287,9 @@ final class Eko_Sampa_Rest_Api {
 
         $html['editorPreview']     = $rnd->build_editor_preview_payload($tpl, $ctx);
         $html['template_placeholders'] = Eko_Sampa_Placeholder_Tokens::collect_from_template_row($tpl);
+        $html['render_source']          = (($order['status'] ?? '') === 'completed')
+            ? 'live_template_pre_snapshot_fallback'
+            : 'live_template';
 
         return new \WP_REST_Response($html);
     }
