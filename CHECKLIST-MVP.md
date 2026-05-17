@@ -103,7 +103,7 @@ Itens já revistos no código (complementar com testes manuais no browser):
 | Área | Verificação |
 |------|-------------|
 | **Interact** | Rebind usa `unset` global + **cadeia única** `.draggable().resizable()` por elemento (evita listeners duplicados). |
-| **Timers** | `destroy()` no componente do editor limpa `saveTimer`, debounce do Interact e **Sortable**. |
+| **Timers** | `destroy()` no componente do editor limpa debounce do Interact e **Sortable** (sem `saveTimer`). |
 | **Corrida persist** | Após `PATCH`, só atualiza `saveState` se `templateId` for o mesmo que no início do pedido. |
 | **Galeria** | Erros de listagem não são silenciosos; upload OK limpa mensagem de erro anterior. |
 | **Alpine** | `Alpine.data` registado em `alpine:init`; `destroy()` é hook suportado no Alpine 3 para teardown. |

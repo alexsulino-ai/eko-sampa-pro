@@ -36,6 +36,13 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <button type="button" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100" @click="deleteSelected()"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="bringForward()" title="<?php echo esc_attr__('Move selected one step toward front (same as dragging up in the layer list)', 'eko-sampa'); ?>"><?php echo esc_html__('Bring forward', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="sendBackward()" title="<?php echo esc_attr__('Move selected one step toward back', 'eko-sampa'); ?>"><?php echo esc_html__('Send backward', 'eko-sampa'); ?></button>
+                <button
+                    type="button"
+                    class="rounded border border-indigo-600 bg-indigo-600 px-2 py-1 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    x-show="Number(cfg().templateId || 0) > 0"
+                    :disabled="_persistRunning || !hasUnsavedChanges"
+                    @click="saveNow()"
+                ><?php echo esc_html__('Salvar', 'eko-sampa'); ?></button>
             </div>
         </template>
         <template x-if="!previewOnly">
@@ -73,8 +80,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <div class="eko-sampa-editor__viewport-frame flex min-h-full min-w-full items-start justify-center p-4 md:p-8" @mousedown.self="clearSelectionIfCanvas($event)">
                     <div class="eko-sampa-editor__stage" :style="stageTransform">
                         <div
-                            class="eko-sampa-editor__canvas relative shrink-0 bg-white shadow-lg ring-1 ring-slate-900/10 transition-shadow duration-150"
-                            :class="{ 'ring-2 ring-emerald-400/60 shadow-md': snapFlash }"
+                            class="eko-sampa-editor__canvas relative shrink-0 bg-white"
                             :style="canvasSurfaceStyle()"
                             x-ref="editorCanvas"
                             role="application"
@@ -82,36 +88,30 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                         >
                             <template x-for="(item, idx) in elements" :key="item.id">
                                 <div
-                                    class="eko-sampa-editor__element group absolute touch-none select-none rounded-[1px]"
-                                    :class="{
-                                        'shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
-                                        'shadow-lg ring-2 ring-indigo-500': selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
-                                        'ring-2 ring-indigo-400': selectedId === item.id && (inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
-                                        'hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
-                                    }"
+                                    class="eko-sampa-editor__element absolute touch-none select-none"
                                     :data-element-id="item.id"
                                     :data-layer-index="idx"
-                                    :style="elementPositionStyle(item)"
+                                    :style="elementPositionStyle(item, idx)"
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent="(item.type === 'text' || item.type === 'placeholder') && openInlineEdit(item)"
                                 >
                                     <template x-if="item.type === 'image'">
-                                        <div class="absolute inset-0 cursor-pointer" :style="elementFrameCss(item)" @click.stop="select(item.id)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
                                             <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'text' || item.type === 'placeholder'">
-                                        <div class="absolute inset-0" :style="elementFrameCss(item)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
                                             <div
-                                                class="eko-sampa-editor__inline-hit pointer-events-none min-h-0 min-w-0 cursor-text"
+                                                class="eko-sampa-editor__inline-hit pointer-events-none flex min-h-0 min-w-0 flex-1 cursor-text flex-col"
                                                 x-show="!(inlineOpen && inlineTargetId === item.id)"
                                             >
-                                                <span class="pointer-events-none block min-h-full min-w-0 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
+                                                <span class="pointer-events-none box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
                                             </div>
                                             <template x-if="inlineOpen && inlineTargetId === item.id">
                                                 <textarea
                                                     id="eko-inline-edit"
-                                                    class="eko-sampa-editor__inline-field pointer-events-auto absolute inset-0 box-border ring-1 ring-indigo-300/40 outline-none"
+                                                    class="eko-sampa-editor__inline-field pointer-events-auto box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words resize-none border-0 bg-transparent p-0 outline-none"
                                                     rows="1"
                                                     :style="inlineEditorTextareaCss(item)"
                                                     x-model="inlineValue"
@@ -125,19 +125,19 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'rectangle'">
-                                        <div class="pointer-events-none absolute inset-0" :style="elementFrameCss(item)"></div>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)"></div>
                                     </template>
 
                                     <template x-if="selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && !previewOnly">
                                         <div>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-t pointer-events-auto absolute left-0 top-0 z-[60] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-t pointer-events-auto absolute left-1/2 top-0 z-[60] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-r eko-resize-t pointer-events-auto absolute right-0 top-0 z-[60] h-3.5 w-3.5 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-r pointer-events-auto absolute right-0 top-1/2 z-[60] h-3.5 w-3.5 translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-r eko-resize-b pointer-events-auto absolute bottom-0 right-0 z-[60] h-3.5 w-3.5 translate-x-1/2 translate-y-1/2 cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-b pointer-events-auto absolute bottom-0 left-1/2 z-[60] h-3.5 w-3.5 -translate-x-1/2 translate-y-1/2 cursor-ns-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-b pointer-events-auto absolute bottom-0 left-0 z-[60] h-3.5 w-3.5 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
-                                            <span class="eko-sampa-editor__resize-handle eko-resize-l pointer-events-auto absolute left-0 top-1/2 z-[60] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-white bg-indigo-500 shadow-md ring-1 ring-indigo-600/30 transition hover:scale-110" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-t pointer-events-auto absolute left-0 top-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-t pointer-events-auto absolute left-1/2 top-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-ns-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-r eko-resize-t pointer-events-auto absolute right-0 top-0 z-[60] h-3.5 w-3.5 -mr-[7px] -mt-[7px] cursor-nesw-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-r pointer-events-auto absolute right-0 top-1/2 z-[60] h-3.5 w-3.5 -mr-[7px] -mt-[7px] cursor-ew-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-r eko-resize-b pointer-events-auto absolute bottom-0 right-0 z-[60] h-3.5 w-3.5 -mr-[7px] -mb-[7px] cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-b pointer-events-auto absolute bottom-0 left-1/2 z-[60] h-3.5 w-3.5 -ml-[7px] -mb-[7px] cursor-ns-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-b pointer-events-auto absolute bottom-0 left-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mb-[7px] cursor-nesw-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <span class="eko-sampa-editor__resize-handle eko-resize-l pointer-events-auto absolute left-0 top-1/2 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-ew-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
                                         </div>
                                     </template>
                                 </div>
@@ -315,6 +315,11 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                             <option value="capitalize"><?php echo esc_html__('Capitalize', 'eko-sampa'); ?></option>
                         </select>
                     </label>
+                    <label class="flex items-center gap-2">
+                        <span class="w-14 shrink-0 text-slate-500"><?php echo esc_html__('Rotate', 'eko-sampa'); ?></span>
+                        <input class="flex-1 accent-indigo-600" type="range" min="-180" max="180" step="1" x-model.number="selectedElement.styles.rotate" />
+                        <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="(selectedElement.styles.rotate || 0) + '°'"></span>
+                    </label>
                     <label class="block">
                         <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Shadow', 'eko-sampa'); ?></span>
                         <select class="w-full rounded border border-slate-200 bg-white px-1 py-1" x-model="selectedElement.styles.boxShadow">
@@ -382,7 +387,52 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                     </div>
             </template>
             <template x-if="selectedElement && selectedElement.type === 'rectangle'">
-                    <p class="text-[11px] leading-relaxed text-slate-500"><?php echo esc_html__('Rectangle: adjust size and position on the canvas.', 'eko-sampa'); ?></p>
+                    <div class="space-y-3">
+                        <p class="text-[11px] font-medium text-slate-600"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></p>
+                        <p class="text-[10px] leading-snug text-slate-500"><?php echo esc_html__('Size and position: drag edges on the canvas. Rotation applies to the inner frame only.', 'eko-sampa'); ?></p>
+                        <label class="flex items-center gap-2">
+                            <span class="text-slate-500"><?php echo esc_html__('Opacity', 'eko-sampa'); ?></span>
+                            <input class="flex-1 accent-indigo-600" type="range" min="0.1" max="1" step="0.05" x-model.number="selectedElement.styles.opacity" />
+                            <span class="w-8 tabular-nums text-slate-600" x-text="Math.round((selectedElement.styles.opacity || 1) * 100) + '%'"></span>
+                        </label>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Radius', 'eko-sampa'); ?></span>
+                            <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="400" x-model.number="selectedElement.styles.borderRadius" />
+                        </label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="block col-span-1">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Border', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="40" x-model.number="selectedElement.styles.borderWidth" />
+                            </label>
+                            <label class="block col-span-2">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Border style', 'eko-sampa'); ?></span>
+                                <select class="w-full rounded border border-slate-200 bg-white px-1 py-1" x-model="selectedElement.styles.borderStyle">
+                                    <option value="none"><?php echo esc_html__('None', 'eko-sampa'); ?></option>
+                                    <option value="solid"><?php echo esc_html__('Solid', 'eko-sampa'); ?></option>
+                                    <option value="dashed"><?php echo esc_html__('Dashed', 'eko-sampa'); ?></option>
+                                    <option value="dotted"><?php echo esc_html__('Dotted', 'eko-sampa'); ?></option>
+                                </select>
+                            </label>
+                        </div>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Border color', 'eko-sampa'); ?></span>
+                            <input class="h-8 w-full max-w-[8rem] cursor-pointer rounded border border-slate-200" type="color" :value="selectedElement.styles.borderColor" @input="selectedElement.styles.borderColor = $event.target.value" />
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <span class="w-14 shrink-0 text-slate-500"><?php echo esc_html__('Rotate', 'eko-sampa'); ?></span>
+                            <input class="flex-1 accent-indigo-600" type="range" min="-180" max="180" step="1" x-model.number="selectedElement.styles.rotate" />
+                            <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="(selectedElement.styles.rotate || 0) + '°'"></span>
+                        </label>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Shadow', 'eko-sampa'); ?></span>
+                            <select class="w-full rounded border border-slate-200 bg-white px-1 py-1" x-model="selectedElement.styles.boxShadow">
+                                <option value="none"><?php echo esc_html__('None', 'eko-sampa'); ?></option>
+                                <option value="0 1px 2px rgba(15,23,42,0.08)"><?php echo esc_html__('Small', 'eko-sampa'); ?></option>
+                                <option value="0 4px 12px rgba(15,23,42,0.12)"><?php echo esc_html__('Medium', 'eko-sampa'); ?></option>
+                                <option value="0 12px 32px rgba(15,23,42,0.18)"><?php echo esc_html__('Large', 'eko-sampa'); ?></option>
+                            </select>
+                        </label>
+                    </div>
             </template>
         </div>
     </div>

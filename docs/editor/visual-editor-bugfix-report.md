@@ -12,7 +12,7 @@ O pipeline de thumbnail/print (JS renderer e PHP) **não definia `z-index`**, co
 
 ### Correção
 
-- Contrato numérico partilhado: `STACK_Z_BASE = 10`, `STACK_Z_STRIDE = 4`, `z = 10 + index * 4` no `EkoCanvasRenderer.elementPositionStyle(item, index)` e no PHP `Eko_Sampa_Template_Renderer::render_element`.
+- Contrato numérico partilhado: `STACK_Z_BASE = 10`, `STACK_Z_STRIDE = 1`, `z = 10 + index` no `EkoCanvasRenderer.elementPositionStyle(item, index)` e no PHP `Eko_Sampa_Template_Renderer::render_element`.
 - Editor: `elementPositionStyle` usa o renderer + índice e aplica **boost** só no modo edição (não em `previewOnly`).
 - Remoção das classes Tailwind de `z-index` no canvas; botões **Bring forward** / **Send backward** alteram só o array (sem segundo modelo de camadas).
 - `normalizeLayerOrder()` como hook documentado após reordenações.
@@ -56,7 +56,7 @@ Continua a haver troca `x-if` entre span e textarea (um remount por sessão de e
 | Ficheiro | Alteração |
 |----------|-----------|
 | `assets/js/eko-canvas-renderer.js` | `STACK_Z_*`, `stackZFromIndex`, `elementPositionStyle(item, idx)`, `overflow` por tipo, `buildElementHtml` com índice |
-| `assets/js/editor-canvas.js` | `elementPositionStyle` + boosts, `normalizeLayerOrder`, bring/send, `inlineEditorTextareaCss`, diagnósticos `window.*` |
+| `assets/js/editor-canvas.js` | `elementPositionStyle`, `editorElementFrameStyle` (chrome no frame), `normalizeLayerOrder`, bring/send, `inlineEditorTextareaCss`, stubs `window.*` diagnóstico |
 | `includes/class-template-renderer.php` | `z-index` por índice, `overflow` por tipo no frame |
 | `views/editor-canvas.php` | Remoção de `z-*` no canvas, `(item, idx)`, `data-layer-index`, textarea estilizado, botões de camada |
 | `views/editor-canvas-order-preview.php` | Alinhamento de classes / índice com o editor |

@@ -161,7 +161,7 @@ final class Eko_Sampa_Template_Renderer {
 
     /**
      * @param array<string, mixed> $el
-     * @param int                  $stack_index Sibling paint order (0 = back). Must match `EkoCanvasRenderer` STACK_Z_*.
+     * @param int                  $stack_index Sibling paint order (0 = back). Must match `EkoCanvasRenderer.stackZFromIndex` (10 + index).
      */
     private function render_element(array $el, bool $for_print, int $stack_index = 0): string {
         $x      = (float) ($el['x'] ?? 0);
@@ -171,7 +171,7 @@ final class Eko_Sampa_Template_Renderer {
         $type   = sanitize_key((string) ($el['type'] ?? 'text'));
         $styles = isset($el['styles']) && is_array($el['styles']) ? $el['styles'] : [];
 
-        $zi = 10 + max(0, $stack_index) * 4;
+        $zi = 10 + max(0, $stack_index);
 
         $pos = sprintf(
             'position:absolute;left:%Fpx;top:%Fpx;width:%Fpx;height:%Fpx;box-sizing:border-box;z-index:%d;',
@@ -256,7 +256,7 @@ final class Eko_Sampa_Template_Renderer {
             $border = sprintf('%dpx %s %s', $bw, $bs, $bc);
         }
 
-        $overflow = ( $type === 'text' || $type === 'placeholder' ) ? 'visible' : 'hidden';
+        $overflow = 'hidden';
 
         $css = sprintf(
             'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:%s;',
@@ -270,6 +270,11 @@ final class Eko_Sampa_Template_Renderer {
 
         if ($type === 'rectangle') {
             $css .= 'background:#f1f5f9;';
+        }
+
+        if ($type === 'text' || $type === 'placeholder') {
+            $bgf = $this->sanitize_css_color($styles['backgroundColor'] ?? 'transparent', 'transparent');
+            $css .= sprintf('background-color:%s;padding:4px 6px;display:flex;flex-direction:column;min-height:0;', $bgf);
         }
 
         return $css;
@@ -294,7 +299,6 @@ final class Eko_Sampa_Template_Renderer {
             $ta = 'left';
         }
         $color = $this->sanitize_css_color($styles['color'] ?? '#111827', '#111827');
-        $bg    = $this->sanitize_css_color($styles['backgroundColor'] ?? 'transparent', 'transparent');
         $lh    = isset($styles['lineHeight']) ? (float) $styles['lineHeight'] : 1.35;
         if ($lh < 0.8 || $lh > 4.0) {
             $lh = 1.35;
@@ -308,7 +312,7 @@ final class Eko_Sampa_Template_Renderer {
         $overflow = $for_print ? 'hidden' : 'auto';
 
         return sprintf(
-            'width:100%%;height:100%%;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;background-color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;padding:4px 6px;display:block;',
+            'flex:1;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
             $ff,
             $fs,
             $fw,
@@ -316,7 +320,6 @@ final class Eko_Sampa_Template_Renderer {
             $td,
             $ta,
             $color,
-            $bg,
             $lh,
             $ls,
             $tt,

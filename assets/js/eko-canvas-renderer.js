@@ -310,11 +310,12 @@
 
     /**
      * Stacking order for sibling canvas elements. Must stay aligned with PHP
-     * {@see Eko_Sampa_Template_Renderer::render_element} (same base + stride).
-     * Index 0 = back, last index = front. Not persisted in json_data.
+     * {@see Eko_Sampa_Template_Renderer::render_element}.
+     * Rule: z = STACK_Z_BASE + stackIndex (index 0 = back, last = front). Not persisted in json_data.
      */
     const STACK_Z_BASE = 10;
-    const STACK_Z_STRIDE = 4;
+    /** Kept for callers/tests; value 1 so z = BASE + index. */
+    const STACK_Z_STRIDE = 1;
 
     function stackZFromIndex(stackIndex) {
         const i = Math.max(0, Math.floor(Number(stackIndex) || 0));
@@ -356,6 +357,12 @@
         return out;
     }
 
+    /**
+     * Inner frame: border, opacity, shadow, and rotation for every element type.
+     * Rotation must not be applied on the canvas host (Interact + layout live there).
+     *
+     * @param {object} item
+     */
     function elementFrameCss(item) {
         const t = item && item.type;
         const rawSt = item && item.styles;
@@ -371,7 +378,7 @@
         if (bw > 0 && bs !== 'none') {
             border = `${bw}px ${bs} ${bc}`;
         }
-        const overflowMode = t === 'text' || t === 'placeholder' ? 'visible' : 'hidden';
+        const overflowMode = 'hidden';
         const parts = [
             'position:absolute',
             'left:0',
@@ -392,6 +399,14 @@
         if (t === 'rectangle') {
             parts.push('background:#f1f5f9');
         }
+        if (t === 'text' || t === 'placeholder') {
+            const bg = safeCssColor(st.backgroundColor, 'transparent');
+            parts.push(`background-color:${bg}`);
+            parts.push('padding:4px 6px');
+            parts.push('display:flex');
+            parts.push('flex-direction:column');
+            parts.push('min-height:0');
+        }
         return parts.join(';');
     }
 
@@ -407,15 +422,18 @@
         const td = String(st.textDecoration || d.textDecoration);
         const ta = String(st.textAlign || d.textAlign);
         const col = safeCssColor(st.color, d.color);
-        const bg = safeCssColor(st.backgroundColor, 'transparent');
         const lh = Number(st.lineHeight);
         const lineH = Number.isFinite(lh) && lh > 0 && lh <= 4 ? String(lh) : String(d.lineHeight);
         const ls = clampNum(st.letterSpacing, -20, 40, 0);
         const tt = String(st.textTransform || d.textTransform);
         const overflow = forPrint ? 'hidden' : 'auto';
         return [
+            'flex:1',
+            'min-width:0',
+            'min-height:0',
             'width:100%',
-            'height:100%',
+            'margin:0',
+            'padding:0',
             'box-sizing:border-box',
             `font-family:${ff.replace(/"/g, "'")}`,
             `font-size:${fs}px`,
@@ -424,14 +442,15 @@
             `text-decoration:${td}`,
             `text-align:${ta}`,
             `color:${col}`,
-            `background-color:${bg}`,
             `line-height:${lineH}`,
             `letter-spacing:${ls}px`,
             `text-transform:${tt}`,
             'white-space:pre-wrap',
+            'overflow-wrap:break-word',
+            'word-wrap:break-word',
             'word-break:break-word',
             `overflow:${overflow}`,
-            'padding:4px 6px',
+            'vertical-align:top',
             'display:block',
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact',

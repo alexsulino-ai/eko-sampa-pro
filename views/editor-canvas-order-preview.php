@@ -47,8 +47,7 @@ if (! defined('ABSPATH')) {
                 <div class="eko-sampa-editor__viewport-frame flex h-full min-h-0 w-full min-w-0 items-start justify-center overflow-hidden p-2 sm:p-3" @mousedown.self="clearSelectionIfCanvas($event)">
                     <div class="eko-sampa-editor__stage max-h-full max-w-full shrink-0" :style="stageTransform">
                         <div
-                            class="eko-sampa-editor__canvas relative shrink-0 bg-white shadow-lg ring-1 ring-slate-900/10 transition-shadow duration-150"
-                            :class="{ 'ring-2 ring-emerald-400/60 shadow-md': snapFlash }"
+                            class="eko-sampa-editor__canvas relative shrink-0 bg-white"
                             :style="canvasSurfaceStyle()"
                             x-ref="editorCanvas"
                             role="application"
@@ -56,32 +55,27 @@ if (! defined('ABSPATH')) {
                         >
                             <template x-for="(item, idx) in elements" :key="item.id">
                                 <div
-                                    class="eko-sampa-editor__element group absolute touch-none select-none rounded-[1px]"
-                                    :class="{
-                                        'shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
-                                        'shadow-lg ring-2 ring-indigo-500': selectedId === item.id && draggingId !== item.id,
-                                        'hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
-                                    }"
+                                    class="eko-sampa-editor__element absolute touch-none select-none"
                                     :data-element-id="item.id"
                                     :data-layer-index="idx"
-                                    :style="elementPositionStyle(item)"
+                                    :style="elementPositionStyle(item, idx)"
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent
                                 >
                                     <template x-if="item.type === 'image'">
-                                        <div class="pointer-events-none absolute inset-0" :style="elementFrameCss(item)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
                                             <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'text' || item.type === 'placeholder'">
-                                        <div class="absolute inset-0" :style="elementFrameCss(item)">
-                                            <div class="eko-sampa-editor__inline-hit pointer-events-none min-h-0 min-w-0 cursor-default">
-                                                <span class="pointer-events-none block min-h-full min-w-0 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
+                                            <div class="eko-sampa-editor__inline-hit pointer-events-none flex min-h-0 min-w-0 flex-1 cursor-default flex-col">
+                                                <span class="pointer-events-none box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
                                             </div>
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'rectangle'">
-                                        <div class="pointer-events-none absolute inset-0" :style="elementFrameCss(item)"></div>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)"></div>
                                     </template>
                                 </div>
                             </template>

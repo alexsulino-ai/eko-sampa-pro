@@ -2,7 +2,7 @@
 
 ## O que foi blindado
 
-1. **Contrato explícito de z-index** (`window.EkoEditorZIndexContract` + [z-index-contract.md](z-index-contract.md)): base alinhada ao renderer/PHP; `SELECTED_OFFSET`/`DRAGGING_OFFSET` a zero; elevação só durante drag (`stackZ(top)+STACK_Z_STRIDE+2`); banda reservada para hover; `RESIZE_HANDLE_Z` documentado para chrome filho.
+1. **Z-index no editor:** só `stackZ(index)` no raiz do elemento (`10 + index`); selecção com `box-shadow` inset no frame (`editorElementFrameStyle`), sem boosts nem `window.EkoEditorZIndexContract`. Handles com `z-[60]` **só** dentro do host (por cima do frame) e **sem** `translate`/`scale` no host.
 2. **`ekoLayerDiagnostics.validate(root, editorState?)`:** detecta `z-*` Tailwind no raiz do canvas, `z-index` fora do triplo {base, +selected, +drag}, stacking context inesperado no host (transform/filter/isolation/perspective), e divergência entre `z-index` no atributo `style` vs computed.
 3. **`ekoTextEditDiagnostics.compareMetrics(root)`:** compara métricas computed entre `#eko-inline-edit` e o `span` de preview; expõe `font_metric_drift`, `wrapping_drift`, `line_count_mismatch`, `layout_shift_suspected`, `transform_drift`.
 4. **`?visual_regression_debug=1`:** `window.__ekoVisualRegressionDebug.dump({ root?, editorState? })` agrega layer stack, validação, bounds, mapa de z e métricas de overlay de texto.
