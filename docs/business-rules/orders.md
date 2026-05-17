@@ -20,9 +20,12 @@ Payload típico do frontend:
   "template_id": 3,
   "service_id": 12,
   "status": "pending",
+  "order_title": "Cartão João Silva",
   "dynamic_data_json": {}
 }
 ```
+
+`order_title` (opcional) é **rótulo operacional** da OS (fila de produção). **Não** confundir com `templates.nome`; **não** entra no canvas, export, `dynamic_data_json`, nem em `template_render_context()`. Ver [../schema/orders-schema.md](../schema/orders-schema.md).
 
 `service_id` no payload é **sobrescrito** pelo valor do template em DB se o template tiver `service_id > 0`.
 
@@ -84,5 +87,6 @@ Ver [../troubleshooting/create-order-400.md](../troubleshooting/create-order-400
 - **Imutabilidade**: pedidos em `completed` **não** aceitam `update` via REST/model (resposta `409` `eko_sampa_order_immutable`).
 - **Nova revisão de produção:** `POST /orders/{id}/duplicate-revision` — só a partir de `completed`; cria nova OS `pending` (`duplicate_as_revision`).
 - **Render:** `GET /orders/{id}/render` usa snapshot quando `Order_Completed_Snapshot::is_ready`; pedidos `completed` legados sem snapshot usam template vivo com `render_source: live_template_pre_snapshot_fallback` (compatibilidade).
+- A resposta de render inclui `operational_meta` (`order_id`, `order_title`, `status`) — metadado para UI de impressão; **não** faz parte do HTML da arte.
 
 Ver [../storage/storage-architecture.md](../storage/storage-architecture.md).

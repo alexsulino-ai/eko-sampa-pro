@@ -16,8 +16,6 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Template_Thumbnail_Generator {
 
-    private const MM_TO_PX = 3.7795275591;
-
     /**
      * @return true|\WP_Error
      */
@@ -79,8 +77,8 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
 
         $width_mm  = max(1.0, (float) ( $row['width_mm'] ?? 210 ));
         $height_mm = max(1.0, (float) ( $row['height_mm'] ?? 297 ));
-        $canvas_w  = max(1, (int) round($width_mm * self::MM_TO_PX));
-        $canvas_h  = max(1, (int) round($height_mm * self::MM_TO_PX));
+        $canvas_w  = max(1, (int) round($width_mm * Eko_Sampa_Render_Schema::CSS_PX_PER_MM));
+        $canvas_h  = max(1, (int) round($height_mm * Eko_Sampa_Render_Schema::CSS_PX_PER_MM));
         $max_w     = Eko_Sampa_Template_Thumbnail_Config::MAX_WIDTH_PX;
         $scale     = min(1.0, $max_w / $canvas_w);
         $out_w     = max(1, (int) round($canvas_w * $scale));

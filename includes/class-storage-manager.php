@@ -154,6 +154,66 @@ final class Eko_Sampa_Storage_Manager {
     }
 
     /**
+     * Normalize a path relative to {@see wp_upload_dir()} `basedir` (no leading slash, no traversal).
+     */
+    public static function normalize_upload_relative(string $relative): string {
+        $rel = str_replace('\\', '/', trim($relative));
+        $rel = ltrim($rel, '/');
+        if ($rel === '' || str_contains($rel, '..')) {
+            return '';
+        }
+        // Reject scheme-prefixed values mistaken for relative paths.
+        if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $rel)) {
+            return '';
+        }
+
+        return $rel;
+    }
+
+    /**
+     * Resolve an uploads-relative path to an absolute filesystem path under the site's uploads directory.
+     *
+     * @return string Absolute path or '' when invalid / outside uploads.
+     */
+    public static function resolve_upload_relative_to_abs(string $relative): string {
+        $rel = self::normalize_upload_relative($relative);
+        if ($rel === '') {
+            return '';
+        }
+        $d = self::upload_dirs();
+        if ($d['error'] || $d['basedir'] === '' || $d['basedir'] === '/') {
+            return '';
+        }
+        $abs = wp_normalize_path(trailingslashit($d['basedir']) . $rel);
+        if (true !== self::safe_path_guard($abs, 'read', false)) {
+            return '';
+        }
+
+        return $abs;
+    }
+
+    /**
+     * Build a public URL for a file under uploads from a uploads-relative path (e.g. `eko-sampa/users/user-1/templates/2.jpg`).
+     * Returns '' when the path is invalid, escapes uploads, or the file is not a readable regular file.
+     */
+    public static function public_url_for_upload_relative(string $relative): string {
+        $abs = self::resolve_upload_relative_to_abs($relative);
+        if ($abs === '' || ! is_readable($abs) || ! is_file($abs)) {
+            return '';
+        }
+        $d = self::upload_dirs();
+        if ($d['error'] || $d['baseurl'] === '') {
+            return '';
+        }
+        $from_rel = self::relative_from_abs($abs);
+        if ($from_rel === '') {
+            return '';
+        }
+
+        return trailingslashit($d['baseurl']) . str_replace('\\', '/', $from_rel);
+    }
+
+    /**
      * Hard boundary: path must resolve under `uploads/eko-sampa/` (or uploads only when $eko_required is false).
      * Aborts on doubt (symlink escape, missing realpath for existing nodes, traversal).
      *

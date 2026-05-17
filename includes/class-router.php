@@ -111,6 +111,9 @@ final class Eko_Sampa_Router {
 
         $storage_report = null;
 
+        $template_schema_report = null;
+        $template_schema_repair_result = null;
+
         if (isset($_POST['eko_sampa_integrity_action'])
             && check_admin_referer('eko_sampa_integrity', 'eko_sampa_integrity_nonce')) {
             $action = sanitize_key((string) wp_unslash($_POST['eko_sampa_integrity_action']));
@@ -134,6 +137,23 @@ final class Eko_Sampa_Router {
             } elseif ($action === 'storage_integrity_report') {
                 $storage_report = Eko_Sampa_Storage_Manager::build_storage_integrity_report();
                 $notice           = __('Storage integrity report generated (read-only).', 'eko-sampa');
+            } elseif ($action === 'template_schema_simulate') {
+                $database->ensure_schema();
+                $template_schema_report = [
+                    'diagnostics' => Eko_Sampa_Template_Schema_Diagnostics::analyze(),
+                    'repair_preview' => (new Eko_Sampa_Database())->preview_templates_legacy_hybrid_relaxed_defaults(),
+                ];
+                $notice = __('Template schema integrity report generated (read-only).', 'eko-sampa');
+            } elseif ($action === 'template_schema_repair') {
+                $database->ensure_schema();
+                $template_schema_repair_result = Eko_Sampa_Template_Schema_Repair::run_relaxed_defaults((int) get_current_user_id());
+                $template_schema_report       = [
+                    'diagnostics' => Eko_Sampa_Template_Schema_Diagnostics::analyze(),
+                    'repair_preview' => (new Eko_Sampa_Database())->preview_templates_legacy_hybrid_relaxed_defaults(),
+                ];
+                $notice = ! empty($template_schema_repair_result['ok'])
+                    ? __('Template schema repair completed.', 'eko-sampa')
+                    : __('Template schema repair failed — see wpdb_error in JSON.', 'eko-sampa');
             }
         }
 

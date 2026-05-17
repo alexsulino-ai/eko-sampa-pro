@@ -207,15 +207,13 @@ function ekoEditorCanvasFactory() {
          * Uses a local clamp so this never depends on other prototype methods during Alpine init.
          */
         syncLogicalCanvasSizeFromMm() {
-            const pxPerMm = 96 / 25.4;
-            const clamp = (n, lo, hi, fb) => {
-                const x = Number(n);
-                return !Number.isFinite(x) ? fb : Math.max(lo, Math.min(hi, x));
-            };
-            const wMm = clamp(this.widthMm, 10, 2000, 210);
-            const hMm = clamp(this.heightMm, 10, 2000, 297);
-            this.canvasWidth = Math.max(1, Math.round(wMm * pxPerMm));
-            this.canvasHeight = Math.max(1, Math.round(hMm * pxPerMm));
+            var V = typeof window !== 'undefined' ? window.EkoVisualRenderContract : null;
+            if (!V || typeof V.mmToCanvasPx !== 'function') {
+                throw new Error('[ekoEditorCanvas] EkoVisualRenderContract.mmToCanvasPx required — check script enqueue order.');
+            }
+            var dims = V.mmToCanvasPx(this.widthMm, this.heightMm);
+            this.canvasWidth = dims.canvasWidth;
+            this.canvasHeight = dims.canvasHeight;
         },
 
         zoomFactor() {

@@ -147,18 +147,16 @@
 
             })
 
-            .catch(function () {
-
+            .catch(function (err) {
                 document.body.classList.add('eko-sampa-print-ready');
-
                 document.body.classList.add('eko-sampa-print-error');
-
                 if (status) {
-
-                    status.textContent = '';
-
+                    status.style.display = '';
+                    status.textContent =
+                        err && err.message
+                            ? 'Render failed: ' + String(err.message)
+                            : 'Render failed. Open the browser console for details.';
                 }
-
             });
 
     });

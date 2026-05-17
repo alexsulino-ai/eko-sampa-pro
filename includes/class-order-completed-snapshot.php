@@ -151,6 +151,9 @@ final class Eko_Sampa_Order_Completed_Snapshot {
             'woo_order_id' => (int) ($order_row['woo_order_id'] ?? 0),
             'print_ready' => (int) ($order_row['print_ready'] ?? 0),
             'status'     => (string) ($order_row['status'] ?? 'completed'),
+            'order_title' => isset($order_row['order_title']) && is_string($order_row['order_title'])
+                ? (string) $order_row['order_title']
+                : null,
             'service_fields_snapshot_json' => (string) ($order_row['service_fields_snapshot_json'] ?? ''),
         ];
 

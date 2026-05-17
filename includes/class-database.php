@@ -184,6 +184,8 @@ final class Eko_Sampa_Database {
             '1.0.3' => [$this, 'migrate_to_1_0_3'],
             '1.0.4' => [$this, 'migrate_to_1_0_4'],
             '1.0.5' => [$this, 'migrate_to_1_0_5'],
+            '1.0.6' => [$this, 'migrate_to_1_0_6'],
+            '1.0.7' => [$this, 'migrate_to_1_0_7'],
         ];
     }
 
@@ -684,6 +686,7 @@ final class Eko_Sampa_Database {
                 'status'             => "varchar(32) NOT NULL DEFAULT 'pending'",
                 'dynamic_data_json'  => 'longtext NULL',
                 'print_ready'        => 'tinyint(1) NOT NULL DEFAULT 0',
+                'order_title'        => 'varchar(255) NULL',
                 'created_at'         => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 'updated_at'         => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
             ]
@@ -750,16 +753,142 @@ final class Eko_Sampa_Database {
     }
 
     /**
-     * Legacy FK consolidation + integrity snapshot after template service_id alignment.
+     * Post-1.0.4: re-run alignment + integrity snapshot (no automatic repair).
      */
     private function migrate_to_1_0_5(string $charset_collate): void {
         unset($charset_collate);
-
-        global $wpdb;
 
         $this->run_schema_alignment();
 
         $integrity = new Eko_Sampa_Database_Integrity($this);
         $integrity->run(false);
+    }
+
+    /**
+     * Hybrid installs: legacy English NOT NULL columns (`title`, `width`, …) without DEFAULT block modern INSERTs.
+     * Relaxes server-side constraints (DEFAULTs) — no column drops. Idempotent ALTER … MODIFY.
+     */
+    private function migrate_to_1_0_6(string $charset_collate): void {
+        unset($charset_collate);
+        $this->repair_templates_legacy_hybrid_relaxed_defaults(0);
+    }
+
+    /**
+     * Orders: optional operational label (`order_title`) — not part of template / render context.
+     */
+    private function migrate_to_1_0_7(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+        $this->schema_align_orders($wpdb);
+    }
+
+    /**
+     * Preview ALTER statements for legacy hybrid columns (diagnostics / repair UI).
+     *
+     * @return array{statements: list<string>, backfill_title_sql: string}
+     */
+    public function preview_templates_legacy_hybrid_relaxed_defaults(): array {
+        return $this->build_templates_legacy_hybrid_relaxed_sql(true);
+    }
+
+    /**
+     * Apply ALTER + optional title backfill. Call from admin repair or migration 1.0.6.
+     *
+     * @return array{ok: bool, statements: list<string>, backfill_rows: int, wpdb_error: string}
+     */
+    public function repair_templates_legacy_hybrid_relaxed_defaults(int $actor_user_id): array {
+        $built = $this->build_templates_legacy_hybrid_relaxed_sql(false);
+        global $wpdb;
+
+        $ok    = true;
+        $error = '';
+        foreach ($built['statements'] as $sql) {
+            if ($sql === '') {
+                continue;
+            }
+            $wpdb->query($sql);
+            if ($wpdb->last_error !== '') {
+                $ok    = false;
+                $error = trim((string) $wpdb->last_error);
+                break;
+            }
+        }
+
+        $backfill_rows = 0;
+        if ($ok && $built['backfill_title_sql'] !== '') {
+            $r = $wpdb->query($built['backfill_title_sql']);
+            $backfill_rows = is_numeric($r) ? (int) $r : 0;
+            if ($wpdb->last_error !== '') {
+                $ok    = false;
+                $error = trim((string) $wpdb->last_error);
+            }
+        }
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
+
+        if ($actor_user_id > 0 && class_exists('Eko_Sampa_Storage_Audit', false)) {
+            Eko_Sampa_Storage_Audit::append(
+                'template_schema_legacy_defaults_relaxed',
+                [
+                    'by'             => $actor_user_id,
+                    'ok'             => $ok,
+                    'statements_n'   => count($built['statements']),
+                    'backfill_rows'  => $backfill_rows,
+                    'wpdb_error'     => $error,
+                ]
+            );
+        }
+
+        return [
+            'ok'             => $ok,
+            'statements'     => $built['statements'],
+            'backfill_rows'  => $backfill_rows,
+            'wpdb_error'     => $error,
+        ];
+    }
+
+    /**
+     * @return array{statements: list<string>, backfill_title_sql: string}
+     */
+    private function build_templates_legacy_hybrid_relaxed_sql(bool $preview_only): array {
+        unset($preview_only);
+
+        global $wpdb;
+        $statements = [];
+        if (! $this->table_exists($wpdb, 'eko_sampa_templates')) {
+            return ['statements' => [], 'backfill_title_sql' => ''];
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $have  = $this->table_column_set($wpdb, $table);
+        $mods  = [];
+
+        if (isset($have['title'])) {
+            $mods[] = "MODIFY COLUMN `title` varchar(255) NOT NULL DEFAULT ''";
+        }
+        if (isset($have['width'])) {
+            $mods[] = 'MODIFY COLUMN `width` float NOT NULL DEFAULT 0';
+        }
+        if (isset($have['height'])) {
+            $mods[] = 'MODIFY COLUMN `height` float NOT NULL DEFAULT 0';
+        }
+        if (isset($have['background_color'])) {
+            $mods[] = "MODIFY COLUMN `background_color` varchar(20) NOT NULL DEFAULT '#ffffff'";
+        }
+        if (isset($have['created_at'])) {
+            $mods[] = 'MODIFY COLUMN `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        }
+
+        if ($mods !== []) {
+            $statements[] = 'ALTER TABLE `' . $table . '` ' . implode(', ', $mods);
+        }
+
+        $backfill = '';
+        if (isset($have['title'], $have['nome'])) {
+            $backfill = "UPDATE `{$table}` SET `title` = `nome` WHERE (`title` = '' OR `title` IS NULL) AND `nome` <> ''";
+        }
+
+        return ['statements' => $statements, 'backfill_title_sql' => $backfill];
     }
 }

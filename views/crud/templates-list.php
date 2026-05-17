@@ -72,13 +72,6 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     <p class="eko-template-card__meta" x-text="formatDimensions(r)"></p>
                     <p class="eko-template-card__meta" x-show="r.categoria" x-text="r.categoria"></p>
                     <p class="eko-template-card__meta" x-text="formatUpdated(r)"></p>
-                    <button
-                        type="button"
-                        class="eko-tpl-create-order"
-                        x-show="canOrderCreate() && canCreateOrderFrom(r)"
-                        :disabled="isCreatingOrder(r.id)"
-                        @click="createOrderFromTemplate(r)"
-                    ><?php echo esc_html__('Create order', 'eko-sampa'); ?></button>
                     <div class="eko-template-card__actions">
                         <?php
                         eko_sampa_crud_actions_render(
@@ -131,7 +124,6 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     <?php
                     eko_sampa_crud_actions_render(
                         [
-                            ['type' => 'create_order', 'click' => 'createOrderFromTemplate(r)', 'can' => 'order.create', 'show' => 'canCreateOrderFrom(r)', 'loading' => 'isCreatingOrder(r.id)', 'size' => 'sm'],
                             ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm'],
                             ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm'],
                             ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm'],

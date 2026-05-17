@@ -285,6 +285,16 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/templates/(?P<id>\d+)/duplicate-diagnostics',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_templates_duplicate_diagnostics'],
+                'permission_callback' => [$this, 'require_templates_cap'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/templates/(?P<id>\d+)/thumbnail',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
@@ -951,7 +961,28 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row));
+        $enriched = Eko_Sampa_Template_Thumbnail::enrich_row($row);
+        $inspect  = $request->get_param('inspect_duplicate');
+        if ($inspect === 'deep') {
+            $enriched['duplicate_inspect_deep'] = Eko_Sampa_Template_Duplicate_Diagnostics::deep($id);
+        } elseif ($inspect) {
+            $enriched['duplicate_inspect'] = Eko_Sampa_Template_Thumbnail::inspect_duplicate_readiness($id);
+        }
+
+        return new \WP_REST_Response($enriched);
+    }
+
+    public function route_templates_duplicate_diagnostics(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id = (int) $request['id'];
+        if (! is_array(( new Eko_Sampa_Template() )->get($id))) {
+            return new \WP_Error(
+                'eko_sampa_not_found',
+                __('Source template was not found or is not visible for your account.', 'eko-sampa'),
+                ['status' => 404, 'failure_reason' => 'source_not_found']
+            );
+        }
+
+        return new \WP_REST_Response(Eko_Sampa_Template_Duplicate_Diagnostics::duplicate_diagnostics_bundle($id));
     }
 
     public function route_templates_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1002,21 +1033,131 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_duplicate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id = (int) $request['id'];
-        $new = (new Eko_Sampa_Template())->duplicate($id);
-        if (! $new) {
+        $id  = (int) $request['id'];
+        $tpl = new Eko_Sampa_Template();
+        if (! is_array($tpl->get($id))) {
             return new \WP_Error(
-                'eko_sampa_duplicate_failed',
-                __('Could not duplicate template.', 'eko-sampa'),
-                array_merge(['status' => 400], $this->wpdb_debug_data())
+                'eko_sampa_duplicate_source_not_found',
+                __('Source template was not found or is not visible for your account.', 'eko-sampa'),
+                array_merge(['status' => 404], ['failure_reason' => 'source_not_found'])
             );
         }
 
-        Eko_Sampa_Template_Thumbnail::copy($id, (int) $new);
+        $payload = $tpl->build_duplicate_create_data($id);
+        if (! is_array($payload)) {
+            return new \WP_Error(
+                'eko_sampa_duplicate_payload_failed',
+                __('Could not build duplicate payload.', 'eko-sampa'),
+                ['status' => 400, 'failure_reason' => 'payload_unavailable']
+            );
+        }
 
-        $row = (new Eko_Sampa_Template())->get((int) $new);
+        $try = $tpl->try_create($payload, false);
+        if (empty($try['success'])) {
+            $report = Eko_Sampa_Template_Duplicate_Diagnostics::sanitize_try_for_api($try);
 
-        return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row, 201);
+            Eko_Sampa_Storage_Audit::append(
+                'template_duplicate_insert_failed',
+                [
+                    'source_template_id' => $id,
+                    'failure_reason'     => (string) ( $try['failure_reason'] ?? '' ),
+                    'mysql_errno'        => (int) ( $try['mysql_errno'] ?? 0 ),
+                    'sql_state'          => (string) ( $try['sql_state'] ?? '' ),
+                    'offending_column'   => (string) ( $try['offending_column'] ?? '' ),
+                ]
+            );
+
+            if (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log(
+                    '[eko-sampa] template_duplicate_insert_failed template=' . $id
+                    . ' reason=' . (string) ( $try['failure_reason'] ?? '' )
+                    . ' errno=' . (int) ( $try['mysql_errno'] ?? 0 )
+                );
+            }
+
+            $detail = trim((string) ($try['json_decode_error'] ?? ''));
+            $base   = __('Could not duplicate template.', 'eko-sampa');
+            $msg    = $detail !== ''
+                ? sprintf(
+                    /* translators: 1: generic duplicate failure, 2: technical detail (e.g. json_object_coerce_decode_failed). */
+                    __('%1$s [%2$s]', 'eko-sampa'),
+                    $base,
+                    $detail
+                )
+                : $base;
+
+            return new \WP_Error(
+                'eko_sampa_duplicate_failed',
+                $msg,
+                array_merge(
+                    ['status' => 400],
+                    [
+                        'failure_reason'      => (string) ( $try['failure_reason'] ?? 'wpdb_insert_unknown' ),
+                        'db_last_error'       => (string) ( $try['wpdb_error'] ?? $this->wpdb_last_error_snippet() ),
+                        'mysql_errno'         => (int) ( $try['mysql_errno'] ?? 0 ),
+                        'sql_state'           => (string) ( $try['sql_state'] ?? '' ),
+                        'offending_column'    => (string) ( $try['offending_column'] ?? '' ),
+                        'json_decode_error'   => (string) ( $try['json_decode_error'] ?? '' ),
+                        'insert_diagnostics'  => $try['insert_diagnostics'] ?? null,
+                        'duplicate_try'       => is_array($report) ? $report : [],
+                    ],
+                    $this->wpdb_debug_data()
+                )
+            );
+        }
+
+        $new_id = (int) ( $try['id'] ?? 0 );
+        if ($new_id <= 0) {
+            return new \WP_Error(
+                'eko_sampa_duplicate_failed',
+                __('Could not duplicate template.', 'eko-sampa'),
+                ['status' => 500, 'failure_reason' => 'insert_id_missing']
+            );
+        }
+
+        $copy = Eko_Sampa_Template_Thumbnail::copy($id, $new_id);
+
+        $warnings = [];
+        if (true !== $copy) {
+            $warnings['thumbnail_copy_failed'] = is_wp_error($copy)
+                ? [
+                    'code'    => $copy->get_error_code(),
+                    'message' => $copy->get_error_message(),
+                ]
+                : ['code' => 'unknown', 'message' => __('Thumbnail copy returned false.', 'eko-sampa')];
+            Eko_Sampa_Storage_Audit::append('duplicate_thumbnail_copy_failed', [
+                'source_template_id' => $id,
+                'new_template_id'    => $new_id,
+                'error'              => is_wp_error($copy) ? $copy->get_error_code() : 'not_wp_error',
+            ]);
+        } elseif (! Eko_Sampa_Template_Thumbnail::exists($new_id)) {
+            $warnings['thumbnail_missing'] = [
+                'code'    => 'thumbnail_missing',
+                'message' => __('Source had no readable thumbnail file; new template has no JPEG yet.', 'eko-sampa'),
+            ];
+        }
+
+        $row = (new Eko_Sampa_Template())->get($new_id);
+        if (! is_array($row)) {
+            return new \WP_Error(
+                'eko_sampa_duplicate_fetch_failed',
+                __('Duplicate was created but could not be reloaded.', 'eko-sampa'),
+                ['status' => 500, 'failure_reason' => 'reload_failed', 'template_id' => $new_id]
+            );
+        }
+
+        $out = Eko_Sampa_Template_Thumbnail::enrich_row($row);
+        if (! empty($try['schema_integrity_bridge'])) {
+            $out['schema_integrity_bridge'] = $try['schema_integrity_bridge'];
+        }
+        if ($warnings !== []) {
+            $out['duplicate_warnings'] = $warnings;
+        }
+
+        Eko_Sampa_Storage_Manager::audit('template_duplicated', ['from' => $id, 'to' => $new_id]);
+
+        return new \WP_REST_Response($out, 201);
     }
 
     public function route_templates_thumbnail(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1230,7 +1371,13 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Order())->get((int) $new), 201);
+        $model = new Eko_Sampa_Order();
+        $row   = $model->get((int) $new);
+
+        return new \WP_REST_Response(
+            is_array($row) ? $model->enrich_row_for_api($row) : ['id' => (int) $new],
+            201
+        );
     }
 
     public function route_orders_duplicate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1244,7 +1391,13 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        return new \WP_REST_Response((new Eko_Sampa_Order())->get((int) $new), 201);
+        $model = new Eko_Sampa_Order();
+        $row   = $model->get((int) $new);
+
+        return new \WP_REST_Response(
+            is_array($row) ? $model->enrich_row_for_api($row) : ['id' => (int) $new],
+            201
+        );
     }
 
     public function route_orders_render(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1274,6 +1427,7 @@ final class Eko_Sampa_Rest_Api {
                     $html,
                     Eko_Sampa_Order_Completed_Snapshot::render_integrity_hints($uid, $oid, (string) ($order['status'] ?? ''))
                 );
+                $html['operational_meta'] = $this->order_operational_meta_payload($order);
 
                 return new \WP_REST_Response($html);
             }
@@ -1302,6 +1456,7 @@ final class Eko_Sampa_Rest_Api {
                 (string) ($order['status'] ?? '')
             )
         );
+        $html['operational_meta'] = $this->order_operational_meta_payload($order);
 
         return new \WP_REST_Response($html);
     }
@@ -1474,6 +1629,30 @@ final class Eko_Sampa_Rest_Api {
         $err = (string) $wpdb->last_error;
 
         return $err !== '' ? ['db_last_error' => $err] : [];
+    }
+
+    /**
+     * Non-render metadata for order print/preview clients (never merged into canvas context).
+     *
+     * @param array<string, mixed> $order
+     *
+     * @return array{order_id: int, order_title: ?string, status: string}
+     */
+    private function order_operational_meta_payload(array $order): array {
+        $oid = (int) ($order['id'] ?? 0);
+        $t   = null;
+        if (isset($order['order_title']) && is_string($order['order_title'])) {
+            $t = sanitize_text_field($order['order_title']);
+            if ($t === '') {
+                $t = null;
+            }
+        }
+
+        return [
+            'order_id'    => $oid,
+            'order_title' => $t,
+            'status'      => sanitize_key((string) ($order['status'] ?? '')),
+        ];
     }
 
     /**

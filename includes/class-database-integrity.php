@@ -130,7 +130,10 @@ final class Eko_Sampa_Database_Integrity {
             'service_id',
             'template_id',
             'status',
+            'order_title',
         ]);
+
+        $report['orders_operational_title'] = $this->orders_order_title_metrics();
 
         $report['orphans']['templates_missing_service'] = $this->find_templates_missing_service();
         $report['orphans']['templates_missing_client']  = $this->find_templates_missing_client();
@@ -356,6 +359,47 @@ final class Eko_Sampa_Database_Integrity {
         }
 
         return $out;
+    }
+
+    /**
+     * Operational order title column (DB 1.0.7+): presence and fill rate for diagnostics JSON.
+     *
+     * @return array<string, mixed>
+     */
+    private function orders_order_title_metrics(): array {
+        global $wpdb;
+
+        if (! $this->database->table_exists_for_suffix('eko_sampa_orders')) {
+            return [
+                'table_exists'         => false,
+                'column_present'      => false,
+                'rows_without_title'  => null,
+                'readiness'           => 'no_table',
+            ];
+        }
+
+        $cols = $this->column_presence_report('eko_sampa_orders', ['order_title']);
+        $have  = ! empty($cols['order_title']);
+        if (! $have) {
+            return [
+                'table_exists'        => true,
+                'column_present'      => false,
+                'rows_without_title'  => null,
+                'readiness'           => 'migration_required',
+                'expected_db_version' => '1.0.7',
+            ];
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_orders';
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $n = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE `order_title` IS NULL OR `order_title` = ''");
+
+        return [
+            'table_exists'        => true,
+            'column_present'      => true,
+            'rows_without_title'  => $n,
+            'readiness'           => 'ok',
+        ];
     }
 
     /**

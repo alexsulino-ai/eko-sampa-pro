@@ -14,6 +14,10 @@ if (! defined('ABSPATH')) {
 ?>
 <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Order', 'eko-sampa'); ?></h3>
 <div class="mt-3 grid gap-3 sm:grid-cols-2">
+    <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Operational title', 'eko-sampa'); ?>
+        <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" maxlength="255" x-model="state.form.order_title" placeholder="<?php echo esc_attr__('e.g. Cartão João Silva — not shown on the printed artwork', 'eko-sampa'); ?>" />
+        <span class="mt-1 block text-[11px] text-slate-500"><?php echo esc_html__('For your production queue only. Not the template name and not embedded in the canvas or export.', 'eko-sampa'); ?></span>
+    </label>
     <?php if (current_user_can('manage_options')) : ?>
         <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Owner user ID (new only)', 'eko-sampa'); ?>
             <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model="state.form.user_id" :disabled="!!state.form.id" />

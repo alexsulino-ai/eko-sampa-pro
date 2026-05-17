@@ -5,6 +5,7 @@
 - SQL error: Unknown column `client_id` / `service_id`
 - REST 400 em template save
 - `eko_sampa_db_version` alto mas colunas em falta
+- REST duplicate: `missing_required_column` / `offending_column: title` (tabela híbrida com colunas inglesas `NOT NULL` sem `DEFAULT`)
 
 ## Causa
 
@@ -15,7 +16,8 @@ Deploy parcial, restore DB antigo, ou option atualizada sem `dbDelta` completo.
 1. Atualizar plugin para versão com `EKO_SAMPA_DB_VERSION` atual
 2. Carregar qualquer página WP (dispara `ensure_schema`)
 3. **Diagnostics → Run integrity check**
-4. Verificar `columns.eko_sampa_templates` no raw report — `client_id: true`
+4. **Diagnostics → Simulate / Run template schema repair** (híbrido `title`/`width`/…) — ver [../schema/templates-schema.md](../schema/templates-schema.md)
+5. Verificar `columns.eko_sampa_templates` no raw report — `client_id: true`
 
 ## CLI
 

@@ -403,18 +403,90 @@ final class Eko_Sampa_Template_Thumbnail {
         return is_array($cols) && $cols !== [];
     }
 
-    public static function copy(int $from_id, int $to_id): bool {
-        if ($from_id <= 0 || $to_id <= 0 || ! self::exists($from_id)) {
-            return false;
+    /**
+     * Copy persisted JPEG from one template id to another (user-scoped write for destination owner).
+     *
+     * When the source has no readable thumbnail, returns **true** (duplicate still valid) and records audit.
+     * On filesystem / validation errors returns {@see \WP_Error} — caller may roll back the new template row.
+     *
+     * @return true|\WP_Error
+     */
+    public static function copy(int $from_id, int $to_id): bool|\WP_Error {
+        if ($from_id <= 0 || $to_id <= 0) {
+            return new \WP_Error(
+                'eko_sampa_duplicate_thumbnail_invalid',
+                __('Invalid template id for thumbnail copy.', 'eko-sampa'),
+                ['status' => 400, 'failure_reason' => 'invalid_ids']
+            );
+        }
+
+        if (! self::exists($from_id)) {
+            Eko_Sampa_Storage_Manager::audit('duplicate_thumbnail_source_missing', ['from' => $from_id, 'to' => $to_id]);
+            Eko_Sampa_Storage_Audit::append('duplicate_thumbnail_source_missing', ['from' => $from_id, 'to' => $to_id]);
+
+            return true;
         }
 
         $src = self::file_path($from_id);
-        $bin = file_get_contents($src);
-        if (! is_string($bin) || $bin === '') {
-            return false;
+        if ($src === '' || ! is_readable($src)) {
+            Eko_Sampa_Storage_Manager::audit('duplicate_thumbnail_source_unreadable', ['from' => $from_id, 'to' => $to_id]);
+            Eko_Sampa_Storage_Audit::append('duplicate_thumbnail_source_unreadable', ['from' => $from_id, 'to' => $to_id]);
+
+            return true;
         }
 
-        return true === self::save_jpeg_binary($to_id, $bin);
+        $bin = file_get_contents($src);
+        if (! is_string($bin) || $bin === '') {
+            return new \WP_Error(
+                'eko_sampa_duplicate_thumbnail_read',
+                __('Could not read source thumbnail file.', 'eko-sampa'),
+                ['status' => 500, 'failure_reason' => 'thumbnail_read_failed', 'from' => $from_id]
+            );
+        }
+
+        $saved = self::save_jpeg_binary($to_id, $bin);
+        if ($saved instanceof \WP_Error) {
+            return $saved;
+        }
+
+        return true;
+    }
+
+    /**
+     * Read-only diagnostics for POST /templates/{id}/duplicate or GET ?inspect_duplicate=1.
+     *
+     * @return array<string, mixed>
+     */
+    public static function inspect_duplicate_readiness(int $template_id): array {
+        if ($template_id <= 0) {
+            return ['template_id' => $template_id, 'ok' => false, 'code' => 'invalid_id'];
+        }
+
+        $owner = self::template_owner_id($template_id);
+        global $wpdb;
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        $safe  = preg_replace('/[^a-z0-9_]/i', '', $table);
+        $preview_rel = '';
+        if ($safe !== '' && $safe === $table) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $preview_rel = (string) $wpdb->get_var($wpdb->prepare("SELECT preview_image FROM `{$safe}` WHERE id = %d LIMIT 1", $template_id));
+        }
+
+        $src_abs   = self::file_path($template_id);
+        $thumb_rel = $src_abs !== '' ? Eko_Sampa_Storage_Manager::relative_from_abs($src_abs) : '';
+        $preview_public = $preview_rel !== ''
+            ? Eko_Sampa_Storage_Manager::public_url_for_upload_relative($preview_rel)
+            : '';
+
+        return [
+            'template_id'              => $template_id,
+            'owner_user_id'            => $owner,
+            'thumbnail_readable'       => self::exists($template_id),
+            'thumbnail_relative'       => $thumb_rel,
+            'preview_image_stored'     => $preview_rel,
+            'preview_image_public_ok'  => $preview_public !== '',
+            'preview_image_broken_stored' => $preview_rel !== '' && $preview_public === '',
+        ];
     }
 
     /**
@@ -442,6 +514,18 @@ final class Eko_Sampa_Template_Thumbnail {
         if ($row['thumbnail_visual_hash'] === '') {
             $row['thumbnail_visual_hash'] = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
         }
+
+        $preview_rel = trim((string) ( $row['preview_image'] ?? '' ));
+        $stored_preview_url = $preview_rel !== ''
+            ? Eko_Sampa_Storage_Manager::public_url_for_upload_relative($preview_rel)
+            : '';
+        $row['preview_image_resolved'] = $preview_rel !== '' && $stored_preview_url !== '';
+
+        $display_preview = $stored_preview_url;
+        if ($display_preview === '' && $row['has_thumbnail']) {
+            $display_preview = (string) $row['thumbnail_url'];
+        }
+        $row['preview_image_public_url'] = $display_preview;
 
         $read = self::file_path($id);
         if ($state === self::STATE_READY && $version > 0 && $read !== '' && is_readable($read)) {

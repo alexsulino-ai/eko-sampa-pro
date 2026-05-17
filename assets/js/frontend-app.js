@@ -33,6 +33,9 @@
                 if (j && j.message) {
                     msg = j.message;
                 }
+                if (j && j.code) {
+                    msg = String(j.code) + ': ' + msg;
+                }
                 if (j && j.data && j.data.failure_reason) {
                     msg += ' [' + String(j.data.failure_reason) + ']';
                 }
@@ -1713,7 +1716,21 @@ function ekoTemplatesFactory() {
         },
         async duplicate(id) {
             try {
-                await window.ekoSampaApi('templates/' + id + '/duplicate', { method: 'POST' });
+                const created = await window.ekoSampaApi('templates/' + id + '/duplicate', { method: 'POST' });
+                if (
+                    created &&
+                    created.duplicate_warnings &&
+                    (Array.isArray(created.duplicate_warnings)
+                        ? created.duplicate_warnings.length
+                        : Object.keys(created.duplicate_warnings).length)
+                ) {
+                    try {
+                        // eslint-disable-next-line no-console
+                        console.warn('[eko-sampa] duplicate completed with warnings:', created.duplicate_warnings);
+                    } catch (e2) {
+                        void e2;
+                    }
+                }
                 if (this.mode === 'list') {
                     await this.load();
                 } else {
@@ -1817,6 +1834,7 @@ function ekoOrdersFactory() {
             previewDraftTimer: null,
             form: {
                 id: 0,
+                order_title: '',
                 client_id: 0,
                 service_id: '',
                 template_id: '',
@@ -2161,6 +2179,7 @@ function ekoOrdersFactory() {
             r.service_is_orphan = !!row.service_is_orphan;
             r.service_label = row.service_label != null ? String(row.service_label) : '';
             r.use_template_placeholders = !!row.use_template_placeholders;
+            r.order_title = r.order_title != null ? String(r.order_title) : '';
             if (r.service_is_orphan && !r.service_is_recovered) {
                 r.service_id = 0;
             }
@@ -2268,6 +2287,7 @@ function ekoOrdersFactory() {
         reset() {
             this.state.form = {
                 id: 0,
+                order_title: '',
                 client_id: 0,
                 service_id: '',
                 template_id: '',
@@ -2424,6 +2444,8 @@ function ekoOrdersFactory() {
                 return;
             }
             const dyn = JSON.parse(JSON.stringify(this.state.form.dynamic_data_json && typeof this.state.form.dynamic_data_json === 'object' ? this.state.form.dynamic_data_json : {}));
+            const ot =
+                this.state.form.order_title != null ? String(this.state.form.order_title).trim().slice(0, 255) : '';
             const payload = {
                 client_id: parseInt(String(this.state.form.client_id != null && this.state.form.client_id !== '' ? this.state.form.client_id : 0), 10),
                 service_id: parseInt(String(this.state.form.service_id || 0), 10),
@@ -2432,6 +2454,7 @@ function ekoOrdersFactory() {
                 dynamic_data_json: dyn,
                 woo_order_id: parseInt(String(this.state.form.woo_order_id || 0), 10),
                 print_ready: parseInt(String(this.state.form.print_ready != null ? this.state.form.print_ready : 0), 10) ? 1 : 0,
+                order_title: ot !== '' ? ot : null,
             };
             if (this.isAdmin && this.state.form.user_id) {
                 payload.user_id = parseInt(String(this.state.form.user_id), 10);
@@ -2476,6 +2499,10 @@ function ekoOrdersFactory() {
             } catch (e) {
                 this.error = String(e.message || e);
             }
+        },
+        orderListPrimary(r) {
+            const t = r && r.order_title != null ? String(r.order_title).trim() : '';
+            return t !== '' ? t : '—';
         },
         printUrl(id) {
             const sid = String(id);

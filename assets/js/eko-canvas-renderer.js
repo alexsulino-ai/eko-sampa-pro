@@ -1,14 +1,40 @@
 /**
  * Shared canvas render engine — single source of truth for editor preview, order preview, and print.
- * Keep in sync with {@see Eko_Sampa_Template_Renderer} (PHP mirrors this contract).
+ * Requires {@see assets/js/eko-visual-render-contract.js} (`EkoVisualRenderContract.computeScene`) — no parallel mm/scale path.
+ *
+ * @package Eko_Sampa
  */
 (function (global) {
     'use strict';
 
-    const MM_TO_CSS_PX = 96 / 25.4;
-
     /** Keep in sync with {@see Eko_Sampa_Render_Schema::VERSION}. */
     const RENDER_SCHEMA_VERSION = 1;
+
+    function requireVisualContract() {
+        const V = global.EkoVisualRenderContract;
+        if (!V || typeof V.computeScene !== 'function') {
+            throw new Error(
+                '[EkoCanvasRenderer] EkoVisualRenderContract is required — load `eko-sampa-visual-render-contract` before this script.'
+            );
+        }
+        // Some hosts/CDNs serve a stale contract without mmToCanvasPx while canvas-renderer is newer.
+        // Synthesize mmToCanvasPx from MM_TO_CSS_PX so the renderer can still boot (same numeric basis).
+        if (typeof V.mmToCanvasPx !== 'function') {
+            const k = Number(V.MM_TO_CSS_PX);
+            const pxPerMm = Number.isFinite(k) && k > 0 ? k : 96 / 25.4;
+            V.mmToCanvasPx = function (widthMm, heightMm) {
+                const wMm = Math.max(10, Math.min(2000, Number(widthMm) || 210));
+                const hMm = Math.max(10, Math.min(2000, Number(heightMm) || 297));
+                return {
+                    widthMm: wMm,
+                    heightMm: hMm,
+                    canvasWidth: Math.max(1, Math.round(wMm * pxPerMm)),
+                    canvasHeight: Math.max(1, Math.round(hMm * pxPerMm)),
+                };
+            };
+        }
+        return V;
+    }
 
     const RenderTargets = {
         DOM: 'dom',
@@ -18,13 +44,14 @@
         PNG: 'png',
     };
 
-    const THUMBNAIL_MAX_WIDTH_PX = 520;
-
     const RenderLifecycle = {
         INIT: 'eko-sampa:render:init',
         ASSETS_LOADING: 'eko-sampa:render:assets-loading',
         ASSETS_READY: 'eko-sampa:render:assets-ready',
         LAYOUT_READY: 'eko-sampa:render:layout-ready',
+        FONTS_WAITING: 'eko-sampa:render:fonts-waiting',
+        FONTS_READY: 'eko-sampa:render:fonts-ready',
+        FONTS_TIMEOUT: 'eko-sampa:render:fonts-timeout',
         PAINT_READY: 'eko-sampa:render:paint-ready',
         ERROR: 'eko-sampa:render:error',
     };
@@ -36,23 +63,25 @@
     };
 
     const CanvasUnitSystem = {
-        MM_TO_CSS_PX: MM_TO_CSS_PX,
+        get MM_TO_CSS_PX() {
+            return requireVisualContract().MM_TO_CSS_PX;
+        },
         SURFACE_UNIT: 'mm',
         LAYOUT_UNIT: 'px',
         mmToLayoutPx(mm) {
-            return Math.max(1, Math.round(Number(mm) * MM_TO_CSS_PX));
+            return Math.max(1, Math.round(Number(mm) * requireVisualContract().MM_TO_CSS_PX));
         },
         layoutPxToMm(px) {
-            return Number(px) / MM_TO_CSS_PX;
+            return Number(px) / requireVisualContract().MM_TO_CSS_PX;
         },
         surfaceSize(widthMm, heightMm) {
-            return mmToCanvasPx(widthMm, heightMm);
+            return requireVisualContract().mmToCanvasPx(widthMm, heightMm);
         },
         unitsMeta() {
             return {
                 surface: CanvasUnitSystem.SURFACE_UNIT,
                 layout: CanvasUnitSystem.LAYOUT_UNIT,
-                css_px_per_mm: MM_TO_CSS_PX,
+                css_px_per_mm: requireVisualContract().MM_TO_CSS_PX,
             };
         },
     };
@@ -66,12 +95,36 @@
         }
         try {
             if (typeof URLSearchParams !== 'undefined' && global.location && global.location.search) {
-                return new URLSearchParams(global.location.search).get('eko_render_debug') === '1';
+                var sp = new URLSearchParams(global.location.search);
+                if (
+                    sp.get('eko_render_debug') === '1' ||
+                    sp.get('render_debug') === '1' ||
+                    sp.get('visual_debug') === '1'
+                ) {
+                    return true;
+                }
             }
         } catch (e) {
             void e;
         }
         return false;
+    }
+
+    function waitForFonts(timeoutMs) {
+        const ms = Math.max(400, Math.min(30000, timeoutMs || 8000));
+        if (typeof document === 'undefined' || !document.fonts || typeof document.fonts.ready === 'undefined') {
+            return Promise.resolve({ ok: true, skipped: true });
+        }
+        return Promise.race([
+            document.fonts.ready.then(function () {
+                return { ok: true, skipped: false };
+            }),
+            new Promise(function (resolve) {
+                setTimeout(function () {
+                    resolve({ ok: false, skipped: false, reason: 'font_load_timeout' });
+                }, ms);
+            }),
+        ]);
     }
 
     function dispatchRenderEvent(name, detail) {
@@ -88,10 +141,11 @@
     function normalizePayload(raw) {
         const body = raw && typeof raw === 'object' ? raw : {};
         const version = Number(body.schema_version);
+        // Do not call CanvasUnitSystem.unitsMeta() inside the default object: Object.assign evaluates
+        // the full default before merging `body`, so a missing VRC would throw even when `body.units` exists (e.g. print page).
         const normalized = Object.assign(
             {
                 schema_version: RENDER_SCHEMA_VERSION,
-                units: CanvasUnitSystem.unitsMeta(),
             },
             body
         );
@@ -118,7 +172,8 @@
         if (!el || typeof el !== 'object') {
             return { geometry: {}, appearance: {}, typography: {}, transforms: {}, metadata: {} };
         }
-        const st = el.styles && typeof el.styles === 'object' ? el.styles : {};
+        const st =
+            el.styles && typeof el.styles === 'object' && !Array.isArray(el.styles) ? el.styles : {};
         return {
             geometry: {
                 x: el.x,
@@ -253,17 +308,6 @@
         };
     }
 
-    function mmToCanvasPx(widthMm, heightMm) {
-        const wMm = clampNum(widthMm, 10, 2000, 210);
-        const hMm = clampNum(heightMm, 10, 2000, 297);
-        return {
-            widthMm: wMm,
-            heightMm: hMm,
-            canvasWidth: Math.max(1, Math.round(wMm * MM_TO_CSS_PX)),
-            canvasHeight: Math.max(1, Math.round(hMm * MM_TO_CSS_PX)),
-        };
-    }
-
     function canvasSurfaceStyle(widthPx, heightPx, options) {
         const w = Math.max(1, Math.round(Number(widthPx) || 1));
         const h = Math.max(1, Math.round(Number(heightPx) || 1));
@@ -297,7 +341,8 @@
 
     function elementFrameCss(item) {
         const t = item && item.type;
-        const st = (item && item.styles) || {};
+        const rawSt = item && item.styles;
+        const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
         const op = clampNum(st.opacity, 0, 1, 1);
         const br = Math.max(0, Number(st.borderRadius) || 0);
         const bw = Math.max(0, Number(st.borderWidth) || 0);
@@ -333,7 +378,8 @@
     }
 
     function textContentCss(item, options) {
-        const st = (item && item.styles) || {};
+        const rawSt = item && item.styles;
+        const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
         const d = defaultTextStyles();
         const forPrint = options && options.forPrint;
         const ff = resolveFontFamily(st.fontFamily || d.fontFamily);
@@ -375,9 +421,11 @@
     }
 
     function imageImgCss(item) {
-        const st = (item && item.styles) || {};
+        const rawSt = item && item.styles;
+        const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
         const fit = String(st.objectFit || 'cover').toLowerCase();
         const f = ['contain', 'cover', 'fill', 'none', 'scale-down'].includes(fit) ? fit : 'cover';
+        const op = String(st.objectPosition || 'center center').trim() || 'center center';
         return [
             'width:100%',
             'height:100%',
@@ -385,6 +433,7 @@
             'max-height:100%',
             'display:block',
             `object-fit:${f}`,
+            `object-position:${op}`,
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact',
         ].join(';');
@@ -458,49 +507,6 @@
         }
     }
 
-    function scaleElementsForThumbnail(elements, scale) {
-        const s = Number(scale);
-        if (!Number.isFinite(s) || s <= 0 || s >= 0.999) {
-            return Array.isArray(elements) ? elements : [];
-        }
-        return (Array.isArray(elements) ? elements : []).map((el) => {
-            if (!el || typeof el !== 'object') {
-                return el;
-            }
-            let copy;
-            try {
-                copy = JSON.parse(JSON.stringify(el));
-            } catch (e2) {
-                return el;
-            }
-            ['x', 'y', 'width', 'height'].forEach((key) => {
-                const n = Number(copy[key]);
-                if (Number.isFinite(n)) {
-                    copy[key] = Math.round(n * s * 100) / 100;
-                }
-            });
-            if (copy.styles && typeof copy.styles === 'object') {
-                const fs = Number(copy.styles.fontSize);
-                if (Number.isFinite(fs)) {
-                    copy.styles.fontSize = Math.max(6, Math.round(fs * s));
-                }
-                const ls = Number(copy.styles.letterSpacing);
-                if (Number.isFinite(ls)) {
-                    copy.styles.letterSpacing = Math.round(ls * s * 10) / 10;
-                }
-                const br = Number(copy.styles.borderRadius);
-                if (Number.isFinite(br)) {
-                    copy.styles.borderRadius = Math.max(0, Math.round(br * s));
-                }
-                const bw = Number(copy.styles.borderWidth);
-                if (Number.isFinite(bw)) {
-                    copy.styles.borderWidth = Math.max(0, Math.round(bw * s));
-                }
-            }
-            return copy;
-        });
-    }
-
     function buildElementHtml(item, options) {
         if (!item || typeof item !== 'object') {
             return '';
@@ -555,10 +561,14 @@
 
     function buildPrintRootHtml(preview, options) {
         const payload = normalizePayload(preview);
-        const widthMm = clampNum(payload.width_mm, 1, 2000, 210);
-        const heightMm = clampNum(payload.height_mm, 1, 2000, 297);
-        const dims = mmToCanvasPx(widthMm, heightMm);
-        const elements = payload.elements || [];
+        const scene = requireVisualContract().computeScene(payload, 'print', options || {});
+        const dims = {
+            widthMm: scene.widthMm,
+            heightMm: scene.heightMm,
+            canvasWidth: scene.canvasWidth,
+            canvasHeight: scene.canvasHeight,
+        };
+        const elements = scene.elementsForRender;
         const forPrint = !options || options.forPrint !== false;
         const canvasHtml = buildCanvasInnerHtml(elements, dims.canvasWidth, dims.canvasHeight, {
             showGrid: options && options.showGrid,
@@ -573,6 +583,7 @@
             heightMm: dims.heightMm,
             canvasWidth: dims.canvasWidth,
             canvasHeight: dims.canvasHeight,
+            renderLayoutMeta: scene.meta || null,
             html:
                 `<div class="eko-sampa-print-root" style="position:relative;width:${dims.widthMm}mm;height:${dims.heightMm}mm;${printAdjust}overflow:hidden;box-sizing:border-box;background:#fff;">` +
                 canvasHtml +
@@ -582,15 +593,17 @@
 
     function buildThumbnailRootHtml(preview, options) {
         const opts = options || {};
-        const maxW = clampNum(opts.maxWidth, 120, 1200, THUMBNAIL_MAX_WIDTH_PX);
         const payload = normalizePayload(preview);
-        const widthMm = clampNum(payload.width_mm, 1, 2000, 210);
-        const heightMm = clampNum(payload.height_mm, 1, 2000, 297);
-        const dims = mmToCanvasPx(widthMm, heightMm);
-        const scale = Math.min(1, maxW / dims.canvasWidth);
-        const outW = Math.max(1, Math.round(dims.canvasWidth * scale));
-        const outH = Math.max(1, Math.round(dims.canvasHeight * scale));
-        const elements = scaleElementsForThumbnail(payload.elements || [], scale);
+        const scene = requireVisualContract().computeScene(payload, 'thumbnail', opts);
+        const dims = {
+            widthMm: scene.widthMm,
+            heightMm: scene.heightMm,
+            canvasWidth: scene.designCanvasWidth,
+            canvasHeight: scene.designCanvasHeight,
+        };
+        const outW = scene.canvasWidth;
+        const outH = scene.canvasHeight;
+        const elements = scene.elementsForRender;
         const canvasHtml = buildCanvasInnerHtml(elements, outW, outH, {
             showGrid: false,
             forPrint: true,
@@ -603,8 +616,9 @@
             heightMm: dims.heightMm,
             canvasWidth: outW,
             canvasHeight: outH,
-            designCanvasWidth: dims.canvasWidth,
-            designCanvasHeight: dims.canvasHeight,
+            designCanvasWidth: scene.designCanvasWidth,
+            designCanvasHeight: scene.designCanvasHeight,
+            renderLayoutMeta: scene.meta || null,
             html:
                 `<div class="eko-sampa-thumbnail-root" data-eko-render-target="thumbnail" style="width:${outW}px;height:${outH}px;position:relative;overflow:hidden;box-sizing:border-box;background:#fff;${printAdjust}">` +
                 canvasHtml +
@@ -676,7 +690,7 @@
                     if (typeof img.decode === 'function') {
                         img.decode()
                             .then(() => finish('ready'))
-                            .catch(() => finish('ready'));
+                            .catch(() => finish('decode_failed'));
                     } else {
                         finish('ready');
                     }
@@ -740,6 +754,36 @@
         return runRenderPipeline(container, preview, opts);
     }
 
+    function measureLayoutSurfaceDrift(container, expectedW, expectedH) {
+        if (!container || !container.querySelector) {
+            return null;
+        }
+        const canvas = container.querySelector('.eko-sampa-canvas');
+        if (!canvas) {
+            return { error: 'canvas_dom_missing' };
+        }
+        const r = canvas.getBoundingClientRect();
+        const dw = Math.abs(Math.round(r.width) - Math.round(expectedW));
+        const dh = Math.abs(Math.round(r.height) - Math.round(expectedH));
+        return {
+            surface_rect_css_px: { w: r.width, h: r.height },
+            expected_px: { w: expectedW, h: expectedH },
+            delta_rounded_px: { w: dw, h: dh },
+        };
+    }
+
+    function snapshotUnicodeAudit(payloadNormalized) {
+        try {
+            const V = requireVisualContract();
+            if (V && typeof V.detect_unicode_render_issues === 'function') {
+                return V.detect_unicode_render_issues(payloadNormalized);
+            }
+        } catch (e) {
+            return { issues: [], issues_count: 0, error: String(e) };
+        }
+        return { issues: [], issues_count: 0 };
+    }
+
     function runRenderPipeline(container, preview, options) {
         const opts = options || {};
         const payload = normalizePayload(preview);
@@ -753,8 +797,9 @@
         }
 
         const isThumbnail = opts.target === RenderTargets.THUMBNAIL;
+        let built;
         try {
-            const built = isThumbnail ? buildThumbnailRootHtml(payload, opts) : buildPrintRootHtml(payload, opts);
+            built = isThumbnail ? buildThumbnailRootHtml(payload, opts) : buildPrintRootHtml(payload, opts);
             container.innerHTML = built.html;
             dispatchRenderEvent(RenderLifecycle.LAYOUT_READY, {
                 runId: runId,
@@ -762,6 +807,7 @@
                 heightMm: built.heightMm,
                 canvasWidth: built.canvasWidth,
                 canvasHeight: built.canvasHeight,
+                renderLayoutMeta: built.renderLayoutMeta || null,
             });
         } catch (err) {
             dispatchRenderEvent(RenderLifecycle.ERROR, { runId: runId, reason: 'layout', error: String(err) });
@@ -774,12 +820,78 @@
             timeoutMs: opts.assetTimeoutMs || 12000,
             retries: opts.assetRetries != null ? opts.assetRetries : 1,
         })
-            .then((report) => {
-                dispatchRenderEvent(RenderLifecycle.ASSETS_READY, { runId: runId, report: report });
+            .then(function (report) {
+                if (!isThumbnail) {
+                    return { report: report, fonts: { ok: true, skipped: true } };
+                }
+                dispatchRenderEvent(RenderLifecycle.FONTS_WAITING, { runId: runId });
+                const fontMs = opts.fontReadyTimeoutMs != null ? opts.fontReadyTimeoutMs : 8000;
+                return waitForFonts(fontMs).then(function (fonts) {
+                    return { report: report, fonts: fonts };
+                });
+            })
+            .then(function (bundle) {
+                const report = bundle.report;
+                const fonts = bundle.fonts || { ok: true, skipped: true };
+                if (isThumbnail) {
+                    if (fonts.skipped) {
+                        /* no document.fonts */
+                    } else if (fonts.ok) {
+                        dispatchRenderEvent(RenderLifecycle.FONTS_READY, { runId: runId });
+                    } else {
+                        dispatchRenderEvent(RenderLifecycle.FONTS_TIMEOUT, { runId: runId, fonts: fonts });
+                        if (isRenderDebug()) {
+                            // eslint-disable-next-line no-console
+                            console.warn('[EkoCanvasRenderer] font_load_timeout', fonts);
+                        }
+                    }
+                }
+                const diagnosis = {
+                    runId: runId,
+                    target: opts.target,
+                    layout: {
+                        widthMm: built.widthMm,
+                        heightMm: built.heightMm,
+                        canvasWidth: built.canvasWidth,
+                        canvasHeight: built.canvasHeight,
+                    },
+                    contract: built.renderLayoutMeta || null,
+                    fonts: fonts,
+                    assets: report,
+                    visual_debug: isRenderDebug(),
+                    pixel_ratio:
+                        typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1,
+                    unicode_audit: snapshotUnicodeAudit(payload),
+                };
+                if (isThumbnail) {
+                    diagnosis.canonical_design_px = {
+                        w: built.designCanvasWidth,
+                        h: built.designCanvasHeight,
+                    };
+                    diagnosis.layout_surface_drift = measureLayoutSurfaceDrift(
+                        container,
+                        built.canvasWidth,
+                        built.canvasHeight
+                    );
+                }
+                if (isRenderDebug() && container) {
+                    container._ekoRenderDiagnosis = diagnosis;
+                }
+                dispatchRenderEvent(RenderLifecycle.ASSETS_READY, {
+                    runId: runId,
+                    report: report,
+                    fonts: fonts,
+                    diagnosis: isRenderDebug() ? diagnosis : undefined,
+                });
                 if (!isThumbnail) {
                     applyDebugOverlay(container);
                 }
-                dispatchRenderEvent(RenderLifecycle.PAINT_READY, { runId: runId, report: report });
+                dispatchRenderEvent(RenderLifecycle.PAINT_READY, {
+                    runId: runId,
+                    report: report,
+                    fonts: fonts,
+                    diagnosis: isRenderDebug() ? diagnosis : undefined,
+                });
                 try {
                     document.dispatchEvent(new CustomEvent('eko-sampa-print-ready', { detail: { runId: runId } }));
                 } catch (e2) {
@@ -787,7 +899,7 @@
                 }
                 return report;
             })
-            .catch((err) => {
+            .catch(function (err) {
                 dispatchRenderEvent(RenderLifecycle.ERROR, { runId: runId, reason: 'assets', error: String(err) });
                 throw err;
             });
@@ -797,14 +909,16 @@
         return runRenderPipeline(container, preview, Object.assign({ forPrint: true, target: RenderTargets.PRINT }, options || {}));
     }
 
+    const _ekoVisualContract = requireVisualContract();
+
     const api = {
         RENDER_SCHEMA_VERSION: RENDER_SCHEMA_VERSION,
         RenderTargets: RenderTargets,
         RenderLifecycle: RenderLifecycle,
         CanvasUnitSystem: CanvasUnitSystem,
         FONT_REGISTRY: FONT_REGISTRY,
-        MM_TO_CSS_PX: MM_TO_CSS_PX,
-        mmToCanvasPx: mmToCanvasPx,
+        MM_TO_CSS_PX: _ekoVisualContract.MM_TO_CSS_PX,
+        mmToCanvasPx: _ekoVisualContract.mmToCanvasPx,
         normalizePayload: normalizePayload,
         splitElementLayers: splitElementLayers,
         resolveFontFamily: resolveFontFamily,
@@ -820,13 +934,16 @@
         buildCanvasInnerHtml: buildCanvasInnerHtml,
         buildPrintRootHtml: buildPrintRootHtml,
         buildThumbnailRootHtml: buildThumbnailRootHtml,
-        THUMBNAIL_MAX_WIDTH_PX: THUMBNAIL_MAX_WIDTH_PX,
+        THUMBNAIL_MAX_WIDTH_PX: _ekoVisualContract.THUMBNAIL_MAX_WIDTH_PX,
         mountInto: mountInto,
         mountToTarget: mountToTarget,
         runRenderPipeline: runRenderPipeline,
         preloadAssets: preloadAssets,
         preloadImages: preloadImages,
         clampNum: clampNum,
+        getVisualRenderContract: function () {
+            return global.EkoVisualRenderContract || null;
+        },
         safeCssColor: safeCssColor,
         safeBoxShadow: safeBoxShadow,
         safeFontFamily: safeFontFamily,

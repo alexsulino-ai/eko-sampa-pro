@@ -2,8 +2,8 @@
 
 Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/v1`, Alpine CRUD). Objetivo: blindar o domínio contra regressões — cada regra crítica tem arquivo, contrato e ponto de código rastreável.
 
-**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (1.7.3+)  
-**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` = `1.0.5`  
+**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (1.7.5+)  
+**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` = `1.0.6`  
 **Opção WordPress:** `eko_sampa_db_version`
 
 ---
@@ -30,6 +30,7 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [overview.md](architecture/overview.md) — camadas, bootstrap, fluxos principais
 - [plugin-layout.md](architecture/plugin-layout.md) — pastas e classes
 - [domain-contracts.md](architecture/domain-contracts.md) — contratos Template / Order / Service / Client
+- [schema-alignment.md](architecture/schema-alignment.md) — drift `eko_sampa_templates`, DDL 1.0.6, bridge INSERT
 - [lessons-learned.md](architecture/lessons-learned.md) — bugs reais e como não repetir
 - [safe-delete-pattern.md](architecture/safe-delete-pattern.md) — padrão `safe_delete` multi-entidade (roadmap)
 - [onboarding.md](architecture/onboarding.md) — setup local e primeiros passos
@@ -41,13 +42,19 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 ### Banco e integridade
 
 - [schema.md](database/schema.md) — tabelas, colunas, legado `servico_id` / `cliente_id`
+- [templates-schema.md](schema/templates-schema.md) — contrato canónico vs colunas legadas + bridge/repair
+- [orders-schema.md](schema/orders-schema.md) — `order_title` (rótulo operacional da OS)
 - [ensure-schema.md](database/ensure-schema.md) — `ensure_schema()`, alignment, `row_exists()`
-- [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.5
+- [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.6
 - [integrity.md](database/integrity.md) — órfãos, repair, opções WP
 
 ### Regras de negócio
 
 - [templates.md](business-rules/templates.md)
+- [thumbnail-pipeline.md](templates/thumbnail-pipeline.md) — DOM → JPEG, fonts, assets, fallback servidor
+- [Visual Render Contract](architecture/visual-render-contract.md) — layout unificado print/thumbnail
+- [duplicate-lifecycle.md](templates/duplicate-lifecycle.md) — POST duplicate, `try_create`, `duplicate-diagnostics`, insert diagnostics
+- [preview-image-resolution.md](templates/preview-image-resolution.md) — URL pública vs path relativo
 - [orders.md](business-rules/orders.md)
 - [services.md](business-rules/services.md)
 - [service-delete.md](business-rules/service-delete.md) — contrato DELETE + safe delete

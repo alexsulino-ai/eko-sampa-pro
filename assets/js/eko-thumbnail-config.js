@@ -15,6 +15,12 @@
         DEBOUNCE_MS: 1200,
         MAX_RETRIES: 1,
         HISTORY_MAX_ENTRIES: 20,
+        /** Wait for {@link document.fonts.ready} before rasterizing thumbnails (ms). */
+        FONT_READY_TIMEOUT_MS: 8000,
+        /** Retries per image asset during thumbnail preload (see {@link EkoCanvasRenderer.preloadAssets}). */
+        ASSET_RETRIES: 1,
+        /** Cap for devicePixelRatio when calling html-to-image (fidelity vs file size). */
+        CAPTURE_PIXEL_RATIO_CAP: 2,
     };
 
     /** Formal client pipeline lifecycle. */

@@ -6,7 +6,47 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.7.6] — 2026-05-16
+
+### Adicionado
+
+- **Orders — título operacional (`order_title`):** coluna `varchar(255) NULL`, migração **1.0.7**, CRUD + listagem + busca + duplicação com sufixo ` (Copy)`; **não** entra em `template_render_context`, canvas ou export; incluído em `order.json` do snapshot concluído; bloco operacional na página de impressão; `operational_meta` em `GET /orders/{id}/render`; relatório `orders_operational_title` no integrity check.
+
+---
+
+## [1.7.5] — 2026-05-16
+
+### Corrigido
+
+- **Ativação fatal (parse error):** em `class-database.php`, o corpo de `migrate_to_1_0_5` tinha ficado **fora** de qualquer método (merge incompleto); restaurado o método e removido o código órfão.
+
+### Integridade de schema (templates híbridos)
+
+- **Drift legado vs canónico:** `Eko_Sampa_Template_Schema_Contract`, `Eko_Sampa_Template_Schema_Diagnostics::analyze()`, `Eko_Sampa_Template_Legacy_Row_Bridge` (política explícita por coluna), `Eko_Sampa_Template_Schema_Repair`.
+- **INSERT:** `prepare_create_row` aplica bridge **antes** de `filter_row_to_existing_columns`; `schema_integrity_bridge` em `try_create` / REST duplicate (201); `insert_formats` suporta colunas legadas (`title`, `width`, …).
+- **DDL:** `EKO_SAMPA_DB_VERSION` **1.0.6** — `migrate_to_1_0_6` relaxa `NOT NULL` sem default em colunas legadas (`ALTER … MODIFY … DEFAULT`), backfill `title` ← `nome`; audit `template_schema_legacy_defaults_relaxed`.
+- **Admin Diagnostics:** *Simulate* / *Run template schema repair* + JSON de relatório.
+- **Docs:** `docs/schema/templates-schema.md`, `docs/architecture/schema-alignment.md`; actualizações em `business-rules/templates.md`, `diagnostics/admin-tool.md`, `README.md`.
+- **`load_schema`:** público em `Eko_Sampa_Template_Insert_Diagnostics` para diagnóstico partilhado.
+- **Fallback allowlist:** colunas legadas em `Eko_Sampa_Model_Base::table_fallback_column_allowlist()` para `eko_sampa_templates`.
+
+---
+
 ## [1.7.4] — 2026-05-16
+
+### Corrigido / UX
+
+- **Preview image:** URLs públicas via `Eko_Sampa_Storage_Manager::public_url_for_upload_relative`; REST `enrich_row` expõe `preview_image_public_url` e `preview_image_resolved`; detalhe do template deixa de usar o path relativo como `href`.
+- **Duplicar template:** `prepare_create_row` + `Eko_Sampa_Template_Insert_Diagnostics::simulate_insert_validation` antes de cada `INSERT`; erros semânticos (`mysql_errno`, `sql_state`, `offending_column`, `insert_diagnostics`); audit `template_duplicate_insert_failed`; endpoint `GET /templates/{id}/duplicate-diagnostics`; remoção do fallback genérico `insert_failed`.
+- **`json_data` duplo (string JSON dentro de string):** `json_decode_lenient_assoc` faz unwrap recursivo até ao documento objeto/array antes de re-canonizar, evitando `json_invalid` na duplicação quando a coluna guarda JSON escapado uma vez a mais.
+- **`json_data` na duplicação (definitivo):** aceitar valor vindo da BD como **objeto** (coluna MySQL `JSON` / driver); candidatos a decode **sem** `wp_unslash` primeiro (evita corromper `\\` válidos), depois com `wp_unslash` para linhas antigas; `trim_json_blob` (BOM, NBSP, controlos Unicode); `json_decode` com profundidade 8192; `JSON_PARTIAL_OUTPUT_ON_ERROR` + sanitização de `NAN`/`INF` antes de `wp_json_encode`; mensagem REST de duplicação inclui detalhe técnico em `[%s]`.
+- **Visual único:** `eko-canvas-renderer.js` exige `EkoVisualRenderContract` (sem ramo mm/scale duplicado); editor usa `mmToCanvasPx` do contrato; GD thumbnail usa `Eko_Sampa_Render_Schema::CSS_PX_PER_MM`; `decode_failed` explícito; `?visual_debug=1` + `detect_unicode_render_issues`; `Eko_Sampa_Visual_Drift_Diagnostics` (servidor).
+- **Listagem de templates:** botão «Create order» removido só na grelha/lista; mantido no detalhe e na edição.
+
+### Melhorado (thumbnail fiel)
+
+- Pipeline: espera `document.fonts.ready` (timeout configurável), retries de assets (`ASSET_RETRIES`), `pixelRatio` limitado (`CAPTURE_PIXEL_RATIO_CAP`); eventos `eko-sampa:render:fonts-*`.
+- **Visual Render Contract:** obrigatório para `eko-canvas-renderer.js` e para o editor (`mmToCanvasPx`); `?visual_debug=1`; `detect_unicode_render_issues`; medição `layout_surface_drift` em diagnóstico; `object-position` em imagens quando definido no elemento.
 
 ### Adicionado / Endurecimento
 
@@ -19,6 +59,8 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 ### Documentação
 
 - `docs/storage/storage-architecture.md`: ciclo de vida do snapshot, manifesto, locks, invariantes e riscos do fallback ao template vivo.
+- `docs/templates/thumbnail-pipeline.md`, `duplicate-lifecycle.md`, `preview-image-resolution.md`; `docs/rest-api/templates.md`; `docs/diagnostics/admin-tool.md`; `docs/README.md` (índice).
+- `docs/architecture/visual-render-contract.md`.
 
 ## [1.7.3] — 2026-05-16
 

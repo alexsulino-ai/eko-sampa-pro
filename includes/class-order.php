@@ -16,6 +16,9 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
 
+    /** Max UTF-8 length for `order_title` (matches DB varchar(255)). */
+    private const ORDER_TITLE_MAX_CHARS = 255;
+
     /** @var array{ok: bool, debug: array<string, mixed>}|null */
     private ?array $last_relations_check = null;
 
@@ -31,7 +34,7 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
      * @return array<int, string>
      */
     private function allowed_orderby(): array {
-        return ['id', 'status', 'created_at', 'updated_at', 'woo_order_id'];
+        return ['id', 'status', 'created_at', 'updated_at', 'woo_order_id', 'order_title'];
     }
 
     /**
@@ -263,10 +266,17 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             }
         }
         if (! empty($args['s'])) {
-            $s = sanitize_text_field((string) $args['s']);
-            if ($s !== '' && ctype_digit($s)) {
-                $frag .= ' AND id = %d';
-                $vals[] = (int) $s;
+            $wpdb = $this->db();
+            $s     = sanitize_text_field((string) $args['s']);
+            if ($s !== '') {
+                if (ctype_digit($s)) {
+                    $frag .= ' AND id = %d';
+                    $vals[] = (int) $s;
+                } else {
+                    $like = '%' . $wpdb->esc_like($s) . '%';
+                    $frag .= ' AND order_title LIKE %s';
+                    $vals[] = $like;
+                }
             }
         }
 
@@ -325,6 +335,7 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             'status'             => self::STATUS_PENDING,
             'dynamic_data_json'  => $source['dynamic_data_json'] ?? null,
             'print_ready'        => 0,
+            'order_title'        => $this->build_duplicate_order_title($source),
         ];
 
         $snap = $source['service_fields_snapshot_json'] ?? null;
@@ -653,6 +664,9 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
      *
      * `dynamic_data_json` may be a JSON string (DB) or an associative array (REST draft).
      *
+     * **Excluded by design:** `order_title` and other operational-only columns must not appear here,
+     * so they never reach `render-context.json`, canvas HTML, or snapshot render payloads.
+     *
      * @param array<string, mixed> $order
      *
      * @return array<string, string>
@@ -809,8 +823,68 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
                 ? (int) (bool) absint((int) $data['print_ready'])
                 : 0;
         }
+        $title_partial = $partial && array_key_exists('order_title', $data);
+        $title_full    = ! $partial && array_key_exists('order_title', $data);
+        if ($title_partial || $title_full) {
+            $out['order_title'] = $this->sanitize_order_title_for_storage($data['order_title'] ?? null);
+        }
 
         return $out;
+    }
+
+    /**
+     * Operational label for production queue — never passed to {@see template_render_context()}.
+     */
+    private function sanitize_order_title_for_storage(mixed $value): ?string {
+        if ($value === null) {
+            return null;
+        }
+
+        $s = is_string($value) ? wp_unslash($value) : (string) $value;
+        $s = trim(wp_check_invalid_utf8($s, true));
+        if ($s === '') {
+            return null;
+        }
+
+        if (function_exists('mb_strlen') && mb_strlen($s, 'UTF-8') > self::ORDER_TITLE_MAX_CHARS) {
+            $s = mb_substr($s, 0, self::ORDER_TITLE_MAX_CHARS, 'UTF-8');
+        } elseif (strlen($s) > self::ORDER_TITLE_MAX_CHARS) {
+            $s = substr($s, 0, self::ORDER_TITLE_MAX_CHARS);
+        }
+
+        return sanitize_text_field($s);
+    }
+
+    /**
+     * Duplicate: same pattern as templates (`nome` + translated " (Copy)"), bounded by varchar(255).
+     *
+     * @param array<string, mixed> $source
+     */
+    private function build_duplicate_order_title(array $source): string {
+        $src = '';
+        if (isset($source['order_title']) && is_string($source['order_title'])) {
+            $src = trim(wp_check_invalid_utf8($source['order_title'], true));
+        }
+
+        $suffix    = ' (' . __('Copy', 'eko-sampa') . ')';
+        $suffixLen = function_exists('mb_strlen') ? mb_strlen($suffix, 'UTF-8') : strlen($suffix);
+        $max       = max(1, self::ORDER_TITLE_MAX_CHARS - $suffixLen);
+        $base      = $src !== '' ? $src : (string) __('Untitled order', 'eko-sampa');
+        $baseLen   = function_exists('mb_strlen') ? mb_strlen($base, 'UTF-8') : strlen($base);
+        if ($baseLen > $max) {
+            $base = function_exists('mb_substr')
+                ? mb_substr($base, 0, $max, 'UTF-8')
+                : substr($base, 0, $max);
+        }
+
+        $full = $base . $suffix;
+        if (function_exists('mb_strlen') && mb_strlen($full, 'UTF-8') > self::ORDER_TITLE_MAX_CHARS) {
+            $full = mb_substr($full, 0, self::ORDER_TITLE_MAX_CHARS, 'UTF-8');
+        } elseif (strlen($full) > self::ORDER_TITLE_MAX_CHARS) {
+            $full = substr($full, 0, self::ORDER_TITLE_MAX_CHARS);
+        }
+
+        return sanitize_text_field($full);
     }
 
     private function sanitize_status(string $status): string {
@@ -937,6 +1011,7 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             'template_id'                    => '%d',
             'woo_order_id'                   => '%d',
             'status'                         => '%s',
+            'order_title'                    => '%s',
             'dynamic_data_json'              => '%s',
             'service_fields_snapshot_json'   => '%s',
             'print_ready'                    => '%d',

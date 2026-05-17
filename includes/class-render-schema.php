@@ -23,7 +23,7 @@ final class Eko_Sampa_Render_Schema {
 
     public const UNITS_LAYOUT = 'px';
 
-    /** CSS reference px per mm (96dpi). Must match EkoCanvasRenderer.MM_TO_CSS_PX. */
+    /** CSS reference px per mm (96dpi). Must match `EkoVisualRenderContract` / `eko-visual-render-contract.js`. */
     public const CSS_PX_PER_MM = 96.0 / 25.4;
 
     /**

@@ -93,6 +93,8 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_FRONTEND_STYLE = 'eko-sampa-frontend';
 
+    public const HANDLE_EKO_VISUAL_RENDER_CONTRACT = 'eko-sampa-visual-render-contract';
+
     public const HANDLE_EKO_CANVAS_RENDERER = 'eko-sampa-canvas-renderer';
 
     public const HANDLE_EKO_PRINT_MOUNT = 'eko-sampa-print-mount';
@@ -377,12 +379,27 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        $vrc_rel = 'assets/js/eko-visual-render-contract.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $vrc_rel)) {
+            wp_register_script(
+                self::HANDLE_EKO_VISUAL_RENDER_CONTRACT,
+                $this->plugin_asset_url($vrc_rel),
+                [],
+                $this->plugin_asset_version($vrc_rel),
+                true
+            );
+        }
+
         $renderer_rel = 'assets/js/eko-canvas-renderer.js';
         if (is_readable(EKO_SAMPA_PLUGIN_DIR . $renderer_rel)) {
+            $renderer_deps = [];
+            if (wp_script_is(self::HANDLE_EKO_VISUAL_RENDER_CONTRACT, 'registered')) {
+                $renderer_deps[] = self::HANDLE_EKO_VISUAL_RENDER_CONTRACT;
+            }
             wp_register_script(
                 self::HANDLE_EKO_CANVAS_RENDERER,
                 $this->plugin_asset_url($renderer_rel),
-                [],
+                $renderer_deps,
                 $this->plugin_asset_version($renderer_rel),
                 true
             );
@@ -460,6 +477,9 @@ final class Eko_Sampa_Assets {
              * listeners are registered (same race as frontend-app.js).
              */
             $editor_deps = [self::HANDLE_INTERACT, self::HANDLE_SORTABLE];
+            if (wp_script_is(self::HANDLE_EKO_VISUAL_RENDER_CONTRACT, 'registered')) {
+                $editor_deps[] = self::HANDLE_EKO_VISUAL_RENDER_CONTRACT;
+            }
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 $editor_deps[] = self::HANDLE_EKO_CANVAS_RENDERER;
             }
@@ -655,6 +675,9 @@ final class Eko_Sampa_Assets {
             }
             if (wp_style_is(self::HANDLE_EKO_PRINT_CSS, 'registered')) {
                 wp_enqueue_style(self::HANDLE_EKO_PRINT_CSS);
+            }
+            if (wp_script_is(self::HANDLE_EKO_VISUAL_RENDER_CONTRACT, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_VISUAL_RENDER_CONTRACT);
             }
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);

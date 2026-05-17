@@ -10,6 +10,8 @@
  * @var int                         $inspect_sid
  * @var list<array<string, mixed>>  $delete_audit
  * @var array<string, mixed>|null     $storage_report Result of {@see Eko_Sampa_Storage_Manager::build_storage_integrity_report()}
+ * @var array<string, mixed>|null     $template_schema_report Diagnostics + repair preview JSON
+ * @var array<string, mixed>|null     $template_schema_repair_result Last repair outcome (if any)
  */
 
 declare(strict_types=1);
@@ -30,6 +32,13 @@ if (! isset($inspect_snapshot)) {
 
 if (! isset($storage_report)) {
     $storage_report = null;
+}
+
+if (! isset($template_schema_report)) {
+    $template_schema_report = null;
+}
+if (! isset($template_schema_repair_result)) {
+    $template_schema_repair_result = null;
 }
 
 $permission_violations = is_array($permission_report) && ! empty($permission_report['violations'])
@@ -97,6 +106,31 @@ $orphan_counts = [
             <?php echo esc_html__('Storage integrity report (dry-run)', 'eko-sampa'); ?>
         </button>
     </form>
+
+    <h2><?php echo esc_html__('Template schema integrity (hybrid / legacy drift)', 'eko-sampa'); ?></h2>
+    <p class="description">
+        <?php echo esc_html__('Structural analysis of wp_eko_sampa_templates vs the canonical plugin contract. “Simulate repair” shows ALTER statements; “Run repair” applies DEFAULTs to legacy English NOT NULL columns (no drops) and backfills title from nome where empty.', 'eko-sampa'); ?>
+    </p>
+    <form method="post" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0;">
+        <?php wp_nonce_field('eko_sampa_integrity', 'eko_sampa_integrity_nonce'); ?>
+        <button type="submit" class="button button-secondary" name="eko_sampa_integrity_action" value="template_schema_simulate">
+            <?php echo esc_html__('Simulate template schema repair', 'eko-sampa'); ?>
+        </button>
+        <button type="submit" class="button button-primary" name="eko_sampa_integrity_action" value="template_schema_repair"
+            onclick="return window.confirm('<?php echo esc_js(__('Apply ALTER TABLE … MODIFY to relax legacy NOT NULL defaults? This writes to the database.', 'eko-sampa')); ?>');">
+            <?php echo esc_html__('Run template schema repair', 'eko-sampa'); ?>
+        </button>
+    </form>
+
+    <?php if (is_array($template_schema_repair_result)) : ?>
+        <h3><?php echo esc_html__('Last repair outcome', 'eko-sampa'); ?></h3>
+        <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:240px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($template_schema_repair_result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+    <?php endif; ?>
+
+    <?php if (is_array($template_schema_report)) : ?>
+        <h3><?php echo esc_html__('Template schema report', 'eko-sampa'); ?></h3>
+        <pre style="background:#fff;border:1px solid #ccd0d4;padding:12px;max-height:480px;overflow:auto;font-size:12px;"><?php echo esc_html(wp_json_encode($template_schema_report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)); ?></pre>
+    <?php endif; ?>
 
     <?php if (is_array($storage_report)) : ?>
         <h2><?php echo esc_html__('Storage integrity (filesystem, dry-run)', 'eko-sampa'); ?></h2>

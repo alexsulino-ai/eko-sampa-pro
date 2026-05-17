@@ -58,6 +58,8 @@ POST /wp-json/eko-sampa/v1/orders
 
 Helper: `window.ekoSampaApi('orders', { method: 'POST', body: payload })`
 
+Opcional: `order_title` — rótulo operacional da OS (não é o nome do template); ver [../schema/orders-schema.md](../schema/orders-schema.md).
+
 ## 7. REST — prepare_create_data
 
 `Eko_Sampa_Rest_Api::route_orders_create`:

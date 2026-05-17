@@ -193,9 +193,14 @@
         const w = Math.max(1, node.offsetWidth || parseInt(node.style.width, 10) || 1);
         const h = Math.max(1, node.offsetHeight || parseInt(node.style.height, 10) || 1);
         throwIfAborted(signal);
+        const cap = typeof CFG.CAPTURE_PIXEL_RATIO_CAP === 'number' ? CFG.CAPTURE_PIXEL_RATIO_CAP : 2;
+        const dpr =
+            typeof global !== 'undefined' && global.devicePixelRatio
+                ? Math.min(cap, Math.max(1, global.devicePixelRatio))
+                : 1;
         const captureOpts = {
             quality: opts.quality != null ? opts.quality : CFG.JPEG_QUALITY,
-            pixelRatio: 1,
+            pixelRatio: opts.pixelRatio != null ? opts.pixelRatio : dpr,
             width: w,
             height: h,
             cacheBust: true,
@@ -254,7 +259,8 @@
                 target: R.RenderTargets.THUMBNAIL,
                 maxWidth: maxWidth,
                 assetTimeoutMs: Math.min(15000, timeoutMs - 2000),
-                assetRetries: 0,
+                assetRetries: typeof CFG.ASSET_RETRIES === 'number' ? CFG.ASSET_RETRIES : 1,
+                fontReadyTimeoutMs: typeof CFG.FONT_READY_TIMEOUT_MS === 'number' ? CFG.FONT_READY_TIMEOUT_MS : 8000,
             });
 
             await Promise.race([pipeline, timeout]);

@@ -51,10 +51,22 @@ $crud_nav = [
                 <div><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Service ID', 'eko-sampa'); ?></dt><dd class="mt-1 font-mono" x-text="state.record.service_id || '—'"></dd></div>
                 <div><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Product ID', 'eko-sampa'); ?></dt><dd class="mt-1 font-mono" x-text="state.record.product_id || '—'"></dd></div>
             </dl>
-            <p class="mt-4 text-xs text-slate-500" x-show="state.record.preview_image">
-                <span class="font-medium"><?php echo esc_html__('Preview image:', 'eko-sampa'); ?></span>
-                <a class="text-indigo-600 hover:underline break-all" :href="state.record.preview_image" x-text="state.record.preview_image" target="_blank" rel="noopener"></a>
-            </p>
+            <div class="mt-4 text-xs text-slate-500 sm:col-span-2" x-show="state.record.preview_image || state.record.preview_image_public_url">
+                <span class="font-medium"><?php echo esc_html__('Preview image', 'eko-sampa'); ?></span>
+                <p class="mt-1" x-show="state.record.preview_image_public_url">
+                    <a
+                        class="text-indigo-600 hover:underline break-all"
+                        :href="state.record.preview_image_public_url"
+                        x-text="state.record.preview_image_public_url"
+                        target="_blank"
+                        rel="noopener"
+                    ></a>
+                </p>
+                <p class="mt-1 text-amber-700" x-show="state.record.preview_image && !state.record.preview_image_public_url" x-cloak>
+                    <?php echo esc_html__('The stored path does not resolve to a public file (missing on disk or outside uploads). A generated thumbnail may still be available above.', 'eko-sampa'); ?>
+                </p>
+                <p class="mt-1 font-mono text-[10px] text-slate-400 break-all" x-show="state.record.preview_image" x-text="'<?php echo esc_js(__('Stored relative path', 'eko-sampa')); ?>: ' + (state.record.preview_image || '')"></p>
+            </div>
         </div>
         <div class="space-y-4">
             <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

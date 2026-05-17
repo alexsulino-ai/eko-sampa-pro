@@ -41,15 +41,26 @@ Se `failed_at === service_not_visible_for_order` e `service_exists === false`, m
 - Ownership via `Eko_Sampa_Order::get`
 - **`PUT/PATCH` em `completed`:** bloqueado — `eko_sampa_order_immutable` (409)
 - **`DELETE`:** `eko_sampa_safe_delete_order()` — remove snapshot em `completed-orders/order-{id}/` quando existir
+- **`order_title`:** opcional em create/update; ver [../schema/orders-schema.md](../schema/orders-schema.md)
+
+## GET `/orders` (listagem)
+
+- Query `s`: se o valor for **apenas dígitos**, filtra por `id`; caso contrário, `LIKE` em `order_title`.
+- `orderby` pode incluir `order_title` (whitelist no modelo).
 
 ## POST `/orders/{id}/duplicate-revision`
 
 - Só para OS `completed`; caso contrário `eko_sampa_duplicate_revision_failed` (400)
-- Equivalente a novo ciclo: nova linha `pending`, `woo_order_id` zerado
+- Equivalente a novo ciclo: nova linha `pending`, `woo_order_id` zerado; `order_title` com sufixo ` (Copy)` (truncado a 255 caracteres)
+
+## POST `/orders/{id}/duplicate`
+
+- Resposta 201 com linha enriquecida (`enrich_row_for_api`); novo `order_title` com sufixo ` (Copy)`.
 
 ## POST `/orders/{id}/render`
 
 - Se `completed` + snapshot válido → `render_source: completed_snapshot`
 - Caso contrário → `live_template` ou `live_template_pre_snapshot_fallback`
+- Campo **`operational_meta`**: `{ order_id, order_title, status }` — só para cabeçalho operacional na UI; não faz parte do payload do canvas.
 
 Ver [../tutorials/create-order-step-by-step.md](../tutorials/create-order-step-by-step.md) e [../storage/storage-architecture.md](../storage/storage-architecture.md).

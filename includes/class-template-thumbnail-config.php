@@ -2,6 +2,9 @@
 /**
  * Official thumbnail export contract (keep in sync with assets/js/eko-thumbnail-config.js).
  *
+ * Client-only keys (JS) documented in PHP for traceability: FONT_READY_TIMEOUT_MS, ASSET_RETRIES,
+ * CAPTURE_PIXEL_RATIO_CAP — see assets/js/eko-thumbnail-config.js.
+ *
  * @package Eko_Sampa
  */
 

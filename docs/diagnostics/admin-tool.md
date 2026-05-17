@@ -16,6 +16,8 @@
 | Repair orphan template services | `repair_orphans` | `ensure_schema()` + `integrity->run(true)` |
 | Inspect service (delete readiness) | `inspect_service_delete` | `Eko_Sampa_Service_Relations_Inspector::inspect(service_id)` (POST campo `service_id`) |
 | Storage integrity report (dry-run) | `storage_integrity_report` | `Eko_Sampa_Storage_Manager::build_storage_integrity_report()` — só leitura |
+| Simulate template schema repair | `template_schema_simulate` | `Eko_Sampa_Template_Schema_Diagnostics::analyze()` + preview SQL (`ALTER … MODIFY` + backfill `title`) — **sem escrita** |
+| Run template schema repair | `template_schema_repair` | `Eko_Sampa_Template_Schema_Repair::run_relaxed_defaults()` — aplica DDL + backfill; confirmação JS; audit `template_schema_legacy_defaults_relaxed` |
 
 Nonce: `eko_sampa_integrity`
 
@@ -23,8 +25,9 @@ Nonce: `eko_sampa_integrity`
 
 - Option: `eko_sampa_integrity_last_report`
 - Mostra: timestamps, versões, contadores de órfãos, tabela template→service, **repair history**, JSON raw
+- **`orders_operational_title`:** presença da coluna `order_title`, `rows_without_title`, `readiness` (`ok` | `migration_required`) — ver [../schema/orders-schema.md](../schema/orders-schema.md)
 - **Service delete:** snapshot JSON por id + option `eko_sampa_service_delete_audit` (últimas tentativas de DELETE via API / modelo)
-- **Storage (ficheiros):** relatório JSON (orphan JPGs legados, OS `completed` sem snapshot, contagem de pastas `completed-orders`) — ver [../storage/storage-architecture.md](../storage/storage-architecture.md)
+- **Template schema (SQL):** análise estrutural + preview/repair de colunas legadas `NOT NULL` sem `DEFAULT` — ver [../schema/templates-schema.md](../schema/templates-schema.md)
 
 ## Histórico de repairs
 
@@ -35,9 +38,11 @@ Nonce: `eko_sampa_integrity`
 ## Quando usar
 
 - Após deploy de código DB 1.0.4+
+- Após deploy de **`order_title`** (DB 1.0.7+): confirmar `orders_operational_title.readiness === ok` no relatório
 - Após import/migração SQL manual
 - Quando create order retorna `service_exists: false`
 - Rotina preventiva pós-delete de services
+- **Duplicar template:** com a REST autenticada, `GET /wp-json/eko-sampa/v1/templates/{id}/duplicate-diagnostics` (nonce/cookie admin) devolve `readiness_score`, `insert_diagnostics`, `visual_drift` e `actionable_repairs` sem criar linha
 
 ## Não faz
 

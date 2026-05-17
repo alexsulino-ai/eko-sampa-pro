@@ -25,6 +25,7 @@ $crud_nav = [
         <h2 class="text-lg font-semibold text-slate-900">
             <?php echo esc_html__('Order', 'eko-sampa'); ?>
             <span class="font-mono" x-text="'#' + (state.record.id || '')"></span>
+            <span class="block text-base font-normal text-slate-700 sm:inline sm:ml-2" x-show="state.record.order_title" x-text="state.record.order_title"></span>
         </h2>
         <div class="flex flex-wrap gap-2">
             <a class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" :href="crudUrls.list"><?php echo esc_html__('Back to list', 'eko-sampa'); ?></a>
@@ -38,6 +39,7 @@ $crud_nav = [
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h3 class="text-sm font-semibold text-slate-900"><?php echo esc_html__('Order data', 'eko-sampa'); ?></h3>
             <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                <div class="sm:col-span-2"><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Operational title', 'eko-sampa'); ?></dt><dd class="mt-1 text-slate-800" x-text="state.record.order_title ? state.record.order_title : '—'"></dd></div>
                 <div><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Status', 'eko-sampa'); ?></dt><dd class="mt-1" x-text="state.record.status"></dd></div>
                 <div><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Print ready', 'eko-sampa'); ?></dt><dd class="mt-1" x-text="state.record.print_ready == 1 ? '<?php echo esc_js(__('Yes', 'eko-sampa')); ?>' : '<?php echo esc_js(__('No', 'eko-sampa')); ?>'"></dd></div>
                 <div><dt class="text-xs font-medium uppercase text-slate-500"><?php echo esc_html__('Client ID', 'eko-sampa'); ?></dt><dd class="mt-1 font-mono" x-text="state.record.client_id || '0'"></dd></div>

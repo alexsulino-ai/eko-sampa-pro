@@ -60,4 +60,12 @@
 
 Correr Diagnostics após import SQL ou delete manual de services.
 
+### Integridade de schema (templates híbridos)
+
+- `Eko_Sampa_Template_Schema_Diagnostics::analyze()` — drift canónico vs legado, colunas bloqueantes, score.
+- INSERT explícito: `schema_integrity_bridge` no resultado de `try_create` / REST duplicate quando valores legados forem sintetizados (política documentada em `Eko_Sampa_Template_Legacy_Row_Bridge`).
+- DDL: migração DB `1.0.6` + ação **Run template schema repair** em Diagnostics relaxa `NOT NULL` legados com `DEFAULT` e backfill `title` ← `nome`.
+
+Documentação: [../schema/templates-schema.md](../schema/templates-schema.md), [../architecture/schema-alignment.md](../architecture/schema-alignment.md).
+
 Contrato: [../architecture/domain-contracts.md](../architecture/domain-contracts.md).

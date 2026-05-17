@@ -29,7 +29,7 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('orders', 'new');
                     </template>
                 </select>
             <?php endif; ?>
-            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Order ID…', 'eko-sampa'); ?>" />
+            <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="search" x-model="state.q" @keydown.enter.prevent="state.page=1; load()" placeholder="<?php echo esc_attr__('Order ID or title…', 'eko-sampa'); ?>" />
             <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.status" @change="state.page=1; load()">
                 <option value=""><?php echo esc_html__('All statuses', 'eko-sampa'); ?></option>
                 <option value="pending">pending</option>
@@ -47,7 +47,7 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('orders', 'new');
         <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                 <tr>
-                    <th class="px-4 py-3">ID</th>
+                    <th class="px-4 py-3"><?php echo esc_html__('Order', 'eko-sampa'); ?></th>
                     <th class="px-4 py-3"><?php echo esc_html__('Status', 'eko-sampa'); ?></th>
                     <th class="px-4 py-3"><?php echo esc_html__('WC', 'eko-sampa'); ?></th>
                     <th class="px-4 py-3"><?php echo esc_html__('Print', 'eko-sampa'); ?></th>
@@ -57,7 +57,10 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('orders', 'new');
             <tbody class="divide-y divide-slate-100">
                 <template x-for="r in state.rows" :key="r.id">
                     <tr class="hover:bg-slate-50/80">
-                        <td class="px-4 py-3 font-mono text-slate-900" x-text="r.id"></td>
+                        <td class="px-4 py-3 text-slate-900">
+                            <span class="block font-medium" x-text="orderListPrimary(r)"></span>
+                            <span class="font-mono text-xs text-slate-500" x-text="'#' + (r.id || '')"></span>
+                        </td>
                         <td class="px-4 py-3 text-slate-600" x-text="r.status"></td>
                         <td class="px-4 py-3 font-mono text-xs text-slate-600" x-text="r.woo_order_id ? r.woo_order_id : '—'"></td>
                         <td class="px-4 py-3 text-slate-600" x-text="r.print_ready == 1 ? '<?php echo esc_js(__('Yes', 'eko-sampa')); ?>' : '<?php echo esc_js(__('No', 'eko-sampa')); ?>'"></td>

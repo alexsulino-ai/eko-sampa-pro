@@ -31,10 +31,18 @@ $ctx     = Eko_Sampa_Order::template_render_context($order);
 $rnd     = new Eko_Sampa_Template_Renderer();
 $preview = $rnd->build_editor_preview_payload($tpl, $ctx);
 
+$op_title  = isset($order['order_title']) && is_string($order['order_title']) ? trim($order['order_title']) : '';
+$op_status = isset($order['status']) ? sanitize_key((string) $order['status']) : '';
+$op_id     = (int) ($order['id'] ?? 0);
+
 $wm = max(1, (int) ($preview['width_mm'] ?? 210));
 $hm = max(1, (int) ($preview['height_mm'] ?? 297));
 
-$payload_json = wp_json_encode($preview, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+$json_flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS;
+if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+    $json_flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+}
+$payload_json = wp_json_encode($preview, $json_flags);
 if (! is_string($payload_json)) {
     $payload_json = '{}';
 }
@@ -55,6 +63,16 @@ if (! is_string($payload_json)) {
             <?php echo esc_html__('Back to order', 'eko-sampa'); ?>
         </a>
     </div>
+    <div class="eko-sampa-print-operational mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 print:border-slate-300 print:bg-white">
+        <p class="font-semibold"><?php esc_html_e('Order', 'eko-sampa'); ?> #<?php echo esc_html((string) $op_id); ?></p>
+        <?php if ($op_title !== '') : ?>
+            <p class="mt-1"><span class="text-slate-500"><?php esc_html_e('Title', 'eko-sampa'); ?>:</span> <?php echo esc_html($op_title); ?></p>
+        <?php endif; ?>
+        <?php if ($op_status !== '') : ?>
+            <p class="mt-0.5"><span class="text-slate-500"><?php esc_html_e('Status', 'eko-sampa'); ?>:</span> <?php echo esc_html($op_status); ?></p>
+        <?php endif; ?>
+    </div>
+    <hr class="mb-4 border-slate-200 print:mb-3 print:border-slate-300" />
     <div class="eko-sampa-print-card rounded-lg border border-slate-200 bg-white p-4 shadow-sm print:border-0 print:bg-transparent print:p-0 print:shadow-none">
         <div id="eko-sampa-print-mount" class="eko-sampa-print-mount" data-auto-print="0"></div>
     </div>

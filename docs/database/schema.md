@@ -68,6 +68,8 @@ Tipos: `text`, `textarea`, `number`, `select`, `date`.
 
 Thumbnail pipeline: rotas REST `/templates/{id}/thumbnail*` — ver código `class-template-thumbnail*.php`.
 
+**Híbrido / legado (inglês):** algumas bases ainda têm `title`, `width`, `height`, `background_color`, … em paralelo. O contrato runtime é PT + `json_data`; alinhamento em [../schema/templates-schema.md](../schema/templates-schema.md) e migração DB `1.0.6`.
+
 ---
 
 ## `wp_eko_sampa_layers`
@@ -90,6 +92,7 @@ Thumbnail pipeline: rotas REST `/templates/{id}/thumbnail*` — ver código `cla
 | service_id, template_id | FKs lógicas |
 | woo_order_id | bridge WC |
 | status | `pending`, `in_progress`, `print_queue`, `completed` |
+| order_title | opcional; rótulo operacional (fila de produção); **≠** `templates.nome`; ver [../schema/orders-schema.md](../schema/orders-schema.md) |
 | dynamic_data_json | dados do formulário |
 | service_fields_snapshot_json | opcional (migração 1.0.3+) |
 | print_ready | |
