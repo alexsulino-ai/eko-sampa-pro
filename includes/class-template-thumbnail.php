@@ -36,6 +36,19 @@ final class Eko_Sampa_Template_Thumbnail {
 
     public const STATE_ABORTED = 'aborted';
 
+    /** Persisted JPEG provenance (see {@see self::save_jpeg_binary()}). */
+    public const CAPTURE_LIVE_EDITOR = 'live_editor';
+
+    public const CAPTURE_CLIENT_DOM = 'client_dom';
+
+    public const CAPTURE_SERVER_GD = 'server_gd';
+
+    public const CAPTURE_CATALOG_BACKFILL = 'catalog_backfill';
+
+    public const CAPTURE_SYNTHETIC = 'synthetic';
+
+    public const CAPTURE_FALLBACK = 'fallback';
+
     private const TRANSIENT_GENERATING = 'eko_sampa_thumb_gen_';
 
     private const TRANSIENT_LOCK = 'eko_sampa_thumb_lock_';
@@ -172,6 +185,125 @@ final class Eko_Sampa_Template_Thumbnail {
         return true;
     }
 
+    /**
+     * Normalize persisted / request capture tier labels.
+     */
+    public static function normalize_capture_source(string $raw): string {
+        $k = strtolower(trim($raw));
+        if ($k === '') {
+            return '';
+        }
+
+        return match ($k) {
+            'live_editor', 'live-editor', 'editor_live' => self::CAPTURE_LIVE_EDITOR,
+            'client_dom', 'client-dom', 'client', 'client_raster', 'html2canvas', 'direct' => self::CAPTURE_CLIENT_DOM,
+            'server_gd', 'server-gd', 'gd' => self::CAPTURE_SERVER_GD,
+            'catalog_backfill', 'catalog-backfill', 'list_backfill' => self::CAPTURE_CATALOG_BACKFILL,
+            'synthetic' => self::CAPTURE_SYNTHETIC,
+            'fallback', 'editor_save_fallback', 'editor-save-fallback' => self::CAPTURE_FALLBACK,
+            'editor_save', 'editor-save' => self::CAPTURE_CLIENT_DOM,
+            default => preg_match('/^[a-z0-9_-]{1,32}$/', $k) ? $k : self::CAPTURE_CLIENT_DOM,
+        };
+    }
+
+    /**
+     * Map REST `source` on POST /thumbnail/generate to a capture tier.
+     */
+    public static function normalize_generate_request_source(string $raw): string {
+        $k = sanitize_key($raw);
+
+        return match ($k) {
+            'catalog_backfill' => self::CAPTURE_CATALOG_BACKFILL,
+            'editor_save_fallback' => self::CAPTURE_FALLBACK,
+            'template_write_hook' => self::CAPTURE_SERVER_GD,
+            default => self::CAPTURE_SERVER_GD,
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $params JSON body for POST /templates/{id}/thumbnail
+     */
+    public static function resolve_capture_source_for_client_upload(array $params): string {
+        if (isset($params['thumbnail_capture_source'])) {
+            $v = self::normalize_capture_source((string) $params['thumbnail_capture_source']);
+
+            return $v !== '' ? $v : self::CAPTURE_CLIENT_DOM;
+        }
+        if (isset($params['thumbnail_source'])) {
+            $v = self::normalize_capture_source((string) $params['thumbnail_source']);
+
+            return $v !== '' ? $v : self::CAPTURE_CLIENT_DOM;
+        }
+        $meta = isset($params['source']) ? sanitize_key((string) $params['source']) : '';
+
+        return match ($meta) {
+            'editor_save', 'editor-save' => self::CAPTURE_CLIENT_DOM,
+            'editor_save_fallback', 'editor-save-fallback' => self::CAPTURE_FALLBACK,
+            'catalog_backfill' => self::CAPTURE_CATALOG_BACKFILL,
+            default => self::CAPTURE_CLIENT_DOM,
+        };
+    }
+
+    public static function capture_tier_rank(string $tier): int {
+        $t = self::normalize_capture_source($tier);
+
+        return match ($t) {
+            self::CAPTURE_LIVE_EDITOR => 100,
+            self::CAPTURE_CLIENT_DOM => 80,
+            self::CAPTURE_SERVER_GD => 35,
+            self::CAPTURE_CATALOG_BACKFILL => 25,
+            self::CAPTURE_SYNTHETIC => 22,
+            self::CAPTURE_FALLBACK => 20,
+            default => 15,
+        };
+    }
+
+    /**
+     * When true, skip server GD so a higher-fidelity on-disk thumbnail is not replaced.
+     *
+     * Allows regeneration when the stored visual hash no longer matches the current layout
+     * (real stale thumbnails after layout edits).
+     *
+     * @param array<string, mixed> $row Template row including thumbnail_visual_hash
+     */
+    public static function refuse_regeneration_due_to_capture_tier(array $row, string $incoming_tier, bool $force): bool {
+        if ($force) {
+            return false;
+        }
+        $id = (int) ( $row['id'] ?? 0 );
+        if ($id <= 0 || ! self::exists($id)) {
+            return false;
+        }
+
+        $php_hash = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
+        $stored   = (string) ( $row['thumbnail_visual_hash'] ?? '' );
+        $in_sync  = $stored !== '' && $php_hash !== '' && $stored === $php_hash;
+        if (! $in_sync) {
+            return false;
+        }
+
+        $existing = self::normalize_capture_source((string) ( $row['thumbnail_capture_source'] ?? '' ));
+
+        return self::capture_tier_rank($existing) > self::capture_tier_rank($incoming_tier);
+    }
+
+    /**
+     * Server-side raster after template create/update — only when no JPEG exists yet.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function should_auto_server_thumbnail_after_template_write(array $row): bool {
+        if (! self::needs_regeneration($row)) {
+            return false;
+        }
+        $id = (int) ( $row['id'] ?? 0 );
+        if ($id <= 0) {
+            return false;
+        }
+
+        return ! self::exists($id);
+    }
+
     public static function public_url(int $template_id, int $version = 0): string {
         if ($template_id <= 0 || ! self::exists($template_id)) {
             return '';
@@ -244,7 +376,7 @@ final class Eko_Sampa_Template_Thumbnail {
     /**
      * @return true|\WP_Error
      */
-    public static function save_jpeg_binary(int $template_id, string $binary, string $visual_hash = ''): bool|\WP_Error {
+    public static function save_jpeg_binary(int $template_id, string $binary, string $visual_hash = '', string $capture_source = ''): bool|\WP_Error {
         if ($template_id <= 0) {
             return new \WP_Error('eko_sampa_thumb_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
         }
@@ -301,11 +433,26 @@ final class Eko_Sampa_Template_Thumbnail {
             $data['thumbnail_visual_hash'] = substr($visual_hash, 0, 16);
             $fmt[]                         = '%s';
         }
+        $tier = self::normalize_capture_source($capture_source);
+        if ($tier !== '' && self::table_has_thumbnail_capture_source_column()) {
+            $data['thumbnail_capture_source'] = substr($tier, 0, 32);
+            $fmt[]                            = '%s';
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $wpdb->update($table, $data, ['id' => $template_id], $fmt, ['%d']);
 
         self::clear_generating($template_id);
         self::release_generation_lock($template_id);
+
+        Eko_Sampa_Storage_Audit::append(
+            'thumbnail_jpeg_saved',
+            [
+                'template_id'    => $template_id,
+                'capture_source' => $tier !== '' ? $tier : null,
+                'visual_hash'    => $visual_hash !== '' ? substr($visual_hash, 0, 16) : '',
+                'version'        => $version,
+            ]
+        );
 
         return true;
     }
@@ -330,10 +477,17 @@ final class Eko_Sampa_Template_Thumbnail {
 
     /**
      * @param string $data_url_or_base64 data:image/jpeg;base64,... or raw base64
+     * @param string $visual_hash         optional 16-char checksum
+     * @param string $capture_source      {@see self::CAPTURE_LIVE_EDITOR} etc.
      *
      * @return true|\WP_Error
      */
-    public static function save_from_data_url(int $template_id, string $data_url_or_base64, string $visual_hash = ''): bool|\WP_Error {
+    public static function save_from_data_url(
+        int $template_id,
+        string $data_url_or_base64,
+        string $visual_hash = '',
+        string $capture_source = ''
+    ): bool|\WP_Error {
         $raw = trim($data_url_or_base64);
         if (str_contains($raw, 'base64,')) {
             $parts = explode('base64,', $raw, 2);
@@ -345,7 +499,7 @@ final class Eko_Sampa_Template_Thumbnail {
             return new \WP_Error('eko_sampa_thumb_decode', __('Invalid thumbnail encoding.', 'eko-sampa'), ['status' => 400]);
         }
 
-        return self::save_jpeg_binary($template_id, $binary, $visual_hash);
+        return self::save_jpeg_binary($template_id, $binary, $visual_hash, $capture_source);
     }
 
     public static function delete(int $template_id): void {
@@ -378,6 +532,10 @@ final class Eko_Sampa_Template_Thumbnail {
             $data['thumbnail_version'] = 0;
             $fmt[]                     = '%d';
         }
+        if (self::table_has_thumbnail_capture_source_column()) {
+            $data['thumbnail_capture_source'] = '';
+            $fmt[]                            = '%s';
+        }
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $wpdb->update($table, $data, ['id' => $template_id], $fmt, ['%d']);
     }
@@ -388,6 +546,10 @@ final class Eko_Sampa_Template_Thumbnail {
 
     private static function table_has_thumbnail_visual_hash_column(): bool {
         return self::table_has_column('thumbnail_visual_hash');
+    }
+
+    private static function table_has_thumbnail_capture_source_column(): bool {
+        return self::table_has_column('thumbnail_capture_source');
     }
 
     private static function table_has_column(string $column): bool {
@@ -514,6 +676,7 @@ final class Eko_Sampa_Template_Thumbnail {
         if ($row['thumbnail_visual_hash'] === '') {
             $row['thumbnail_visual_hash'] = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
         }
+        $row['thumbnail_capture_source'] = (string) ( $row['thumbnail_capture_source'] ?? '' );
 
         $preview_rel = trim((string) ( $row['preview_image'] ?? '' ));
         $stored_preview_url = $preview_rel !== ''

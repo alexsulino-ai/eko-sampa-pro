@@ -21,6 +21,15 @@
             'borderStyle',
             'rotate',
             'objectFit',
+            'boxShadow',
+            'lineHeight',
+            'letterSpacing',
+            'textTransform',
+            'paddingTop',
+            'paddingRight',
+            'paddingBottom',
+            'paddingLeft',
+            'alignVertical',
         ];
         const out = {};
         keys.forEach((k) => {
@@ -82,6 +91,14 @@
         return (h >>> 0).toString(16).padStart(8, '0');
     }
 
+    function normalizePageBackground(raw) {
+        const s = String(raw == null ? '' : raw).trim();
+        if (s === '') {
+            return '#ffffff';
+        }
+        return s;
+    }
+
     function visualChecksum(payload) {
         const p = payload && typeof payload === 'object' ? payload : {};
         const elements = (Array.isArray(p.elements) ? p.elements : [])
@@ -96,6 +113,7 @@
         const canonical = {
             width_mm: Math.max(1, parseInt(String(p.width_mm || 210), 10) || 210),
             height_mm: Math.max(1, parseInt(String(p.height_mm || 297), 10) || 297),
+            background_color: normalizePageBackground(p.background_color),
             elements: elements,
         };
         try {
@@ -128,6 +146,7 @@
         const payload = {
             width_mm: r.width_mm != null ? Number(r.width_mm) : 210,
             height_mm: r.height_mm != null ? Number(r.height_mm) : 297,
+            background_color: normalizePageBackground(r.background_color),
             elements: elements,
         };
         payload.visual_hash = visualChecksum(payload);

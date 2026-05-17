@@ -187,6 +187,7 @@ final class Eko_Sampa_Database {
             '1.0.6' => [$this, 'migrate_to_1_0_6'],
             '1.0.7' => [$this, 'migrate_to_1_0_7'],
             '1.0.8' => [$this, 'migrate_to_1_0_8'],
+            '1.0.9' => [$this, 'migrate_to_1_0_9'],
         ];
     }
 
@@ -635,6 +636,7 @@ final class Eko_Sampa_Database {
                 'preview_image' => "varchar(500) NOT NULL DEFAULT ''",
                 'thumbnail_version'     => 'bigint(20) unsigned NOT NULL DEFAULT 0',
                 'thumbnail_visual_hash' => "varchar(16) NOT NULL DEFAULT ''",
+                'thumbnail_capture_source' => "varchar(32) NOT NULL DEFAULT ''",
                 'json_data'             => 'longtext NULL',
                 'created_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 'updated_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
@@ -822,6 +824,16 @@ final class Eko_Sampa_Database {
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $wpdb->query("ALTER TABLE `{$table}` ADD INDEX eko_sampa_orders_order_title (`order_title`(191))");
         Eko_Sampa_Model_Base::clear_table_column_map_cache();
+    }
+
+    /**
+     * Templates: persisted thumbnail capture tier (live vs server GD) for overwrite protection.
+     */
+    private function migrate_to_1_0_9(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+        $this->schema_align_templates($wpdb);
     }
 
     /**

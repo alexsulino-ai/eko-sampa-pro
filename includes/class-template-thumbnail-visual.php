@@ -23,18 +23,20 @@ final class Eko_Sampa_Template_Thumbnail_Visual {
         return self::hash_from_visual(
             (int) ( $row['width_mm'] ?? 210 ),
             (int) ( $row['height_mm'] ?? 297 ),
-            $elements
+            $elements,
+            (string) ( $row['background_color'] ?? '#ffffff' )
         );
     }
 
     /**
      * @param array<int, array<string, mixed>> $elements
      */
-    public static function hash_from_visual(int $width_mm, int $height_mm, array $elements): string {
+    public static function hash_from_visual(int $width_mm, int $height_mm, array $elements, string $background_color = '#ffffff'): string {
         $payload = [
-            'width_mm'  => max(1, $width_mm),
-            'height_mm' => max(1, $height_mm),
-            'elements'  => self::normalize_elements($elements),
+            'width_mm'           => max(1, $width_mm),
+            'height_mm'          => max(1, $height_mm),
+            'background_color'   => $background_color,
+            'elements'           => self::normalize_elements($elements),
         ];
 
         $json = wp_json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -125,6 +127,15 @@ final class Eko_Sampa_Template_Thumbnail_Visual {
             'borderStyle',
             'rotate',
             'objectFit',
+            'boxShadow',
+            'lineHeight',
+            'letterSpacing',
+            'textTransform',
+            'paddingTop',
+            'paddingRight',
+            'paddingBottom',
+            'paddingLeft',
+            'alignVertical',
         ];
         $out  = [];
         foreach ($keys as $key) {
@@ -150,7 +161,8 @@ final class Eko_Sampa_Template_Thumbnail_Visual {
         }
 
         if (str_starts_with($src, 'data:image')) {
-            return 'data:' . substr(hash('sha256', $src), 0, 12);
+            // Must match {@see eko-thumbnail-visual.js} `simpleHash` (FNV-1a 32-bit) for cross-tier checksum parity.
+            return 'data:' . substr(self::fnv1a_hex($src), 0, 8);
         }
 
         return $src;

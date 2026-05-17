@@ -815,6 +815,7 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             'thumbnail'             => '%s',
             'thumbnail_version'     => '%d',
             'thumbnail_visual_hash' => '%s',
+            'thumbnail_capture_source' => '%s',
             'created_at'            => '%s',
             'updated_at'            => '%s',
         ];

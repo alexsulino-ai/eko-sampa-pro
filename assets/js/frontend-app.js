@@ -1331,6 +1331,9 @@ function ekoTemplatesFactory() {
             if (!r || !r.id) {
                 return false;
             }
+            if (r.has_thumbnail && this.thumbnailSrc(r)) {
+                return false;
+            }
             const st = r.thumbnail_state || (r.has_thumbnail ? 'ready' : 'missing');
             if (st === 'generating' || st === 'queued') {
                 return false;

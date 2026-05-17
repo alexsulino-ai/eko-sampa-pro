@@ -34,8 +34,26 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addRectangle()"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-800 hover:bg-indigo-100" @click="openGallery()"><?php echo esc_html__('Gallery', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100" @click="deleteSelected()"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
+                <button
+                    type="button"
+                    class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="!selectedId"
+                    @click="duplicateElement()"
+                    title="<?php echo esc_attr__('Duplicar elemento selecionado', 'eko-sampa'); ?>"
+                ><?php echo esc_html__('Duplicar', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="bringForward()" title="<?php echo esc_attr__('Move selected one step toward front (same as dragging up in the layer list)', 'eko-sampa'); ?>"><?php echo esc_html__('Bring forward', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="sendBackward()" title="<?php echo esc_attr__('Move selected one step toward back', 'eko-sampa'); ?>"><?php echo esc_html__('Send backward', 'eko-sampa'); ?></button>
+                <template x-if="selectedId">
+                    <div class="ml-1 flex flex-wrap items-center gap-1 border-l border-slate-200 pl-2">
+                        <span class="text-[10px] font-medium uppercase tracking-wide text-slate-400"><?php echo esc_html__('Canvas', 'eko-sampa'); ?></span>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementLeft()" title="<?php echo esc_attr__('Align element to left edge of canvas', 'eko-sampa'); ?>">L</button>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementCenterHorizontal()" title="<?php echo esc_attr__('Center element horizontally on canvas', 'eko-sampa'); ?>">H</button>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementRight()" title="<?php echo esc_attr__('Align element to right edge of canvas', 'eko-sampa'); ?>">R</button>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementTop()" title="<?php echo esc_attr__('Align element to top edge of canvas', 'eko-sampa'); ?>">T</button>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementCenterVertical()" title="<?php echo esc_attr__('Center element vertically on canvas', 'eko-sampa'); ?>">V</button>
+                        <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementBottom()" title="<?php echo esc_attr__('Align element to bottom edge of canvas', 'eko-sampa'); ?>">B</button>
+                    </div>
+                </template>
                 <button
                     type="button"
                     class="rounded border border-indigo-600 bg-indigo-600 px-2 py-1 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -95,40 +113,44 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent="(item.type === 'text' || item.type === 'placeholder') && openInlineEdit(item)"
                                 >
+                                    <div class="eko-sampa-editor__rotate-wrap absolute inset-0 min-h-0 min-w-0" :style="editorRotateWrapStyle(item)">
                                     <template x-if="item.type === 'image'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorImageFrameStyle(item)">
                                             <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'text' || item.type === 'placeholder'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
-                                            <div
-                                                class="eko-sampa-editor__inline-hit pointer-events-none flex min-h-0 min-w-0 flex-1 cursor-text flex-col"
-                                                x-show="!(inlineOpen && inlineTargetId === item.id)"
-                                            >
-                                                <span class="pointer-events-none box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorTextFrameStyle(item)">
+                                            <div class="eko-sampa-editor__inline-hit flex min-h-0 min-w-0 flex-1 flex-col" :class="inlineOpen && String(inlineTargetId) === String(item.id) ? 'pointer-events-auto' : 'pointer-events-none cursor-text'">
+                                                <div class="pointer-events-none flex min-h-0 min-w-0 flex-1 flex-col" :style="textVerticalWrapCss(item)">
+                                                    <span
+                                                        class="pointer-events-none box-border block min-h-0 min-w-0 whitespace-pre-wrap break-words"
+                                                        :style="textContentCss(item)"
+                                                        x-show="!(inlineOpen && String(inlineTargetId) === String(item.id))"
+                                                        x-text="item.content"
+                                                    ></span>
+                                                    <template x-if="inlineOpen && String(inlineTargetId) === String(item.id)">
+                                                        <textarea
+                                                            :id="'eko-inline-edit-' + item.id"
+                                                            class="eko-sampa-editor__inline-field box-border block min-h-0 min-w-0 whitespace-pre-wrap break-words"
+                                                            :style="textContentCss(item) + ';' + inlineEditorTextareaCss()"
+                                                            x-model="inlineValue"
+                                                            placeholder="<?php echo esc_attr__('Ctrl+Enter to save · Line breaks allowed', 'eko-sampa'); ?>"
+                                                            @mousedown.stop
+                                                            @click.stop
+                                                            @keydown.escape.prevent="cancelInlineEdit()"
+                                                            @keydown.ctrl.enter.prevent="confirmInlineEdit()"
+                                                        ></textarea>
+                                                    </template>
+                                                </div>
                                             </div>
-                                            <template x-if="inlineOpen && inlineTargetId === item.id">
-                                                <textarea
-                                                    id="eko-inline-edit"
-                                                    class="eko-sampa-editor__inline-field pointer-events-auto box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words resize-none border-0 bg-transparent p-0 outline-none"
-                                                    rows="1"
-                                                    :style="inlineEditorTextareaCss(item)"
-                                                    x-model="inlineValue"
-                                                    placeholder="<?php echo esc_attr__('Ctrl+Enter to save · Line breaks allowed', 'eko-sampa'); ?>"
-                                                    @mousedown.stop
-                                                    @click.stop
-                                                    @keydown.escape.prevent="cancelInlineEdit()"
-                                                    @keydown.ctrl.enter.prevent="confirmInlineEdit()"
-                                                ></textarea>
-                                            </template>
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'rectangle'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)"></div>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorRectangleFrameStyle(item)"></div>
                                     </template>
 
-                                    <template x-if="selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && !previewOnly">
+                                    <template x-if="selectedId === item.id && !(inlineOpen && String(inlineTargetId) === String(item.id)) && !previewOnly">
                                         <div>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-t pointer-events-auto absolute left-0 top-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-nwse-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-t pointer-events-auto absolute left-1/2 top-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-ns-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
@@ -138,8 +160,23 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                             <span class="eko-sampa-editor__resize-handle eko-resize-b pointer-events-auto absolute bottom-0 left-1/2 z-[60] h-3.5 w-3.5 -ml-[7px] -mb-[7px] cursor-ns-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-l eko-resize-b pointer-events-auto absolute bottom-0 left-0 z-[60] h-3.5 w-3.5 -ml-[7px] -mb-[7px] cursor-nesw-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
                                             <span class="eko-sampa-editor__resize-handle eko-resize-l pointer-events-auto absolute left-0 top-1/2 z-[60] h-3.5 w-3.5 -ml-[7px] -mt-[7px] cursor-ew-resize rounded-full border-2 border-white bg-indigo-500" aria-hidden="true"></span>
+                                            <button
+                                                type="button"
+                                                class="eko-sampa-editor__rotate-fab pointer-events-auto absolute z-[70] flex h-9 w-9 cursor-grab items-center justify-center rounded-full border-2 border-white bg-indigo-600 text-white shadow-md transition-shadow duration-150 hover:bg-indigo-700 active:cursor-grabbing"
+                                                :class="{ 'ring-4 ring-emerald-400 ring-offset-2 ring-offset-white shadow-lg': String(_rotateSnapPulseItemId) === String(item.id) }"
+                                                style="right: -22px; top: -22px"
+                                                title="<?php echo esc_attr__('Drag to rotate', 'eko-sampa'); ?>"
+                                                aria-label="<?php echo esc_attr__('Rotate', 'eko-sampa'); ?>"
+                                                @pointerdown.stop="editorRotateFabPointerDown($event, item)"
+                                            >
+                                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                    <path d="M21 12a9 9 0 1 1-3-6.7" />
+                                                    <polyline points="21 3 21 9 15 9" />
+                                                </svg>
+                                            </button>
                                         </div>
                                     </template>
+                                    </div>
                                 </div>
                             </template>
                         </div>
@@ -296,6 +333,33 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                         <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Radius', 'eko-sampa'); ?></span>
                         <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="400" x-model.number="selectedElement.styles.borderRadius" />
                     </label>
+                    <label class="block">
+                        <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Vertical align', 'eko-sampa'); ?></span>
+                        <select class="w-full rounded border border-slate-200 bg-white px-1 py-1" x-model="selectedElement.styles.alignVertical">
+                            <option value="top"><?php echo esc_html__('Top', 'eko-sampa'); ?></option>
+                            <option value="center"><?php echo esc_html__('Center', 'eko-sampa'); ?></option>
+                            <option value="bottom"><?php echo esc_html__('Bottom', 'eko-sampa'); ?></option>
+                        </select>
+                    </label>
+                    <p class="text-[10px] font-medium text-slate-500"><?php echo esc_html__('Padding (frame)', 'eko-sampa'); ?></p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Top', 'eko-sampa'); ?></span>
+                            <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingTop" />
+                        </label>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Right', 'eko-sampa'); ?></span>
+                            <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingRight" />
+                        </label>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Bottom', 'eko-sampa'); ?></span>
+                            <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingBottom" />
+                        </label>
+                        <label class="block">
+                            <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Left', 'eko-sampa'); ?></span>
+                            <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingLeft" />
+                        </label>
+                    </div>
                     <div class="grid grid-cols-2 gap-2">
                         <label class="block">
                             <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Line height', 'eko-sampa'); ?></span>
@@ -317,8 +381,8 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                     </label>
                     <label class="flex items-center gap-2">
                         <span class="w-14 shrink-0 text-slate-500"><?php echo esc_html__('Rotate', 'eko-sampa'); ?></span>
-                        <input class="flex-1 accent-indigo-600" type="range" min="-180" max="180" step="1" x-model.number="selectedElement.styles.rotate" />
-                        <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="(selectedElement.styles.rotate || 0) + '°'"></span>
+                        <input class="flex-1 accent-indigo-600" type="range" min="0" max="359" step="1" x-model.number="selectedElement.styles.rotate" @change="editorRotateSidebarCommit()" />
+                        <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="formatRotateDisplayDeg(selectedElement.styles.rotate)"></span>
                     </label>
                     <label class="block">
                         <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Shadow', 'eko-sampa'); ?></span>
@@ -340,6 +404,25 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                             <input class="flex-1 accent-indigo-600" type="range" min="0.1" max="1" step="0.05" x-model.number="selectedElement.styles.opacity" />
                             <span class="w-8 tabular-nums text-slate-600" x-text="Math.round((selectedElement.styles.opacity || 1) * 100) + '%'"></span>
                         </label>
+                        <p class="text-[10px] font-medium text-slate-500"><?php echo esc_html__('Padding (frame)', 'eko-sampa'); ?></p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Top', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingTop" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Right', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingRight" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Bottom', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingBottom" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Left', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingLeft" />
+                            </label>
+                        </div>
                         <label class="block">
                             <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Radius', 'eko-sampa'); ?></span>
                             <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="400" x-model.number="selectedElement.styles.borderRadius" />
@@ -365,8 +448,8 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                         </label>
                         <label class="flex items-center gap-2">
                             <span class="w-14 text-slate-500"><?php echo esc_html__('Rotate', 'eko-sampa'); ?></span>
-                            <input class="flex-1 accent-indigo-600" type="range" min="-180" max="180" step="1" x-model.number="selectedElement.styles.rotate" />
-                            <span class="w-10 text-right tabular-nums text-slate-600" x-text="(selectedElement.styles.rotate || 0) + '°'"></span>
+                            <input class="flex-1 accent-indigo-600" type="range" min="0" max="359" step="1" x-model.number="selectedElement.styles.rotate" @change="editorRotateSidebarCommit()" />
+                            <span class="w-10 text-right tabular-nums text-slate-600" x-text="formatRotateDisplayDeg(selectedElement.styles.rotate)"></span>
                         </label>
                         <label class="block">
                             <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Shadow', 'eko-sampa'); ?></span>
@@ -399,6 +482,25 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                             <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Radius', 'eko-sampa'); ?></span>
                             <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="400" x-model.number="selectedElement.styles.borderRadius" />
                         </label>
+                        <p class="text-[10px] font-medium text-slate-500"><?php echo esc_html__('Padding (frame)', 'eko-sampa'); ?></p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Top', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingTop" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Right', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingRight" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Bottom', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingBottom" />
+                            </label>
+                            <label class="block">
+                                <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Left', 'eko-sampa'); ?></span>
+                                <input class="w-full rounded border border-slate-200 px-1 py-0.5" type="number" min="0" max="120" x-model.number="selectedElement.styles.paddingLeft" />
+                            </label>
+                        </div>
                         <div class="grid grid-cols-3 gap-2">
                             <label class="block col-span-1">
                                 <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Border', 'eko-sampa'); ?></span>
@@ -420,8 +522,8 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                         </label>
                         <label class="flex items-center gap-2">
                             <span class="w-14 shrink-0 text-slate-500"><?php echo esc_html__('Rotate', 'eko-sampa'); ?></span>
-                            <input class="flex-1 accent-indigo-600" type="range" min="-180" max="180" step="1" x-model.number="selectedElement.styles.rotate" />
-                            <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="(selectedElement.styles.rotate || 0) + '°'"></span>
+                            <input class="flex-1 accent-indigo-600" type="range" min="0" max="359" step="1" x-model.number="selectedElement.styles.rotate" @change="editorRotateSidebarCommit()" />
+                            <span class="w-10 shrink-0 text-right tabular-nums text-slate-600" x-text="formatRotateDisplayDeg(selectedElement.styles.rotate)"></span>
                         </label>
                         <label class="block">
                             <span class="mb-0.5 block text-slate-500"><?php echo esc_html__('Shadow', 'eko-sampa'); ?></span>

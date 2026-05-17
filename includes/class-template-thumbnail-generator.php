@@ -17,9 +17,11 @@ if (! defined('ABSPATH')) {
 final class Eko_Sampa_Template_Thumbnail_Generator {
 
     /**
+     * @param array<string, mixed> $options Keys: force (bool), request_source (string)
+     *
      * @return true|\WP_Error
      */
-    public static function generate_for_id(int $template_id): bool|\WP_Error {
+    public static function generate_for_id(int $template_id, array $options = []): bool|\WP_Error {
         if ($template_id <= 0) {
             return new \WP_Error('eko_sampa_thumb_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
         }
@@ -29,15 +31,16 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        return self::generate_from_row($row);
+        return self::generate_from_row($row, $options);
     }
 
     /**
      * @param array<string, mixed> $row
+     * @param array<string, mixed> $options Keys: force (bool), request_source (string)
      *
      * @return true|\WP_Error
      */
-    public static function generate_from_row(array $row): bool|\WP_Error {
+    public static function generate_from_row(array $row, array $options = []): bool|\WP_Error {
         if (! function_exists('imagecreatetruecolor')) {
             return new \WP_Error(
                 'eko_sampa_thumb_gd',
@@ -49,6 +52,25 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
         $id = (int) ( $row['id'] ?? 0 );
         if ($id <= 0) {
             return new \WP_Error('eko_sampa_thumb_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        $force = ! empty($options['force']);
+        $req   = isset($options['request_source']) ? (string) $options['request_source'] : '';
+        $tier  = Eko_Sampa_Template_Thumbnail::normalize_generate_request_source($req);
+        if (Eko_Sampa_Template_Thumbnail::refuse_regeneration_due_to_capture_tier($row, $tier, $force)) {
+            Eko_Sampa_Storage_Audit::append(
+                'thumbnail_generate_skipped_tier',
+                [
+                    'template_id'      => $id,
+                    'incoming_tier'    => $tier,
+                    'request_source'   => $req,
+                    'capture_source'   => (string) ( $row['thumbnail_capture_source'] ?? '' ),
+                    'thumbnail_visual' => (string) ( $row['thumbnail_visual_hash'] ?? '' ),
+                    'php_visual_hash'  => Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row),
+                ]
+            );
+
+            return true;
         }
 
         if (! Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
@@ -91,8 +113,16 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
 
         imagealphablending($im, true);
         imagesavealpha($im, false);
-        $white = imagecolorallocate($im, 255, 255, 255);
-        imagefilledrectangle($im, 0, 0, $out_w, $out_h, $white);
+        $page_css = trim((string) ( $row['background_color'] ?? '#ffffff' ));
+        if ($page_css === '' || strtolower($page_css) === 'transparent') {
+            $page_css = '#ffffff';
+        }
+        $hex = function_exists('sanitize_hex_color') ? sanitize_hex_color($page_css) : false;
+        if (is_string($hex) && $hex !== '') {
+            $page_css = $hex;
+        }
+        $page_fill = self::allocate_color($im, $page_css, 0);
+        imagefilledrectangle($im, 0, 0, $out_w, $out_h, $page_fill);
 
         foreach ($elements as $element) {
             if (! is_array($element)) {
@@ -117,7 +147,7 @@ final class Eko_Sampa_Template_Thumbnail_Generator {
         }
 
         $visual_hash = Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row);
-        $saved       = Eko_Sampa_Template_Thumbnail::save_jpeg_binary($id, $binary, $visual_hash);
+        $saved       = Eko_Sampa_Template_Thumbnail::save_jpeg_binary($id, $binary, $visual_hash, Eko_Sampa_Template_Thumbnail::CAPTURE_SERVER_GD);
         if ($saved instanceof \WP_Error) {
             Eko_Sampa_Template_Thumbnail::clear_generating($id);
             Eko_Sampa_Template_Thumbnail::release_generation_lock($id);

@@ -250,6 +250,20 @@
         return fallback;
     }
 
+    /**
+     * Solid CSS background for the template page surface (print + thumbnail).
+     * JPEG thumbnails cannot preserve transparency; map transparent → #ffffff.
+     *
+     * @param {object} payload normalized preview payload
+     * @returns {string}
+     */
+    function canvasPageBackgroundSolid(payload) {
+        const p = payload && typeof payload === 'object' ? payload : {};
+        const raw = p.background_color != null ? p.background_color : '#ffffff';
+        const c = safeCssColor(raw, '#ffffff');
+        return c === 'transparent' ? '#ffffff' : c;
+    }
+
     function safeBoxShadow(s) {
         const t = String(s == null ? '' : s).trim();
         if (t === '' || t.toLowerCase() === 'none') {
@@ -292,6 +306,11 @@
             textTransform: 'none',
             boxShadow: 'none',
             rotate: 0,
+            paddingTop: 4,
+            paddingRight: 6,
+            paddingBottom: 4,
+            paddingLeft: 6,
+            alignVertical: 'top',
         };
     }
 
@@ -305,7 +324,67 @@
             rotate: 0,
             boxShadow: 'none',
             objectFit: 'cover',
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
         };
+    }
+
+    function defaultRectangleStyles() {
+        return {
+            opacity: 1,
+            borderRadius: 0,
+            borderWidth: 0,
+            borderStyle: 'solid',
+            borderColor: '#cbd5e1',
+            rotate: 0,
+            boxShadow: 'none',
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+        };
+    }
+
+    /**
+     * Frame-only padding (never on the canvas host). Defaults match legacy text inset (4px 6px).
+     *
+     * @param {object} st
+     * @param {string} type
+     */
+    function framePaddingCss(st, type) {
+        const t = String(type || '');
+        const d =
+            t === 'text' || t === 'placeholder'
+                ? { top: 4, right: 6, bottom: 4, left: 6 }
+                : { top: 0, right: 0, bottom: 0, left: 0 };
+        const pt = clampNum(st.paddingTop, 0, 120, d.top);
+        const pr = clampNum(st.paddingRight, 0, 120, d.right);
+        const pb = clampNum(st.paddingBottom, 0, 120, d.bottom);
+        const pl = clampNum(st.paddingLeft, 0, 120, d.left);
+        return `padding:${pt}px ${pr}px ${pb}px ${pl}px`;
+    }
+
+    /**
+     * Inner column wrapper for text: vertical distribution of the text block (top / center / bottom).
+     *
+     * @param {object} item
+     */
+    function textVerticalWrapCss(item) {
+        const rawSt = item && item.styles;
+        const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
+        const av = String(st.alignVertical != null ? st.alignVertical : 'top').toLowerCase();
+        const jc = av === 'center' ? 'center' : av === 'bottom' ? 'flex-end' : 'flex-start';
+        return [
+            'flex:1',
+            'min-width:0',
+            'min-height:0',
+            'width:100%',
+            'display:flex',
+            'flex-direction:column',
+            `justify-content:${jc}`,
+        ].join(';');
     }
 
     /**
@@ -326,8 +405,12 @@
         const w = Math.max(1, Math.round(Number(widthPx) || 1));
         const h = Math.max(1, Math.round(Number(heightPx) || 1));
         const showGrid = options && options.showGrid;
+        const pageBg =
+            options && options.pageBackground != null && String(options.pageBackground).trim() !== ''
+                ? String(options.pageBackground)
+                : '#ffffff';
         let s =
-            `width:${w}px;height:${h}px;position:relative;box-sizing:border-box;background:#fff;overflow:hidden;`;
+            `width:${w}px;height:${h}px;position:relative;box-sizing:border-box;background:${pageBg};overflow:hidden;`;
         if (showGrid) {
             const gs = clampNum(options.gridSize, 1, 80, 5);
             s +=
@@ -358,12 +441,16 @@
     }
 
     /**
-     * Inner frame: border, opacity, shadow, and rotation for every element type.
-     * Rotation must not be applied on the canvas host (Interact + layout live there).
+     * Inner frame: border, opacity, shadow, and (by default) rotation for every element type.
      *
      * @param {object} item
+     * @param {{omitRotate?: boolean}} [options] When `omitRotate` is true, skip `transform` so the
+     *   visual editor can apply rotation on `.eko-sampa-editor__rotate-wrap` (Interact stays on an
+     *   axis-aligned host without fighting `transform`).
      */
-    function elementFrameCss(item) {
+    function elementFrameCss(item, options) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const omitRotate = !!opts.omitRotate;
         const t = item && item.type;
         const rawSt = item && item.styles;
         const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
@@ -390,27 +477,37 @@
             `border-radius:${br}px`,
             `border:${border}`,
             `box-shadow:${sh}`,
-            `transform:rotate(${rot}deg)`,
-            'transform-origin:center center',
             `overflow:${overflowMode}`,
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact',
         ];
+        if (!omitRotate) {
+            parts.splice(9, 0, `transform:rotate(${rot}deg)`, 'transform-origin:center center');
+        }
         if (t === 'rectangle') {
             parts.push('background:#f1f5f9');
         }
         if (t === 'text' || t === 'placeholder') {
             const bg = safeCssColor(st.backgroundColor, 'transparent');
             parts.push(`background-color:${bg}`);
-            parts.push('padding:4px 6px');
             parts.push('display:flex');
             parts.push('flex-direction:column');
             parts.push('min-height:0');
+        }
+        if (t === 'image') {
+            parts.push('background-color:transparent');
+        }
+        if (t === 'text' || t === 'placeholder' || t === 'image' || t === 'rectangle') {
+            parts.push(framePaddingCss(st, t));
         }
         return parts.join(';');
     }
 
     function textContentCss(item, options) {
+        const t = item && item.type;
+        if (t !== 'text' && t !== 'placeholder') {
+            return 'display:none !important';
+        }
         const rawSt = item && item.styles;
         const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
         const d = defaultTextStyles();
@@ -428,7 +525,8 @@
         const tt = String(st.textTransform || d.textTransform);
         const overflow = forPrint ? 'hidden' : 'auto';
         return [
-            'flex:1',
+            'flex:0 1 auto',
+            'max-height:100%',
             'min-width:0',
             'min-height:0',
             'width:100%',
@@ -451,7 +549,6 @@
             'word-break:break-word',
             `overflow:${overflow}`,
             'vertical-align:top',
-            'display:block',
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact',
         ].join(';');
@@ -573,18 +670,25 @@
 
         const text = escapeHtml(item.content != null ? item.content : '');
         const inner = textContentCss(item, { forPrint: forPrint });
+        const wrap = textVerticalWrapCss(item);
         return (
             `<div class="eko-sampa-canvas__element" style="${pos}">` +
             `<div class="eko-sampa-canvas__frame" style="${frame}">` +
-            `<span class="eko-sampa-canvas__text" style="${inner}">${text}</span>` +
-            `</div></div>`
+            `<div class="eko-sampa-canvas__text-wrap" style="${wrap}">` +
+            `<span class="eko-sampa-canvas__text" style="display:block;${inner}">${text}</span>` +
+            `</div></div></div>`
         );
     }
 
     function buildCanvasInnerHtml(elements, widthPx, heightPx, options) {
         const showGrid = options && options.showGrid;
         const forPrint = options && options.forPrint;
-        const surface = canvasSurfaceStyle(widthPx, heightPx, { showGrid: showGrid, gridSize: options && options.gridSize });
+        const pageBg = options && options.pageBackground;
+        const surface = canvasSurfaceStyle(widthPx, heightPx, {
+            showGrid: showGrid,
+            gridSize: options && options.gridSize,
+            pageBackground: pageBg,
+        });
         const list = Array.isArray(elements) ? elements : [];
         let inner = '';
         list.forEach((el, i) => {
@@ -611,11 +715,13 @@
         };
         const elements = scene.elementsForRender;
         const forPrint = !options || options.forPrint !== false;
+        const pageBg = canvasPageBackgroundSolid(payload);
         const canvasHtml = buildCanvasInnerHtml(elements, dims.canvasWidth, dims.canvasHeight, {
             showGrid: options && options.showGrid,
             forPrint: forPrint,
             forThumbnail: options && options.forThumbnail,
             gridSize: options && options.gridSize,
+            pageBackground: pageBg,
         });
         const printAdjust =
             '-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;';
@@ -626,7 +732,7 @@
             canvasHeight: dims.canvasHeight,
             renderLayoutMeta: scene.meta || null,
             html:
-                `<div class="eko-sampa-print-root" style="position:relative;width:${dims.widthMm}mm;height:${dims.heightMm}mm;${printAdjust}overflow:hidden;box-sizing:border-box;background:#fff;">` +
+                `<div class="eko-sampa-print-root" style="position:relative;width:${dims.widthMm}mm;height:${dims.heightMm}mm;${printAdjust}overflow:hidden;box-sizing:border-box;background:${pageBg};">` +
                 canvasHtml +
                 '</div>',
         };
@@ -645,10 +751,12 @@
         const outW = scene.canvasWidth;
         const outH = scene.canvasHeight;
         const elements = scene.elementsForRender;
+        const pageBg = canvasPageBackgroundSolid(payload);
         const canvasHtml = buildCanvasInnerHtml(elements, outW, outH, {
             showGrid: false,
             forPrint: true,
             forThumbnail: true,
+            pageBackground: pageBg,
         });
         const printAdjust =
             '-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;';
@@ -661,7 +769,7 @@
             designCanvasHeight: scene.designCanvasHeight,
             renderLayoutMeta: scene.meta || null,
             html:
-                `<div class="eko-sampa-thumbnail-root" data-eko-render-target="thumbnail" style="width:${outW}px;height:${outH}px;position:relative;overflow:hidden;box-sizing:border-box;background:#fff;${printAdjust}">` +
+                `<div class="eko-sampa-thumbnail-root" data-eko-render-target="thumbnail" style="width:${outW}px;height:${outH}px;position:relative;overflow:hidden;box-sizing:border-box;background:${pageBg};${printAdjust}">` +
                 canvasHtml +
                 '</div>',
         };
@@ -971,6 +1079,8 @@
         elementPositionStyle: elementPositionStyle,
         elementFrameCss: elementFrameCss,
         textContentCss: textContentCss,
+        textVerticalWrapCss: textVerticalWrapCss,
+        framePaddingCss: framePaddingCss,
         imageImgCss: imageImgCss,
         replaceTokensInText: replaceTokensInText,
         applyContextToElements: applyContextToElements,
@@ -989,10 +1099,12 @@
             return global.EkoVisualRenderContract || null;
         },
         safeCssColor: safeCssColor,
+        canvasPageBackgroundSolid: canvasPageBackgroundSolid,
         safeBoxShadow: safeBoxShadow,
         safeFontFamily: safeFontFamily,
         defaultTextStyles: defaultTextStyles,
         defaultImageStyles: defaultImageStyles,
+        defaultRectangleStyles: defaultRectangleStyles,
     };
 
     global.EkoCanvasRenderer = api;

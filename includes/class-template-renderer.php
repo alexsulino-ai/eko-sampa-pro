@@ -40,12 +40,17 @@ final class Eko_Sampa_Template_Renderer {
     public function build_editor_preview_payload(array $template_row, array $context): array {
         $width_mm  = max(1, (int) ($template_row['width_mm'] ?? 210));
         $height_mm = max(1, (int) ($template_row['height_mm'] ?? 297));
+        $page_bg   = $this->sanitize_css_color($template_row['background_color'] ?? '#ffffff', '#ffffff');
+        if (strtolower($page_bg) === 'transparent') {
+            $page_bg = '#ffffff';
+        }
 
         return Eko_Sampa_Render_Schema::envelope(
             [
-                'width_mm'  => $width_mm,
-                'height_mm' => $height_mm,
-                'elements'  => $this->apply_context_to_elements(
+                'width_mm'          => $width_mm,
+                'height_mm'         => $height_mm,
+                'background_color' => $page_bg,
+                'elements'          => $this->apply_context_to_elements(
                     $this->parse_elements_from_template_row($template_row),
                     $context
                 ),
@@ -65,17 +70,23 @@ final class Eko_Sampa_Template_Renderer {
         $height_mm = (int) $preview['height_mm'];
         [ $canvas_w, $canvas_h ] = $this->design_canvas_px($width_mm, $height_mm);
 
+        $page_bg = $this->sanitize_css_color($preview['background_color'] ?? '#ffffff', '#ffffff');
+        if (strtolower($page_bg) === 'transparent') {
+            $page_bg = '#ffffff';
+        }
         $print_adjust = '-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;';
         $root_style   = sprintf(
-            'position:relative;width:%dmm;height:%dmm;%soverflow:hidden;box-sizing:border-box;background:#fff;',
+            'position:relative;width:%dmm;height:%dmm;%soverflow:hidden;box-sizing:border-box;background:%s;',
             $width_mm,
             $height_mm,
-            $for_print ? $print_adjust : ''
+            $for_print ? $print_adjust : '',
+            $page_bg
         );
         $surface_style = sprintf(
-            'width:%dpx;height:%dpx;position:relative;box-sizing:border-box;background:#fff;overflow:hidden;%s',
+            'width:%dpx;height:%dpx;position:relative;box-sizing:border-box;background:%s;overflow:hidden;%s',
             (int) $canvas_w,
             (int) $canvas_h,
+            $page_bg,
             $for_print ? $print_adjust : ''
         );
 
@@ -184,6 +195,7 @@ final class Eko_Sampa_Template_Renderer {
 
         $frame_css = $this->build_frame_css($styles, $type);
         $text_css  = $this->build_text_inner_css($styles, $for_print);
+        $text_wrap = $this->build_text_vertical_wrap_css($styles);
 
         switch ($type) {
             case 'image':
@@ -216,8 +228,9 @@ final class Eko_Sampa_Template_Renderer {
 
                 return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
                     . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '">'
+                    . '<div class="eko-sampa-canvas__text-wrap" style="' . esc_attr($text_wrap) . '">'
                     . '<span class="eko-sampa-canvas__text" style="' . esc_attr($text_css) . '">' . esc_html($text) . '</span>'
-                    . '</div></div>';
+                    . '</div></div></div>';
         }
     }
 
@@ -274,10 +287,56 @@ final class Eko_Sampa_Template_Renderer {
 
         if ($type === 'text' || $type === 'placeholder') {
             $bgf = $this->sanitize_css_color($styles['backgroundColor'] ?? 'transparent', 'transparent');
-            $css .= sprintf('background-color:%s;padding:4px 6px;display:flex;flex-direction:column;min-height:0;', $bgf);
+            $css .= sprintf('background-color:%s;display:flex;flex-direction:column;min-height:0;', $bgf);
+        }
+
+        if ($type === 'image') {
+            $css .= 'background-color:transparent;';
+        }
+
+        if (in_array($type, [ 'text', 'placeholder', 'image', 'rectangle' ], true)) {
+            $css .= $this->build_frame_padding_css($styles, $type);
         }
 
         return $css;
+    }
+
+    /**
+     * Frame-only padding (matches `EkoCanvasRenderer.framePaddingCss`).
+     *
+     * @param array<string, mixed> $styles
+     */
+    private function build_frame_padding_css(array $styles, string $type): string {
+        $textish = ( $type === 'text' || $type === 'placeholder' );
+        $dt       = $textish ? 4 : 0;
+        $dr       = $textish ? 6 : 0;
+        $db       = $textish ? 4 : 0;
+        $dl       = $textish ? 6 : 0;
+
+        $pt = isset($styles['paddingTop']) ? max(0, min(120, (int) $styles['paddingTop'])) : $dt;
+        $pr = isset($styles['paddingRight']) ? max(0, min(120, (int) $styles['paddingRight'])) : $dr;
+        $pb = isset($styles['paddingBottom']) ? max(0, min(120, (int) $styles['paddingBottom'])) : $db;
+        $pl = isset($styles['paddingLeft']) ? max(0, min(120, (int) $styles['paddingLeft'])) : $dl;
+
+        return sprintf('padding:%dpx %dpx %dpx %dpx;', $pt, $pr, $pb, $pl);
+    }
+
+    /**
+     * Vertical distribution of the text block inside the frame (flex column).
+     *
+     * @param array<string, mixed> $styles
+     */
+    private function build_text_vertical_wrap_css(array $styles): string {
+        $av = isset($styles['alignVertical']) ? strtolower((string) $styles['alignVertical']) : 'top';
+        if (! in_array($av, [ 'top', 'center', 'bottom' ], true)) {
+            $av = 'top';
+        }
+        $jc = $av === 'center' ? 'center' : ( $av === 'bottom' ? 'flex-end' : 'flex-start' );
+
+        return sprintf(
+            'flex:1;min-width:0;min-height:0;width:100%%;display:flex;flex-direction:column;justify-content:%s;',
+            $jc
+        );
     }
 
     /**
@@ -312,7 +371,7 @@ final class Eko_Sampa_Template_Renderer {
         $overflow = $for_print ? 'hidden' : 'auto';
 
         return sprintf(
-            'flex:1;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
+            'flex:0 1 auto;max-height:100%%;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
             $ff,
             $fs,
             $fw,

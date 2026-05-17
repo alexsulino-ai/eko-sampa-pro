@@ -77,6 +77,8 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_EDITOR_CANVAS = 'eko-sampa-editor-canvas';
 
+    public const HANDLE_EKO_EDITOR_TRANSFORM_MATH = 'eko-sampa-editor-transform-math';
+
     public const HANDLE_FRONTEND_APP = 'eko-sampa-frontend-app';
 
     public const HANDLE_EKO_UI = 'eko-sampa-ui';
@@ -108,6 +110,9 @@ final class Eko_Sampa_Assets {
     public const HANDLE_EKO_THUMBNAIL_HISTORY = 'eko-sampa-thumbnail-history';
 
     public const HANDLE_HTML_TO_IMAGE = 'html-to-image';
+
+    /** Bitmap thumbnail capture (replaces html-to-image for template JPEG export). */
+    public const HANDLE_HTML2CANVAS = 'eko-sampa-html2canvas';
 
     public const HANDLE_EKO_THUMBNAIL_EXPORT = 'eko-sampa-thumbnail-export';
 
@@ -164,6 +169,9 @@ final class Eko_Sampa_Assets {
             }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_EXPORT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_EXPORT);
+            }
+            if (wp_script_is(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH);
             }
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
@@ -346,6 +354,14 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        wp_register_script(
+            self::HANDLE_HTML2CANVAS,
+            'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+            [],
+            '1.4.1',
+            true
+        );
+
         $thumb_config_rel = 'assets/js/eko-thumbnail-config.js';
         if (is_readable(EKO_SAMPA_PLUGIN_DIR . $thumb_config_rel)) {
             wp_register_script(
@@ -447,8 +463,8 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 $thumb_deps[] = self::HANDLE_EKO_CANVAS_RENDERER;
             }
-            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
-                $thumb_deps[] = self::HANDLE_HTML_TO_IMAGE;
+            if (wp_script_is(self::HANDLE_HTML2CANVAS, 'registered')) {
+                $thumb_deps[] = self::HANDLE_HTML2CANVAS;
             }
             wp_register_script(
                 self::HANDLE_EKO_THUMBNAIL_EXPORT,
@@ -469,6 +485,18 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        $editor_math_rel = 'assets/js/eko-editor-transform-math.js';
+        $editor_math     = EKO_SAMPA_PLUGIN_DIR . $editor_math_rel;
+        if (is_readable($editor_math)) {
+            wp_register_script(
+                self::HANDLE_EKO_EDITOR_TRANSFORM_MATH,
+                $this->plugin_asset_url($editor_math_rel),
+                [],
+                $this->plugin_asset_version($editor_math_rel),
+                true
+            );
+        }
+
         $editor_js_rel = 'assets/js/editor-canvas.js';
         $editor_js     = EKO_SAMPA_PLUGIN_DIR . $editor_js_rel;
         if (is_readable($editor_js)) {
@@ -477,6 +505,9 @@ final class Eko_Sampa_Assets {
              * listeners are registered (same race as frontend-app.js).
              */
             $editor_deps = [self::HANDLE_INTERACT, self::HANDLE_SORTABLE];
+            if (wp_script_is(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH, 'registered')) {
+                $editor_deps[] = self::HANDLE_EKO_EDITOR_TRANSFORM_MATH;
+            }
             if (wp_script_is(self::HANDLE_EKO_VISUAL_RENDER_CONTRACT, 'registered')) {
                 $editor_deps[] = self::HANDLE_EKO_VISUAL_RENDER_CONTRACT;
             }
@@ -599,8 +630,8 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
             }
-            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
-                wp_enqueue_script(self::HANDLE_HTML_TO_IMAGE);
+            if (wp_script_is(self::HANDLE_HTML2CANVAS, 'registered')) {
+                wp_enqueue_script(self::HANDLE_HTML2CANVAS);
             }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_CONFIG);
@@ -620,8 +651,8 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_CANVAS_RENDERER);
             }
-            if (wp_script_is(self::HANDLE_HTML_TO_IMAGE, 'registered')) {
-                wp_enqueue_script(self::HANDLE_HTML_TO_IMAGE);
+            if (wp_script_is(self::HANDLE_HTML2CANVAS, 'registered')) {
+                wp_enqueue_script(self::HANDLE_HTML2CANVAS);
             }
             if (wp_script_is(self::HANDLE_EKO_THUMBNAIL_CONFIG, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_THUMBNAIL_CONFIG);
@@ -640,6 +671,9 @@ final class Eko_Sampa_Assets {
             }
             if (wp_script_is(self::HANDLE_INTERACT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_INTERACT);
+            }
+            if (wp_script_is(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH);
             }
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
@@ -661,6 +695,9 @@ final class Eko_Sampa_Assets {
             }
             if (wp_script_is(self::HANDLE_INTERACT, 'registered')) {
                 wp_enqueue_script(self::HANDLE_INTERACT);
+            }
+            if (wp_script_is(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH, 'registered')) {
+                wp_enqueue_script(self::HANDLE_EKO_EDITOR_TRANSFORM_MATH);
             }
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);

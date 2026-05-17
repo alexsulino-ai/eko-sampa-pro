@@ -9,6 +9,15 @@
 
 ## Install
 
+### Zip upload (Plugins → Add New → Upload)
+
+WordPress só reconhece o pacote se, ao descompactar, existir **uma pasta** com o plugin dentro — no mínimo `eko-sampa.php` nessa pasta.
+
+- **Correto:** `eko-sampa.zip` contém `eko-sampa/eko-sampa.php`, `eko-sampa/includes/`, etc.
+- **Errado:** o zip com `eko-sampa.php` solto na raiz (sem pasta `eko-sampa/`); ou zip da pasta `plugins` inteira com vários plugins misturados; ou zip só com parte dos ficheiros.
+
+Para criar o zip: na pasta **pai** do plugin, comprimir a pasta **`eko-sampa`** (não o conteúdo solto).
+
 1. Copy the `eko-sampa` plugin folder into `wp-content/plugins/`.
 2. In **Plugins**, activate **Eko Sampa**.
 3. On activation, the plugin creates database tables, registers custom roles/capabilities, and flushes rewrite rules once.

@@ -28,6 +28,7 @@ final class Eko_Sampa_Template_Legacy_Row_Bridge {
         'background_color'      => ['source' => 'constant #ffffff until palette is migrated', 'type' => 'hex_default'],
         'thumbnail_version'     => ['source' => 'canonical default 0', 'type' => 'int_zero'],
         'thumbnail_visual_hash' => ['source' => "canonical default ''", 'type' => 'hash_empty'],
+        'thumbnail_capture_source' => ['source' => "canonical default ''", 'type' => 'hash_empty'],
         'created_at'            => ['source' => 'WordPress current_time(mysql) at insert', 'type' => 'mysql_now'],
     ];
 

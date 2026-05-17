@@ -946,8 +946,8 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get((int) $id);
-        if (is_array($row) && Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
-            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id((int) $id);
+        if (is_array($row) && Eko_Sampa_Template_Thumbnail::should_auto_server_thumbnail_after_template_write($row)) {
+            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id((int) $id, ['request_source' => 'template_write_hook']);
             $row = (new Eko_Sampa_Template())->get((int) $id);
         }
 
@@ -1003,8 +1003,8 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Template())->get($id);
-        if (is_array($row) && Eko_Sampa_Template_Thumbnail::needs_regeneration($row)) {
-            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id($id);
+        if (is_array($row) && Eko_Sampa_Template_Thumbnail::should_auto_server_thumbnail_after_template_write($row)) {
+            Eko_Sampa_Template_Thumbnail_Generator::generate_for_id($id, ['request_source' => 'template_write_hook']);
             $row = (new Eko_Sampa_Template())->get($id);
         }
 
@@ -1197,7 +1197,8 @@ final class Eko_Sampa_Rest_Api {
 
         Eko_Sampa_Template_Thumbnail::mark_generating($id);
 
-        $saved = Eko_Sampa_Template_Thumbnail::save_from_data_url($id, $image, $visual_hash);
+        $capture = Eko_Sampa_Template_Thumbnail::resolve_capture_source_for_client_upload($params);
+        $saved   = Eko_Sampa_Template_Thumbnail::save_from_data_url($id, $image, $visual_hash, $capture);
         if ($saved instanceof \WP_Error) {
             Eko_Sampa_Template_Thumbnail::clear_generating($id);
             Eko_Sampa_Template_Thumbnail::release_generation_lock($id);
@@ -1220,7 +1221,34 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
-        $generated = Eko_Sampa_Template_Thumbnail_Generator::generate_from_row($row);
+        $params = $this->json_params($request);
+        $force  = ! empty($params['force']);
+        $src    = isset($params['source']) ? (string) $params['source'] : '';
+        $tier   = Eko_Sampa_Template_Thumbnail::normalize_generate_request_source($src);
+
+        if (Eko_Sampa_Template_Thumbnail::refuse_regeneration_due_to_capture_tier($row, $tier, $force)) {
+            Eko_Sampa_Storage_Audit::append(
+                'thumbnail_generate_skipped_tier',
+                [
+                    'template_id'       => $id,
+                    'request_source'    => $src,
+                    'incoming_tier'     => $tier,
+                    'capture_source_db' => (string) ( $row['thumbnail_capture_source'] ?? '' ),
+                    'stored_visual'     => (string) ( $row['thumbnail_visual_hash'] ?? '' ),
+                    'php_visual_hash'   => Eko_Sampa_Template_Thumbnail_Visual::hash_from_row($row),
+                ]
+            );
+
+            return new \WP_REST_Response(Eko_Sampa_Template_Thumbnail::enrich_row($row), 200);
+        }
+
+        $generated = Eko_Sampa_Template_Thumbnail_Generator::generate_from_row(
+            $row,
+            [
+                'force'            => $force,
+                'request_source'   => $src,
+            ]
+        );
         if ($generated instanceof \WP_Error) {
             return $generated;
         }

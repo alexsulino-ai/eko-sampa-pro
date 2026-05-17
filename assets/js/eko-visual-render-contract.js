@@ -69,6 +69,12 @@
                 if (Number.isFinite(bw)) {
                     copy.styles.borderWidth = Math.max(0, Math.round(bw * s));
                 }
+                ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].forEach(function (pk) {
+                    var pv = Number(copy.styles[pk]);
+                    if (Number.isFinite(pv)) {
+                        copy.styles[pk] = Math.max(0, Math.round(pv * s));
+                    }
+                });
             }
             return copy;
         });

@@ -55,6 +55,8 @@ function ekoEditorCanvasFactory() {
         gridSize: 5,
         widthMm: 210,
         heightMm: 297,
+        /** DB `background_color` — passed to thumbnail/print renderer (same as servidor). */
+        templateBackgroundColor: '#ffffff',
         /** Logical canvas px (synced from mm; not zoom). */
         canvasWidth: 794,
         canvasHeight: 1123,
@@ -90,6 +92,19 @@ function ekoEditorCanvasFactory() {
         _snapFlashTimer: null,
         /** Brief visual feedback after grid snap */
         snapFlash: false,
+        /** Angular snap (degrees): threshold and cardinal targets (360° ≡ 0°). */
+        ROTATE_SNAP_THRESHOLD: 3,
+        ROTATE_SNAP_POINTS: Object.freeze([0, 90, 180, 270, 360]),
+        /** <1 lowers pointer angular gain (less “twitchy” than 1:1). */
+        ROTATE_DRAG_SENSITIVITY: 0.52,
+        /** Soft snap: fraction of shortest arc toward nearest cardinal per move (Figma-like, non-locking). */
+        ROTATE_SOFT_SNAP_PULL: 0.22,
+        /** Canvas rotate handle: pointer drag writes `styles.rotate` (same range as sidebar sliders). */
+        _rotateFabDrag: null,
+        _rotateFabMoveHandler: null,
+        _rotateFabUpHandler: null,
+        _rotateSnapPulseItemId: null,
+        _rotateSnapPulseTimer: null,
         /** Snapshot of `content` when opening inline editor (for cancel) */
         inlineSnapshot: '',
         /** Right sidebar: layers + JSON — collapsed frees canvas width */
@@ -441,6 +456,7 @@ function ekoEditorCanvasFactory() {
                 const row = await this.api('templates/' + id, { method: 'GET' });
                 this.widthMm = Number(row.width_mm) || 210;
                 this.heightMm = Number(row.height_mm) || 297;
+                this.templateBackgroundColor = this._safeCssColor(row.background_color, '#ffffff');
                 this.syncLogicalCanvasSizeFromMm();
                 let doc = {};
                 if (row.json_data) {
@@ -537,6 +553,11 @@ function ekoEditorCanvasFactory() {
                 textTransform: 'none',
                 boxShadow: 'none',
                 rotate: 0,
+                paddingTop: 4,
+                paddingRight: 6,
+                paddingBottom: 4,
+                paddingLeft: 6,
+                alignVertical: 'top',
             };
         },
 
@@ -550,6 +571,10 @@ function ekoEditorCanvasFactory() {
                 rotate: 0,
                 boxShadow: 'none',
                 objectFit: 'cover',
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
             };
         },
 
@@ -563,6 +588,10 @@ function ekoEditorCanvasFactory() {
                 borderColor: '#cbd5e1',
                 rotate: 0,
                 boxShadow: 'none',
+                paddingTop: 0,
+                paddingRight: 0,
+                paddingBottom: 0,
+                paddingLeft: 0,
             };
         },
 
@@ -572,6 +601,136 @@ function ekoEditorCanvasFactory() {
                 return fallback;
             }
             return Math.max(lo, Math.min(hi, x));
+        },
+
+        /**
+         * Canonical editor rotation in [0, 360) degrees (CSS `rotate(deg)` accepts equivalent values).
+         *
+         * @param {number} angle
+         * @returns {number}
+         */
+        normalizeAngle360(angle) {
+            const n = Number(angle);
+            if (!Number.isFinite(n)) {
+                return 0;
+            }
+            return ((n % 360) + 360) % 360;
+        },
+
+        /**
+         * Shortest signed delta (degrees) to rotate from `fromDeg` toward `toDeg` on a circle.
+         *
+         * @param {number} fromDeg
+         * @param {number} toDeg
+         * @returns {number} in (-180, 180]
+         */
+        _rotateSignedShortestDeltaDeg(fromDeg, toDeg) {
+            const a = this.normalizeAngle360(fromDeg);
+            const b = this.normalizeAngle360(toDeg);
+            let d = b - a;
+            if (d > 180) {
+                d -= 360;
+            }
+            if (d < -180) {
+                d += 360;
+            }
+            return d;
+        },
+
+        /**
+         * @param {number} aDeg
+         * @param {number} bDeg
+         * @returns {number}
+         */
+        circularAbsDeltaDeg(aDeg, bDeg) {
+            return Math.abs(this._rotateSignedShortestDeltaDeg(aDeg, bDeg));
+        },
+
+        /**
+         * Light magnetic pull toward the nearest cardinal when inside threshold (does not hard-lock).
+         *
+         * @param {number} deg
+         * @returns {number}
+         */
+        applyRotateSoftSnapDeg(deg) {
+            const a = this.normalizeAngle360(deg);
+            const th = this.ROTATE_SNAP_THRESHOLD;
+            const pull = this.ROTATE_SOFT_SNAP_PULL;
+            const snaps = this.ROTATE_SNAP_POINTS;
+            let bestSnap = null;
+            let bestDist = Infinity;
+            for (let i = 0; i < snaps.length; i++) {
+                const s = this.normalizeAngle360(snaps[i]);
+                const dist = this.circularAbsDeltaDeg(a, s);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestSnap = s;
+                }
+            }
+            if (bestSnap === null || bestDist > th) {
+                return a;
+            }
+            const signed = this._rotateSignedShortestDeltaDeg(a, bestSnap);
+            return this.normalizeAngle360(a + signed * pull);
+        },
+
+        /**
+         * Hard snap used on pointer release when within threshold of a cardinal.
+         *
+         * @param {number} deg
+         * @returns {number}
+         */
+        hardSnapRotateIfCloseDeg(deg) {
+            const a = this.normalizeAngle360(deg);
+            const th = this.ROTATE_SNAP_THRESHOLD;
+            const snaps = this.ROTATE_SNAP_POINTS;
+            let out = a;
+            let bestD = Infinity;
+            for (let i = 0; i < snaps.length; i++) {
+                const s = this.normalizeAngle360(snaps[i]);
+                const dist = this.circularAbsDeltaDeg(a, s);
+                if (dist <= th && dist < bestD) {
+                    bestD = dist;
+                    out = s;
+                }
+            }
+            return this.normalizeAngle360(out);
+        },
+
+        _triggerRotateSnapVisual(itemId) {
+            const self = this;
+            this._rotateSnapPulseItemId = itemId;
+            if (this._rotateSnapPulseTimer) {
+                clearTimeout(this._rotateSnapPulseTimer);
+            }
+            this._rotateSnapPulseTimer = setTimeout(function () {
+                self._rotateSnapPulseItemId = null;
+                self._rotateSnapPulseTimer = null;
+            }, 240);
+        },
+
+        /**
+         * @param {number|null|undefined} deg
+         * @returns {string}
+         */
+        formatRotateDisplayDeg(deg) {
+            return String(Math.round(this.normalizeAngle360(deg))) + '°';
+        },
+
+        /**
+         * Sidebar rotate slider: normalize to [0,360) and hard-snap near cardinals on release.
+         */
+        editorRotateSidebarCommit() {
+            const el = this.selectedElement;
+            if (!el || !el.styles || typeof el.styles !== 'object') {
+                return;
+            }
+            const before = this.normalizeAngle360(Number(el.styles.rotate) || 0);
+            const after = this.hardSnapRotateIfCloseDeg(before);
+            el.styles.rotate = after;
+            if (this.circularAbsDeltaDeg(before, after) > 0.05) {
+                this._triggerRotateSnapVisual(el.id);
+            }
         },
 
         _safeCssColor(input, fallback) {
@@ -629,8 +788,15 @@ function ekoEditorCanvasFactory() {
                 const bs = String(r.borderStyle || d.borderStyle).toLowerCase();
                 d.borderStyle = ['solid', 'dashed', 'dotted', 'none'].includes(bs) ? bs : 'solid';
                 d.borderColor = this._safeCssColor(r.borderColor, d.borderColor);
-                d.rotate = this._clampNum(r.rotate, -360, 360, d.rotate);
+                const rv = Number(r.rotate);
+                d.rotate = Number.isFinite(rv)
+                    ? this.normalizeAngle360(rv)
+                    : this.normalizeAngle360(d.rotate);
                 d.boxShadow = this._safeBoxShadow(r.boxShadow != null ? r.boxShadow : d.boxShadow);
+                d.paddingTop = Math.round(this._clampNum(r.paddingTop, 0, 120, d.paddingTop));
+                d.paddingRight = Math.round(this._clampNum(r.paddingRight, 0, 120, d.paddingRight));
+                d.paddingBottom = Math.round(this._clampNum(r.paddingBottom, 0, 120, d.paddingBottom));
+                d.paddingLeft = Math.round(this._clampNum(r.paddingLeft, 0, 120, d.paddingLeft));
                 return d;
             }
             if (type === 'rectangle') {
@@ -641,8 +807,15 @@ function ekoEditorCanvasFactory() {
                 const bs = String(r.borderStyle || d.borderStyle).toLowerCase();
                 d.borderStyle = ['solid', 'dashed', 'dotted', 'none'].includes(bs) ? bs : 'solid';
                 d.borderColor = this._safeCssColor(r.borderColor, d.borderColor);
-                d.rotate = this._clampNum(r.rotate, -360, 360, d.rotate);
+                const rv = Number(r.rotate);
+                d.rotate = Number.isFinite(rv)
+                    ? this.normalizeAngle360(rv)
+                    : this.normalizeAngle360(d.rotate);
                 d.boxShadow = this._safeBoxShadow(r.boxShadow != null ? r.boxShadow : d.boxShadow);
+                d.paddingTop = Math.round(this._clampNum(r.paddingTop, 0, 120, d.paddingTop));
+                d.paddingRight = Math.round(this._clampNum(r.paddingRight, 0, 120, d.paddingRight));
+                d.paddingBottom = Math.round(this._clampNum(r.paddingBottom, 0, 120, d.paddingBottom));
+                d.paddingLeft = Math.round(this._clampNum(r.paddingLeft, 0, 120, d.paddingLeft));
                 return d;
             }
             if (type === 'text' || type === 'placeholder') {
@@ -677,7 +850,16 @@ function ekoEditorCanvasFactory() {
                 const tt = String(r.textTransform || d.textTransform).toLowerCase();
                 d.textTransform = ['none', 'uppercase', 'lowercase', 'capitalize'].includes(tt) ? tt : 'none';
                 d.boxShadow = this._safeBoxShadow(r.boxShadow != null ? r.boxShadow : d.boxShadow);
-                d.rotate = this._clampNum(r.rotate, -360, 360, d.rotate);
+                const rv = Number(r.rotate);
+                d.rotate = Number.isFinite(rv)
+                    ? this.normalizeAngle360(rv)
+                    : this.normalizeAngle360(d.rotate);
+                d.paddingTop = Math.round(this._clampNum(r.paddingTop, 0, 120, d.paddingTop));
+                d.paddingRight = Math.round(this._clampNum(r.paddingRight, 0, 120, d.paddingRight));
+                d.paddingBottom = Math.round(this._clampNum(r.paddingBottom, 0, 120, d.paddingBottom));
+                d.paddingLeft = Math.round(this._clampNum(r.paddingLeft, 0, 120, d.paddingLeft));
+                const av = String(r.alignVertical != null ? r.alignVertical : d.alignVertical).toLowerCase();
+                d.alignVertical = ['top', 'center', 'bottom'].includes(av) ? av : 'top';
                 return d;
             }
             return r && typeof r === 'object' ? Object.assign({}, r) : {};
@@ -837,29 +1019,124 @@ function ekoEditorCanvasFactory() {
         },
 
         /**
-         * Inner frame CSS + editor-only outline (selection/hover/drag); keeps `.eko-sampa-editor__element` neutral.
+         * Inner frame CSS (border, fill, shadow). In the live editor, rotation + selection inset
+         * chrome are applied on `.eko-sampa-editor__rotate-wrap`; inner frames use `omitRotate`.
          *
          * @param {object} item
          * @returns {string}
          */
         editorElementFrameStyle(item) {
-            const base = this.elementFrameCss(item);
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (this.previewOnly || !item) {
+                if (R && typeof R.elementFrameCss === 'function') {
+                    return R.elementFrameCss(item);
+                }
+                return this.elementFrameCss(item);
+            }
+            if (R && typeof R.elementFrameCss === 'function') {
+                return R.elementFrameCss(item, { omitRotate: true });
+            }
+            return this.elementFrameCss(item, { omitRotate: true });
+        },
+
+        /**
+         * Editor-only: rotation + selection/hover inset on this wrapper. Interact binds to the
+         * outer `.eko-sampa-editor__element`, which stays free of `transform` so drag/resize stay stable.
+         * For `getRotatedBoundingBox` / local coords see `window.EkoEditorTransformMath`.
+         *
+         * @param {object} item
+         * @returns {string}
+         */
+        editorRotateWrapStyle(item) {
+            const base =
+                'position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;min-width:0;min-height:0;';
             if (this.previewOnly || !item) {
                 return base;
             }
+            const st = item.styles && typeof item.styles === 'object' ? item.styles : {};
+            const rot = this.normalizeAngle360(st.rotate);
+            let out = base;
             const inset = this._editorFrameInsetChrome(item);
-            if (!inset) {
-                return base;
+            if (inset) {
+                const seed = out + 'box-shadow:none;';
+                out = this._mergeFrameBoxShadow(seed, inset);
             }
-            return this._mergeFrameBoxShadow(base, inset);
+            if (rot !== 0) {
+                const sep = out.endsWith(';') ? '' : ';';
+                out += sep + `transform:rotate(${rot}deg);transform-origin:center center;`;
+            }
+            return out;
         },
 
-        elementFrameCss(item) {
+        /**
+         * Branch wrappers inside `x-for`: if a stray DOM node survives (e.g. legacy `div x-if`),
+         * hide overlays that do not match `item.type` so selection chrome / text do not duplicate.
+         */
+        editorImageFrameStyle(item) {
+            if (!item || item.type !== 'image') {
+                return 'display:none !important;pointer-events:none;';
+            }
+            return this.editorElementFrameStyle(item);
+        },
+
+        editorTextFrameStyle(item) {
+            if (!item || (item.type !== 'text' && item.type !== 'placeholder')) {
+                return 'display:none !important;pointer-events:none;';
+            }
+            return this.editorElementFrameStyle(item);
+        },
+
+        editorRectangleFrameStyle(item) {
+            if (!item || item.type !== 'rectangle') {
+                return 'display:none !important;pointer-events:none;';
+            }
+            return this.editorElementFrameStyle(item);
+        },
+
+        _framePaddingCss(type, st) {
+            const r = st && typeof st === 'object' ? st : {};
+            const d =
+                type === 'text' || type === 'placeholder'
+                    ? { top: 4, right: 6, bottom: 4, left: 6 }
+                    : { top: 0, right: 0, bottom: 0, left: 0 };
+            const pt = Math.round(this._clampNum(r.paddingTop, 0, 120, d.top));
+            const pr = Math.round(this._clampNum(r.paddingRight, 0, 120, d.right));
+            const pb = Math.round(this._clampNum(r.paddingBottom, 0, 120, d.bottom));
+            const pl = Math.round(this._clampNum(r.paddingLeft, 0, 120, d.left));
+            return `padding:${pt}px ${pr}px ${pb}px ${pl}px`;
+        },
+
+        /**
+         * @param {object} item
+         * @returns {string}
+         */
+        textVerticalWrapCss(item) {
+            const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            if (R && typeof R.textVerticalWrapCss === 'function') {
+                return R.textVerticalWrapCss(item);
+            }
+            const st = item && item.styles && typeof item.styles === 'object' ? item.styles : {};
+            const av = String(st.alignVertical != null ? st.alignVertical : 'top').toLowerCase();
+            const jc = av === 'center' ? 'center' : av === 'bottom' ? 'flex-end' : 'flex-start';
+            return [
+                'flex:1',
+                'min-width:0',
+                'min-height:0',
+                'width:100%',
+                'display:flex',
+                'flex-direction:column',
+                `justify-content:${jc}`,
+            ].join(';');
+        },
+
+        elementFrameCss(item, options) {
             const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
             if (R && typeof R.elementFrameCss === 'function') {
-                return R.elementFrameCss(item);
+                return R.elementFrameCss(item, options);
             }
-            const t = item.type;
+            const opts = options && typeof options === 'object' ? options : {};
+            const omitRotate = !!opts.omitRotate;
+            const t = item && item.type;
             const st = item.styles || {};
             const op = this._clampNum(st.opacity, 0, 1, 1);
             const br = Math.max(0, Number(st.borderRadius) || 0);
@@ -867,7 +1144,7 @@ function ekoEditorCanvasFactory() {
             const bs = String(st.borderStyle || 'solid');
             const bc = this._safeCssColor(st.borderColor, '#cbd5e1');
             const sh = this._safeBoxShadow(st.boxShadow != null ? st.boxShadow : 'none');
-            const rot = this._clampNum(st.rotate, -360, 360, 0);
+            const rot = this.normalizeAngle360(st.rotate);
             let border = 'none';
             if (bw > 0 && bs !== 'none') {
                 border = `${bw}px ${bs} ${bc}`;
@@ -883,40 +1160,46 @@ function ekoEditorCanvasFactory() {
                 `border-radius:${br}px`,
                 `border:${border}`,
                 `box-shadow:${sh}`,
-                `transform:rotate(${rot}deg)`,
-                'transform-origin:center center',
                 'overflow:hidden',
             ];
+            if (!omitRotate) {
+                parts.push(`transform:rotate(${rot}deg)`, 'transform-origin:center center');
+            }
             if (t === 'rectangle') {
                 parts.push('background:#f1f5f9');
             }
             if (t === 'text' || t === 'placeholder') {
                 const bg = this._safeCssColor(st.backgroundColor, 'transparent');
                 parts.push(`background-color:${bg}`);
-                parts.push('padding:4px 6px');
                 parts.push('display:flex');
                 parts.push('flex-direction:column');
                 parts.push('min-height:0');
+            }
+            if (t === 'text' || t === 'placeholder' || t === 'image' || t === 'rectangle') {
+                parts.push(this._framePaddingCss(t, st));
             }
             return parts.join(';');
         },
 
         /**
-         * Inline editor: match canvas text metrics (same pipeline as span) so layout does not jump.
+         * HTML textarea control resets only. Typography and layout must come from
+         * `textContentCss(item)` on the same node (concat in the template).
          *
-         * @param {object} item
          * @returns {string}
          */
-        inlineEditorTextareaCss(item) {
-            const base = this.textContentCss(item);
+        inlineEditorTextareaCss() {
             return (
-                base +
-                ';resize:none;-webkit-appearance:none;appearance:none;pointer-events:auto;' +
-                'border:none;outline:none;box-shadow:none;background:transparent;caret-color:currentColor'
+                'resize:none;-webkit-appearance:none;appearance:none;pointer-events:auto' +
+                ';border:none;border-width:0;outline:none;outline-offset:0' +
+                ';background:transparent;background-color:transparent' +
+                ';caret-color:currentColor;-webkit-tap-highlight-color:transparent'
             );
         },
 
         textContentCss(item) {
+            if (!item || (item.type !== 'text' && item.type !== 'placeholder')) {
+                return 'display:none !important';
+            }
             const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
             if (R && typeof R.textContentCss === 'function') {
                 return R.textContentCss(item, { forPrint: !!this.previewOnly });
@@ -936,7 +1219,8 @@ function ekoEditorCanvasFactory() {
             const tt = String(st.textTransform || d.textTransform);
             const overflow = this.previewOnly ? 'hidden' : 'auto';
             return [
-                'flex:1',
+                'flex:0 1 auto',
+                'max-height:100%',
                 'min-width:0',
                 'min-height:0',
                 'width:100%',
@@ -959,7 +1243,6 @@ function ekoEditorCanvasFactory() {
                 'word-break:break-word',
                 `overflow:${overflow}`,
                 'vertical-align:top',
-                'display:block',
             ].join(';');
         },
 
@@ -1205,6 +1488,112 @@ function ekoEditorCanvasFactory() {
             this.selectedId = id;
         },
 
+        _editorCanvasClientScale() {
+            const fit = this.previewOnly ? this.orderPreviewFit : 1;
+            return this.zoomFactor() * fit;
+        },
+
+        /**
+         * Pointer angle (radians) from element box center in screen space (matches stage scale).
+         *
+         * @param {PointerEvent|MouseEvent} ev
+         * @param {object} item
+         * @returns {number}
+         */
+        _editorRotatePointerAngleRad(ev, item) {
+            const canvas = this.$refs.editorCanvas;
+            if (!canvas || !item || !ev) {
+                return 0;
+            }
+            const rect = canvas.getBoundingClientRect();
+            const s = this._editorCanvasClientScale();
+            const cx = rect.left + (Number(item.x) + Number(item.width) / 2) * s;
+            const cy = rect.top + (Number(item.y) + Number(item.height) / 2) * s;
+            return Math.atan2(ev.clientY - cy, ev.clientX - cx);
+        },
+
+        /**
+         * On-canvas rotate handle: drag updates `item.styles.rotate` in [0, 360)°, same field as sidebar sliders.
+         *
+         * @param {PointerEvent} ev
+         * @param {object} item
+         */
+        editorRotateFabPointerDown(ev, item) {
+            if (this.previewOnly || !item) {
+                return;
+            }
+            if (typeof ev.button === 'number' && ev.button !== 0) {
+                return;
+            }
+            ev.preventDefault();
+            if (!item.styles || typeof item.styles !== 'object') {
+                item.styles = {};
+            }
+            item.styles.rotate = this.normalizeAngle360(Number(item.styles.rotate) || 0);
+            const startAngle = this._editorRotatePointerAngleRad(ev, item);
+            this._rotateFabDrag = { itemId: item.id, lastAngle: startAngle };
+            const self = this;
+            const move = function (e) {
+                const d = self._rotateFabDrag;
+                if (!d) {
+                    return;
+                }
+                const el = self.elements.find((x) => String(x.id) === String(d.itemId));
+                if (!el) {
+                    return;
+                }
+                if (!el.styles || typeof el.styles !== 'object') {
+                    el.styles = {};
+                }
+                const cur = self._editorRotatePointerAngleRad(e, el);
+                let deltaRad = cur - d.lastAngle;
+                while (deltaRad > Math.PI) {
+                    deltaRad -= 2 * Math.PI;
+                }
+                while (deltaRad < -Math.PI) {
+                    deltaRad += 2 * Math.PI;
+                }
+                d.lastAngle = cur;
+                const deltaDeg =
+                    (deltaRad * 180) / Math.PI * self.ROTATE_DRAG_SENSITIVITY;
+                const curRot = self.normalizeAngle360(Number(el.styles.rotate) || 0);
+                const next = self.normalizeAngle360(curRot + deltaDeg);
+                el.styles.rotate = self.applyRotateSoftSnapDeg(next);
+            };
+            const up = function () {
+                const dragId = self._rotateFabDrag ? self._rotateFabDrag.itemId : null;
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+                window.removeEventListener('pointercancel', up);
+                self._rotateFabDrag = null;
+                self._rotateFabMoveHandler = null;
+                self._rotateFabUpHandler = null;
+                if (dragId != null) {
+                    const el2 = self.elements.find((x) => String(x.id) === String(dragId));
+                    if (el2 && el2.styles && typeof el2.styles === 'object') {
+                        const before = self.normalizeAngle360(Number(el2.styles.rotate) || 0);
+                        const after = self.hardSnapRotateIfCloseDeg(before);
+                        el2.styles.rotate = after;
+                        if (self.circularAbsDeltaDeg(before, after) > 0.05) {
+                            self._triggerRotateSnapVisual(dragId);
+                        }
+                    }
+                }
+            };
+            this._rotateFabMoveHandler = move;
+            this._rotateFabUpHandler = up;
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', up);
+            window.addEventListener('pointercancel', up);
+            try {
+                if (ev.currentTarget && typeof ev.currentTarget.setPointerCapture === 'function') {
+                    ev.currentTarget.setPointerCapture(ev.pointerId);
+                }
+            } catch (err) {
+                void err;
+            }
+        },
+
         clearSelectionIfCanvas(ev) {
             if (this.galleryOpen) {
                 return;
@@ -1413,6 +1802,67 @@ function ekoEditorCanvasFactory() {
             this.normalizeLayerOrder();
         },
 
+        _alignableSelected() {
+            if (this.previewOnly || !this.selectedId) {
+                return null;
+            }
+            return this.elements.find((e) => e.id === this.selectedId) || null;
+        },
+
+        alignElementLeft() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.x = 0;
+            this.clampElementInCanvas(el);
+        },
+
+        alignElementRight() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.x = Math.max(0, Math.round(this.canvasWidth - el.width));
+            this.clampElementInCanvas(el);
+        },
+
+        alignElementCenterHorizontal() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.x = Math.max(0, Math.round((this.canvasWidth - el.width) / 2));
+            this.clampElementInCanvas(el);
+        },
+
+        alignElementTop() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.y = 0;
+            this.clampElementInCanvas(el);
+        },
+
+        alignElementBottom() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.y = Math.max(0, Math.round(this.canvasHeight - el.height));
+            this.clampElementInCanvas(el);
+        },
+
+        alignElementCenterVertical() {
+            const el = this._alignableSelected();
+            if (!el) {
+                return;
+            }
+            el.y = Math.max(0, Math.round((this.canvasHeight - el.height) / 2));
+            this.clampElementInCanvas(el);
+        },
+
         openInlineEdit(item) {
             if (this.previewOnly) {
                 return;
@@ -1425,7 +1875,7 @@ function ekoEditorCanvasFactory() {
             this.inlineValue = this.inlineSnapshot;
             this.inlineOpen = true;
             this.$nextTick(() => {
-                const ta = document.getElementById('eko-inline-edit');
+                const ta = document.getElementById('eko-inline-edit-' + String(item.id));
                 if (ta) {
                     ta.focus();
                     const len = ta.value.length;
@@ -1542,12 +1992,15 @@ function ekoEditorCanvasFactory() {
                 const payload = R.normalizePayload({
                     width_mm: this.widthMm,
                     height_mm: this.heightMm,
+                    background_color: this.templateBackgroundColor || '#ffffff',
                     elements: this.elements,
                 });
                 const V = window.EkoThumbnailVisual;
                 if (V && typeof V.visualChecksum === 'function') {
                     payload.visual_hash = V.visualChecksum(payload);
                 }
+                await this.$nextTick();
+                const canvasEl = this.$refs.editorCanvas;
                 try {
                     await Ex.captureAndUpload(id, payload, {
                         source: 'editor_save',
@@ -1555,11 +2008,16 @@ function ekoEditorCanvasFactory() {
                         quality: 0.85,
                         storedVisualHash: this._lastThumbVisualHash || '',
                         hasThumbnail: !!this._hasThumbnail,
+                        liveCanvasRoot: canvasEl && canvasEl.nodeType === 1 ? canvasEl : null,
+                        pageBackgroundSolid:
+                            R && typeof R.canvasPageBackgroundSolid === 'function'
+                                ? R.canvasPageBackgroundSolid(payload)
+                                : this.templateBackgroundColor || '#ffffff',
                     });
                 } catch (clientErr) {
                     await this.api('templates/' + id + '/thumbnail/generate', {
                         method: 'POST',
-                        body: { source: 'editor_save_fallback' },
+                        body: { source: 'editor_save_fallback', force: true },
                     });
                     void clientErr;
                 }
@@ -1567,7 +2025,7 @@ function ekoEditorCanvasFactory() {
                 try {
                     await this.api('templates/' + id + '/thumbnail/generate', {
                         method: 'POST',
-                        body: { source: 'editor_save_fallback' },
+                        body: { source: 'editor_save_fallback', force: true },
                     });
                 } catch (e2) {
                     if (window.EKO_RENDER_DEBUG || (R && R.isRenderDebug && R.isRenderDebug())) {
@@ -1646,7 +2104,7 @@ function ekoEditorCanvasFactory() {
                 self.clearInteractHostStyles(node);
                 interact(node)
                     .draggable({
-                        ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-field',
+                        ignoreFrom: '.eko-sampa-editor__resize-handle, .eko-sampa-editor__inline-field, .eko-sampa-editor__rotate-fab',
                         inertia: false,
                         /** Sem restrict: o canvas está dentro de um stage com transform:scale; o restrict do Interact calculava mal e prendia tudo no canto. O clamp em JS mantém o layout dentro do canvas. */
                         listeners: {
@@ -1776,25 +2234,27 @@ function ekoEditorCanvasFactory() {
             if (this.previewOnly) {
                 return;
             }
-            if (!this.selectedId) {
+            if (this.selectedId == null || this.selectedId === '') {
                 return;
             }
-            const src = this.elements.find((e) => e.id === this.selectedId);
+            const src = this.elements.find((e) => String(e.id) === String(this.selectedId));
             if (!src) {
                 return;
             }
             let raw;
             try {
+                // Alpine reactive proxies are not structuredClone-safe; JSON round-trip is a reliable deep clone here.
                 raw = JSON.parse(JSON.stringify(src));
             } catch (e) {
                 return;
             }
             raw.id = this.uid(String(raw.type || 'el'));
-            raw.x = this.sanitizeNumber(raw.x, 0) + 12;
-            raw.y = this.sanitizeNumber(raw.y, 0) + 12;
+            raw.x = this.sanitizeNumber(raw.x, 0) + 15;
+            raw.y = this.sanitizeNumber(raw.y, 0) + 15;
             this.elements.push(raw);
+            this.elements = this.elements.slice();
             this.normalizeElements();
-            this.select(raw.id);
+            this.select(String(raw.id));
         },
     };
 }

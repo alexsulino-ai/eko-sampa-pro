@@ -62,21 +62,25 @@ if (! defined('ABSPATH')) {
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent
                                 >
+                                    <div class="eko-sampa-editor__rotate-wrap absolute inset-0 min-h-0 min-w-0" :style="editorRotateWrapStyle(item)">
                                     <template x-if="item.type === 'image'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorImageFrameStyle(item)">
                                             <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'text' || item.type === 'placeholder'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)">
+                                        <div class="pointer-events-none absolute inset-0" :style="editorTextFrameStyle(item)">
                                             <div class="eko-sampa-editor__inline-hit pointer-events-none flex min-h-0 min-w-0 flex-1 cursor-default flex-col">
-                                                <span class="pointer-events-none box-border block min-h-0 min-w-0 w-full flex-1 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
+                                                <div class="pointer-events-none flex min-h-0 min-w-0 flex-1 flex-col" :style="textVerticalWrapCss(item)">
+                                                    <span class="pointer-events-none box-border block min-h-0 min-w-0 whitespace-pre-wrap break-words" :style="textContentCss(item)" x-text="item.content"></span>
+                                                </div>
                                             </div>
                                         </div>
                                     </template>
                                     <template x-if="item.type === 'rectangle'">
-                                        <div class="pointer-events-none absolute inset-0" :style="editorElementFrameStyle(item)"></div>
+                                        <div class="pointer-events-none absolute inset-0" :style="editorRectangleFrameStyle(item)"></div>
                                     </template>
+                                    </div>
                                 </div>
                             </template>
                         </div>

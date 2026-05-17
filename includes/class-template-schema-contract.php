@@ -36,6 +36,7 @@ final class Eko_Sampa_Template_Schema_Contract {
         'json_data',
         'thumbnail_version',
         'thumbnail_visual_hash',
+        'thumbnail_capture_source',
         'created_at',
         'updated_at',
     ];
