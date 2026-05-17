@@ -25,7 +25,8 @@ Nonce: `eko_sampa_integrity`
 
 - Option: `eko_sampa_integrity_last_report`
 - Mostra: timestamps, versões, contadores de órfãos, tabela template→service, **repair history**, JSON raw
-- **`orders_operational_title`:** presença da coluna `order_title`, `rows_without_title`, `readiness` (`ok` | `migration_required`) — ver [../schema/orders-schema.md](../schema/orders-schema.md)
+- **`orders_operational_title`:** presença da coluna `order_title`, contagens, índice, estratégia de busca, amostra de normalização/UTF-8 — ver [../schema/orders-schema.md](../schema/orders-schema.md)
+- **`snapshot_operational_consistency`:** leitura de `order.json` em snapshots `completed` prontos (chave `order_title` legada, ficheiros em falta, `order_id` coerente)
 - **Service delete:** snapshot JSON por id + option `eko_sampa_service_delete_audit` (últimas tentativas de DELETE via API / modelo)
 - **Template schema (SQL):** análise estrutural + preview/repair de colunas legadas `NOT NULL` sem `DEFAULT` — ver [../schema/templates-schema.md](../schema/templates-schema.md)
 
@@ -39,6 +40,7 @@ Nonce: `eko_sampa_integrity`
 
 - Após deploy de código DB 1.0.4+
 - Após deploy de **`order_title`** (DB 1.0.7+): confirmar `orders_operational_title.readiness === ok` no relatório
+- Após deploy de **índice `order_title`** (DB 1.0.8+): `orders_operational_title.order_title_index_found === true` e `missing_index_warning === false`
 - Após import/migração SQL manual
 - Quando create order retorna `service_exists: false`
 - Rotina preventiva pós-delete de services

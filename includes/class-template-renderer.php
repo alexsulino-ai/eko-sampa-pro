@@ -80,11 +80,13 @@ final class Eko_Sampa_Template_Renderer {
         );
 
         $inner = '';
+        $stack_i = 0;
         foreach ($preview['elements'] as $el) {
             if (! is_array($el)) {
                 continue;
             }
-            $inner .= $this->render_element($el, $for_print);
+            $inner .= $this->render_element($el, $for_print, $stack_i);
+            ++$stack_i;
         }
 
         $wrap = $for_print ? 'eko-sampa-print-root' : 'eko-sampa-preview-root';
@@ -159,8 +161,9 @@ final class Eko_Sampa_Template_Renderer {
 
     /**
      * @param array<string, mixed> $el
+     * @param int                  $stack_index Sibling paint order (0 = back). Must match `EkoCanvasRenderer` STACK_Z_*.
      */
-    private function render_element(array $el, bool $for_print): string {
+    private function render_element(array $el, bool $for_print, int $stack_index = 0): string {
         $x      = (float) ($el['x'] ?? 0);
         $y      = (float) ($el['y'] ?? 0);
         $w      = (float) ($el['width'] ?? 10);
@@ -168,12 +171,15 @@ final class Eko_Sampa_Template_Renderer {
         $type   = sanitize_key((string) ($el['type'] ?? 'text'));
         $styles = isset($el['styles']) && is_array($el['styles']) ? $el['styles'] : [];
 
+        $zi = 10 + max(0, $stack_index) * 4;
+
         $pos = sprintf(
-            'position:absolute;left:%Fpx;top:%Fpx;width:%Fpx;height:%Fpx;box-sizing:border-box;',
+            'position:absolute;left:%Fpx;top:%Fpx;width:%Fpx;height:%Fpx;box-sizing:border-box;z-index:%d;',
             $x,
             $y,
             $w,
-            $h
+            $h,
+            $zi
         );
 
         $frame_css = $this->build_frame_css($styles, $type);
@@ -250,13 +256,16 @@ final class Eko_Sampa_Template_Renderer {
             $border = sprintf('%dpx %s %s', $bw, $bs, $bc);
         }
 
+        $overflow = ( $type === 'text' || $type === 'placeholder' ) ? 'visible' : 'hidden';
+
         $css = sprintf(
-            'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:hidden;',
+            'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:%s;',
             $opacity,
             $br,
             $border,
             $sh,
-            $rot
+            $rot,
+            $overflow
         );
 
         if ($type === 'rectangle') {

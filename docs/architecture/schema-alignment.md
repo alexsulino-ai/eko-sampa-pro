@@ -41,3 +41,5 @@ Ver também [../schema/templates-schema.md](../schema/templates-schema.md).
 ## Orders: `order_title` (1.0.7)
 
 Coluna **opcional** e **operacional** (`varchar(255) NULL`), alinhada via `schema_align_orders` / migração `1.0.7`. Não participa do contrato de render (`template_render_context`). Ver [../schema/orders-schema.md](../schema/orders-schema.md).
+
+**1.0.8:** índice secundário em `order_title` (prefixo utf8mb4) — ver `migrate_to_1_0_8` em `class-database.php`.

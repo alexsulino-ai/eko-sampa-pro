@@ -44,6 +44,32 @@
 })();
 
 /**
+ * Editor-only z-index boosts (never persisted, never sent to thumbnail/print HTML).
+ * Base paint values come from {@see EkoCanvasRenderer.stackZFromIndex} — see docs/editor/z-index-contract.md
+ *
+ * @type {{
+ *   HOVER_OFFSET: number,
+ *   SELECTED_OFFSET: number,
+ *   DRAGGING_OFFSET: number,
+ *   HOVER_BAND_MIN: number,
+ *   HOVER_BAND_MAX: number,
+ *   RESIZE_HANDLE_Z: number,
+ *   version: number
+ * }}
+ */
+window.EkoEditorZIndexContract = {
+    HOVER_OFFSET: 0,
+    /** Kept at 0: selection must not reorder paint — see elementPositionStyle (selected used to add +100000 and broke layer order). */
+    SELECTED_OFFSET: 0,
+    /** Deprecated: drag elevation is maxStackZ + STACK_Z_STRIDE + 2 (see elementPositionStyle). */
+    DRAGGING_OFFSET: 0,
+    HOVER_BAND_MIN: 1,
+    HOVER_BAND_MAX: 99,
+    RESIZE_HANDLE_Z: 60,
+    version: 2,
+};
+
+/**
  * Alpine component factory. Hoisted and assigned to `window` immediately so
  * `x-data="window.ekoEditorCanvasFactory()"` works even if `Alpine.data` fails later.
  */
@@ -500,6 +526,17 @@ function ekoEditorCanvasFactory() {
             this.elements.forEach((el, idx) => {
                 this.normalizeOneElement(el, idx, seen);
             });
+            this.normalizeLayerOrder();
+        },
+
+        /**
+         * Single source of truth for stack order: `elements` array (index 0 = back, last = front).
+         * z-index for paint is derived from index (see EkoCanvasRenderer.STACK_Z_*); not a parallel layer store.
+         */
+        normalizeLayerOrder() {
+            if (!Array.isArray(this.elements)) {
+                return;
+            }
         },
 
         defaultTextStyles() {
@@ -644,22 +681,50 @@ function ekoEditorCanvasFactory() {
         },
 
         elementPositionStyle(item) {
+            const idxRaw = this.elements.indexOf(item);
+            const idx = idxRaw < 0 ? 0 : idxRaw;
             const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+            let pos;
             if (R && typeof R.elementPositionStyle === 'function') {
-                return R.elementPositionStyle(item);
+                pos = R.elementPositionStyle(item, idx);
+            } else if (!item || typeof item !== 'object') {
+                pos = 'position:absolute;left:0;top:0;width:100px;height:40px';
+            } else {
+                const x = Number(item.x);
+                const y = Number(item.y);
+                const w = Number(item.width);
+                const h = Number(item.height);
+                const left = Number.isFinite(x) ? x : 0;
+                const top = Number.isFinite(y) ? y : 0;
+                const width = Number.isFinite(w) ? w : this.minElementWidth;
+                const height = Number.isFinite(h) ? h : this.minElementHeight;
+                pos = `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-sizing:border-box;`;
             }
-            if (!item || typeof item !== 'object') {
-                return 'position:absolute;left:0;top:0;width:100px;height:40px';
+            if (this.previewOnly) {
+                return pos;
             }
-            const x = Number(item.x);
-            const y = Number(item.y);
-            const w = Number(item.width);
-            const h = Number(item.height);
-            const left = Number.isFinite(x) ? x : 0;
-            const top = Number.isFinite(y) ? y : 0;
-            const width = Number.isFinite(w) ? w : this.minElementWidth;
-            const height = Number.isFinite(h) ? h : this.minElementHeight;
-            return `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px`;
+            const Zc = window.EkoEditorZIndexContract || {};
+            const hov = Number(Zc.HOVER_OFFSET) || 0;
+            let z =
+                R && typeof R.stackZFromIndex === 'function'
+                    ? R.stackZFromIndex(idx)
+                    : 10 + idx * 4;
+            if (hov && this.hoveredElementId != null && String(this.hoveredElementId) === String(item.id)) {
+                z += hov;
+            }
+            if (this.draggingId === item.id) {
+                const cnt = Array.isArray(this.elements) ? this.elements.length : 0;
+                const top = Math.max(0, cnt - 1);
+                const stride = R && R.STACK_Z_STRIDE != null ? Number(R.STACK_Z_STRIDE) : 4;
+                const maxZ =
+                    R && typeof R.stackZFromIndex === 'function'
+                        ? R.stackZFromIndex(top)
+                        : 10 + top * stride;
+                z = maxZ + stride + 2;
+            }
+            const trimmed = pos.replace(/\s*z-index:\s*\d+\s*;?/gi, '').replace(/;+$/g, '');
+            const sep = trimmed.endsWith(';') || trimmed === '' ? '' : ';';
+            return trimmed + sep + 'z-index:' + z + ';';
         },
 
         elementFrameCss(item) {
@@ -693,12 +758,28 @@ function ekoEditorCanvasFactory() {
                 `box-shadow:${sh}`,
                 `transform:rotate(${rot}deg)`,
                 'transform-origin:center center',
-                'overflow:hidden',
+                t === 'text' || t === 'placeholder' ? 'overflow:visible' : 'overflow:hidden',
             ];
             if (t === 'rectangle') {
                 parts.push('background:#f1f5f9');
             }
             return parts.join(';');
+        },
+
+        /**
+         * Inline editor: match canvas text metrics (same pipeline as span) so layout does not jump.
+         *
+         * @param {object} item
+         * @returns {string}
+         */
+        inlineEditorTextareaCss(item) {
+            const base = this.textContentCss(item);
+            return (
+                base +
+                ';position:absolute;left:0;top:0;width:100%;height:100%;margin:0;border:none;outline:none;resize:none;' +
+                'box-shadow:none;border-radius:0;pointer-events:auto;-webkit-appearance:none;appearance:none;' +
+                'box-sizing:border-box;vertical-align:top'
+            );
         },
 
         textContentCss(item) {
@@ -755,21 +836,6 @@ function ekoEditorCanvasFactory() {
             return `width:100%;height:100%;display:block;object-fit:${f}`;
         },
 
-        /** Toggle cover (default) ↔ contain on image click */
-        toggleImageFit(item) {
-            if (this.previewOnly) {
-                return;
-            }
-            if (!item || item.type !== 'image') {
-                return;
-            }
-            if (!item.styles || typeof item.styles !== 'object') {
-                item.styles = this.sanitizedElementStyles('image', {});
-            }
-            const cur = String(item.styles.objectFit || 'cover').toLowerCase();
-            item.styles.objectFit = cur === 'cover' ? 'contain' : 'cover';
-        },
-
         triggerSnapFlash() {
             this.snapFlash = true;
             clearTimeout(this._snapFlashTimer);
@@ -782,6 +848,9 @@ function ekoEditorCanvasFactory() {
             if (!this.inlineOpen) {
                 return;
             }
+            if (window.ekoTextEditDiagnostics && typeof window.ekoTextEditDiagnostics.recordClose === 'function') {
+                window.ekoTextEditDiagnostics.recordClose(this);
+            }
             const el = this.elements.find((x) => x.id === this.inlineTargetId);
             if (el) {
                 el.content = this.inlineSnapshot;
@@ -793,6 +862,13 @@ function ekoEditorCanvasFactory() {
         },
 
         confirmInlineEdit() {
+            if (
+                this.inlineOpen &&
+                window.ekoTextEditDiagnostics &&
+                typeof window.ekoTextEditDiagnostics.recordClose === 'function'
+            ) {
+                window.ekoTextEditDiagnostics.recordClose(this);
+            }
             const el = this.elements.find((x) => x.id === this.inlineTargetId);
             if (el) {
                 el.content = this.inlineValue;
@@ -1147,6 +1223,32 @@ function ekoEditorCanvasFactory() {
             this.selectedId = null;
         },
 
+        bringForward() {
+            if (this.previewOnly || !this.selectedId) {
+                return;
+            }
+            const i = this.elements.findIndex((e) => e.id === this.selectedId);
+            if (i < 0 || i >= this.elements.length - 1) {
+                return;
+            }
+            const el = this.elements.splice(i, 1)[0];
+            this.elements.splice(i + 1, 0, el);
+            this.normalizeLayerOrder();
+        },
+
+        sendBackward() {
+            if (this.previewOnly || !this.selectedId) {
+                return;
+            }
+            const i = this.elements.findIndex((e) => e.id === this.selectedId);
+            if (i <= 0) {
+                return;
+            }
+            const el = this.elements.splice(i, 1)[0];
+            this.elements.splice(i - 1, 0, el);
+            this.normalizeLayerOrder();
+        },
+
         openInlineEdit(item) {
             if (this.previewOnly) {
                 return;
@@ -1158,6 +1260,9 @@ function ekoEditorCanvasFactory() {
             this.inlineSnapshot = item.content != null ? String(item.content) : '';
             this.inlineValue = this.inlineSnapshot;
             this.inlineOpen = true;
+            if (window.ekoTextEditDiagnostics && typeof window.ekoTextEditDiagnostics.recordOpen === 'function') {
+                window.ekoTextEditDiagnostics.recordOpen(this, item);
+            }
             this.$nextTick(() => {
                 const ta = document.getElementById('eko-inline-edit');
                 if (ta) {
@@ -1356,8 +1461,12 @@ function ekoEditorCanvasFactory() {
                         return;
                     }
                     const arr = self.elements;
-                    const moved = arr.splice(oldIndex, 1)[0];
-                    arr.splice(newIndex, 0, moved);
+                    const n = arr.length;
+                    const fromArr = n - 1 - oldIndex;
+                    const toArr = n - 1 - newIndex;
+                    const moved = arr.splice(fromArr, 1)[0];
+                    arr.splice(toArr, 0, moved);
+                    self.normalizeLayerOrder();
                 },
             });
         },
@@ -1532,6 +1641,516 @@ function ekoEditorCanvasFactory() {
 }
 
 window.ekoEditorCanvasFactory = ekoEditorCanvasFactory;
+
+(function installEkoEditorDiagnostics() {
+    function canvasFromRoot(root) {
+        return root && root.querySelector ? root.querySelector('.eko-sampa-editor__canvas') : null;
+    }
+
+    function overflowChain(el) {
+        const chain = [];
+        let n = el;
+        let hops = 0;
+        while (n && n.nodeType === 1 && hops < 24) {
+            const cs = window.getComputedStyle(n);
+            chain.push({
+                tag: n.tagName,
+                class: n.className,
+                overflowX: cs.overflowX,
+                overflowY: cs.overflowY,
+                contain: cs.contain,
+                clipPath: cs.clipPath,
+                transform: cs.transform,
+                isolation: cs.isolation,
+            });
+            if (n.classList && n.classList.contains('eko-sampa-editor__canvas')) {
+                break;
+            }
+            n = n.parentElement;
+            hops++;
+        }
+        return chain;
+    }
+
+    function detectStackingContext(cs) {
+        const t = cs.transform;
+        const o = cs.opacity;
+        const f = cs.filter;
+        const m = cs.maskImage;
+        const i = cs.isolation;
+        const p = cs.perspective;
+        if (i === 'isolate') {
+            return true;
+        }
+        if (t && t !== 'none') {
+            return true;
+        }
+        if (p && p !== 'none') {
+            return true;
+        }
+        if (f && f !== 'none') {
+            return true;
+        }
+        if (m && m !== 'none' && m !== '') {
+            return true;
+        }
+        if (Number(o) < 1) {
+            return true;
+        }
+        return false;
+    }
+
+    function detectStackingContextOnCanvasRoot(cs) {
+        const t = cs.transform;
+        const f = cs.filter;
+        const i = cs.isolation;
+        const p = cs.perspective;
+        if (i === 'isolate') {
+            return true;
+        }
+        if (t && t !== 'none') {
+            return true;
+        }
+        if (p && p !== 'none') {
+            return true;
+        }
+        if (f && f !== 'none') {
+            return true;
+        }
+        return false;
+    }
+
+    function tailwindZClassOnCanvasRoot(className) {
+        if (!className || typeof className !== 'string') {
+            return null;
+        }
+        const m = className.match(/(?:^|\s)(z-\[[^\]]+\]|z-\d{1,4}|z-auto)(?:\s|$)/);
+        return m ? m[1] : null;
+    }
+
+    function parseInlineZIndex(styleAttr) {
+        if (!styleAttr || typeof styleAttr !== 'string') {
+            return null;
+        }
+        const m = styleAttr.match(/z-index\s*:\s*([^;]+)/i);
+        if (!m) {
+            return null;
+        }
+        const n = Number(String(m[1]).trim());
+        return Number.isFinite(n) ? n : null;
+    }
+
+    /**
+     * Matches {@link ekoEditorCanvasFactory}.elementPositionStyle when an element is being dragged/resized.
+     * @param {number} elementCount `elements.length` on the canvas
+     */
+    function computeEditorDragOverlayZ(elementCount) {
+        const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+        const cnt = Math.max(0, Math.floor(Number(elementCount) || 0));
+        const top = Math.max(0, cnt - 1);
+        const stride = R && R.STACK_Z_STRIDE != null ? Number(R.STACK_Z_STRIDE) : 4;
+        const maxZ =
+            R && typeof R.stackZFromIndex === 'function'
+                ? R.stackZFromIndex(top)
+                : 10 + top * stride;
+        return maxZ + stride + 2;
+    }
+
+    /**
+     * @param {number} layerIndex
+     * @param {string} elementId
+     * @param {object} [editorState] optional: { selectedId, draggingId, hoveredId, hoveredElementId, previewOnly, elements?, elementCount? }
+     * @param {number} [canvasElementCount] fallback when `editorState.elements` is missing (pass `canvasChildren.length` from validate)
+     */
+    function expectedEditorRootZ(layerIndex, elementId, editorState, canvasElementCount) {
+        const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+        const base =
+            R && typeof R.stackZFromIndex === 'function'
+                ? R.stackZFromIndex(layerIndex)
+                : 10 + Math.max(0, layerIndex) * 4;
+        const Zc = window.EkoEditorZIndexContract || {};
+        const hov = Number(Zc.HOVER_OFFSET) || 0;
+        const st = editorState && typeof editorState === 'object' ? editorState : {};
+        if (st.previewOnly) {
+            return base;
+        }
+        const hoveredKey = st.hoveredId != null ? st.hoveredId : st.hoveredElementId;
+        let cnt = 0;
+        if (Array.isArray(st.elements)) {
+            cnt = st.elements.length;
+        } else if (Number(st.elementCount) >= 0) {
+            cnt = Math.floor(Number(st.elementCount));
+        } else if (canvasElementCount != null && Number.isFinite(Number(canvasElementCount))) {
+            cnt = Math.max(0, Math.floor(Number(canvasElementCount)));
+        }
+        if (st.draggingId != null && String(st.draggingId) === String(elementId)) {
+            return computeEditorDragOverlayZ(cnt);
+        }
+        let z = base;
+        if (hov && hoveredKey != null && String(hoveredKey) === String(elementId)) {
+            z += hov;
+        }
+        return z;
+    }
+
+    /**
+     * @param {number} layerIndex
+     * @param {number} [elementCount] canvas `.eko-sampa-editor__element` count for global drag overlay z
+     */
+    function allowedZEnvelopeForIndex(layerIndex, elementCount) {
+        const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
+        const base =
+            R && typeof R.stackZFromIndex === 'function'
+                ? R.stackZFromIndex(layerIndex)
+                : 10 + Math.max(0, layerIndex) * 4;
+        const Zc = window.EkoEditorZIndexContract || {};
+        const hov = Number(Zc.HOVER_OFFSET) || 0;
+        const cnt =
+            elementCount != null && Number.isFinite(Number(elementCount))
+                ? Math.max(0, Math.floor(Number(elementCount)))
+                : 0;
+        const dragOverlay = computeEditorDragOverlayZ(cnt);
+        return { base: base + hov, selected: base + hov, dragging: dragOverlay };
+    }
+
+    window.ekoLayerDiagnostics = {
+        collect(root) {
+            const canvas = canvasFromRoot(root || document);
+            if (!canvas) {
+                return { error: 'canvas_not_found' };
+            }
+            const nodes = Array.from(canvas.querySelectorAll('.eko-sampa-editor__element'));
+            const rows = [];
+            const zSeen = Object.create(null);
+            nodes.forEach((node, domOrder) => {
+                const id = node.getAttribute('data-element-id') || '';
+                const layerAttr = node.getAttribute('data-layer-index');
+                const layer_index = layerAttr != null && layerAttr !== '' ? Number(layerAttr) : null;
+                const cs = window.getComputedStyle(node);
+                const zi = cs.zIndex;
+                const zNum = zi === 'auto' ? null : Number(zi);
+                if (zNum != null && !Number.isNaN(zNum)) {
+                    zSeen[zNum] = (zSeen[zNum] || 0) + 1;
+                }
+                rows.push({
+                    id: id,
+                    layer_index: layer_index,
+                    dom_order: domOrder,
+                    computed_z_index: zi,
+                    stacking_context_detected: detectStackingContext(cs),
+                    overflow_chain_head: overflowChain(node).slice(0, 4),
+                });
+            });
+            const duplicated_z_index = Object.keys(zSeen)
+                .filter((k) => zSeen[k] > 1)
+                .map((k) => ({ z: Number(k), count: zSeen[k] }));
+            return {
+                elements: rows,
+                duplicated_z_index: duplicated_z_index,
+                note: 'layer_index is json_data.elements index; open devtools Application for persisted order.',
+            };
+        },
+
+        /**
+         * @param {Document|Element} [root]
+         * @param {object} [editorState] optional: { selectedId, draggingId, hoveredId, hoveredElementId, previewOnly, elements } from Alpine $data
+         * @returns {{ ok: boolean, warnings: string[], elements: object[] }}
+         */
+        validate(root, editorState) {
+            const canvas = canvasFromRoot(root || document);
+            const warnings = [];
+            const perEl = [];
+            if (!canvas) {
+                warnings.push('canvas_not_found');
+                return { ok: false, warnings: warnings, elements: [] };
+            }
+            const canvasChildren = Array.from(canvas.children).filter(
+                (n) => n.classList && n.classList.contains('eko-sampa-editor__element')
+            );
+            const canvasElementCount = canvasChildren.length;
+            const strict = editorState && typeof editorState === 'object';
+
+            canvasChildren.forEach((node) => {
+                const id = node.getAttribute('data-element-id') || '';
+                const layerAttr = node.getAttribute('data-layer-index');
+                const layerIndex = layerAttr != null && layerAttr !== '' ? Number(layerAttr) : -1;
+                const issues = [];
+                const tw = tailwindZClassOnCanvasRoot(node.className);
+                if (tw) {
+                    issues.push('tailwind_z_class_on_canvas_root:' + tw);
+                    warnings.push(
+                        '[' + id + '] Tailwind z utility on canvas root: ' + tw + ' — use EkoEditorZIndexContract + elementPositionStyle only.'
+                    );
+                }
+                const cs = window.getComputedStyle(node);
+                const computedZ = cs.zIndex === 'auto' ? null : Number(cs.zIndex);
+                if (computedZ != null && layerIndex >= 0) {
+                    if (strict && id) {
+                        const exp = expectedEditorRootZ(layerIndex, id, editorState, canvasElementCount);
+                        if (Math.round(computedZ) !== Math.round(exp)) {
+                            issues.push('z_mismatch_strict');
+                            warnings.push(
+                                '[' +
+                                    id +
+                                    '] z-index ' +
+                                    computedZ +
+                                    ' !== expected ' +
+                                    exp +
+                                    ' (check editorState matches Alpine $data).'
+                            );
+                        }
+                    } else {
+                        const env = allowedZEnvelopeForIndex(layerIndex, canvasElementCount);
+                        const ok = computedZ === env.base || computedZ === env.dragging;
+                        if (!ok) {
+                            issues.push('z_arbitrary');
+                            warnings.push(
+                                '[' +
+                                    id +
+                                    '] z-index ' +
+                                    computedZ +
+                                    ' is not one of contract values for layer_index ' +
+                                    layerIndex +
+                                    ' (base=' +
+                                    env.base +
+                                    ', drag_overlay=' +
+                                    env.dragging +
+                                    ').'
+                            );
+                        }
+                    }
+                }
+                if (detectStackingContextOnCanvasRoot(cs)) {
+                    issues.push('stacking_context_root');
+                    warnings.push(
+                        '[' +
+                            id +
+                            '] Root canvas element: transform/filter/isolation/perspective creates stacking context (often Interact `transform` residue — should be cleared after drag).'
+                    );
+                }
+                const attrZ = parseInlineZIndex(node.getAttribute('style') || '');
+                if (attrZ != null && computedZ != null && Math.abs(attrZ - computedZ) > 0.5) {
+                    issues.push('inline_vs_computed_z');
+                    warnings.push('[' + id + '] style attribute z-index differs from computed (Alpine may have overwritten).');
+                }
+                perEl.push({ id: id, layer_index: layerIndex, issues: issues });
+            });
+
+            return { ok: warnings.length === 0, warnings: warnings, elements: perEl };
+        },
+    };
+
+    window.ekoVisualBoxDiagnostics = {
+        collect(root) {
+            const canvas = canvasFromRoot(root || document);
+            if (!canvas) {
+                return { error: 'canvas_not_found' };
+            }
+            const nodes = Array.from(canvas.querySelectorAll('.eko-sampa-editor__element'));
+            const clipped_elements = [];
+            nodes.forEach((node) => {
+                const id = node.getAttribute('data-element-id') || '';
+                const r = node.getBoundingClientRect();
+                const frame = node.firstElementChild;
+                const inner = frame && frame.querySelector('span,textarea,img');
+                const ir = inner ? inner.getBoundingClientRect() : null;
+                const chain = overflowChain(node);
+                const hidden_by_parent =
+                    node.offsetParent === null && node.parentElement && node.parentElement.offsetParent === null;
+                clipped_elements.push({
+                    id: id,
+                    border_box_metrics: r ? { width: r.width, height: r.height } : null,
+                    visual_bounds: r ? { w: r.width, h: r.height, x: r.x, y: r.y } : null,
+                    transformed_bounds: r ? { w: r.width, h: r.height } : null,
+                    paint_bounds: r ? { w: r.width, h: r.height } : null,
+                    inner_bounds: ir ? { w: ir.width, h: ir.height } : null,
+                    overflow_chain: chain,
+                    hidden_by_parent: hidden_by_parent,
+                    clipping_parent: chain.find((c) => c.overflowY === 'hidden' || c.overflowX === 'hidden') || null,
+                });
+            });
+            return { clipped_elements: clipped_elements };
+        },
+    };
+
+    window.ekoTextEditDiagnostics = {
+        lastSession: null,
+        recordOpen(component, item) {
+            const id = item && item.id;
+            const canvas = component && component.$refs && component.$refs.editorCanvas;
+            const node =
+                id && canvas
+                    ? canvas.querySelector('.eko-sampa-editor__element[data-element-id="' + String(id).replace(/"/g, '') + '"]')
+                    : null;
+            const r = node ? node.getBoundingClientRect() : null;
+            this.lastSession = {
+                id: id,
+                editing_node_recreated: true,
+                width_before: r ? r.width : null,
+                height_before: r ? r.height : null,
+                openedAt: typeof performance !== 'undefined' ? performance.now() : 0,
+                font_swap_detected: false,
+                repaint_count: 0,
+            };
+        },
+        recordClose(component) {
+            if (!this.lastSession || !this.lastSession.id) {
+                return;
+            }
+            const id = this.lastSession.id;
+            const canvas = component && component.$refs && component.$refs.editorCanvas;
+            const node =
+                canvas && id
+                    ? canvas.querySelector('.eko-sampa-editor__element[data-element-id="' + String(id).replace(/"/g, '') + '"]')
+                    : null;
+            const r = node ? node.getBoundingClientRect() : null;
+            this.lastSession.width_after = r ? r.width : null;
+            this.lastSession.height_after = r ? r.height : null;
+            this.lastSession.layout_shift_detected =
+                this.lastSession.width_before != null &&
+                r &&
+                (Math.abs(r.width - this.lastSession.width_before) > 0.75 ||
+                    Math.abs(r.height - (this.lastSession.height_before || 0)) > 0.75);
+            this.lastSession.width_before_after = {
+                w0: this.lastSession.width_before,
+                w1: this.lastSession.width_after,
+                h0: this.lastSession.height_before,
+                h1: this.lastSession.height_after,
+            };
+        },
+
+        /**
+         * Compare textarea vs span metrics while inline editor is open.
+         *
+         * @param {Document|Element} [root]
+         * @returns {object}
+         */
+        compareMetrics(root) {
+            const scope = root && root.querySelector ? root : document;
+            const ta = scope.querySelector('#eko-inline-edit');
+            if (!ta || ta.tagName !== 'TEXTAREA') {
+                return { active: false, message: 'Inline textarea not in DOM (open double-click edit first).' };
+            }
+            const host = ta.closest('.eko-sampa-editor__element');
+            const span = host ? host.querySelector('.eko-sampa-editor__inline-hit span') : null;
+            if (!span) {
+                return { active: true, message: 'Span sibling not found', textarea_found: true };
+            }
+            const cta = window.getComputedStyle(ta);
+            const csp = window.getComputedStyle(span);
+            const keys = [
+                'fontFamily',
+                'fontSize',
+                'lineHeight',
+                'letterSpacing',
+                'whiteSpace',
+                'paddingTop',
+                'paddingRight',
+                'paddingBottom',
+                'paddingLeft',
+                'textAlign',
+                'fontWeight',
+                'fontStyle',
+            ];
+            const drift = [];
+            keys.forEach((k) => {
+                const a = String(cta[k] || '');
+                const b = String(csp[k] || '');
+                if (a !== b) {
+                    drift.push({ key: k, textarea: a, span: b });
+                }
+            });
+            const tw = String(ta.style.transform || cta.transform || '');
+            const sw = String(span.style.transform || csp.transform || '');
+            const transformDrift = tw !== sw && (tw !== 'none' || sw !== 'none');
+            const taLines = String(ta.value || '').split(/\r\n|\r|\n/).length;
+            const spLines = String(span.textContent || '').split(/\r\n|\r|\n/).length;
+            const lineCountMismatch = taLines !== spLines;
+            const wrapDrift = Math.abs((ta.scrollHeight || 0) - (span.scrollHeight || 0)) > 3;
+            const fontMetricDrift = drift.length > 0;
+            const tr = ta.getBoundingClientRect();
+            const hr = host ? host.getBoundingClientRect() : null;
+            const layoutShift =
+                hr && (Math.abs(hr.width - tr.width) > 1.5 || Math.abs(hr.height - tr.height) > 1.5);
+            const fontSwap =
+                drift.some((d) => d.key === 'fontFamily' || d.key === 'fontSize' || d.key === 'lineHeight') || false;
+            if (this.lastSession) {
+                this.lastSession.font_swap_detected = fontSwap;
+            }
+            return {
+                active: true,
+                font_metric_drift: fontMetricDrift,
+                wrapping_drift: wrapDrift,
+                line_count_mismatch: lineCountMismatch,
+                line_counts: { textarea: taLines, span: spLines },
+                transform_drift: transformDrift,
+                layout_shift_suspected: !!layoutShift,
+                drift_keys: drift,
+            };
+        },
+    };
+
+    function isVisualRegressionDebug() {
+        try {
+            if (typeof URLSearchParams === 'undefined' || typeof location === 'undefined' || !location.search) {
+                return false;
+            }
+            return new URLSearchParams(location.search).get('visual_regression_debug') === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    window.__ekoVisualRegressionDebug = {
+        enabled: isVisualRegressionDebug(),
+        /**
+         * @param {object} [opts] { root?: Element, editorState?: object }
+         */
+        dump(opts) {
+            if (!this.enabled) {
+                return {
+                    enabled: false,
+                    hint: 'Add ?visual_regression_debug=1 to the editor URL, then call __ekoVisualRegressionDebug.dump({ editorState: Alpine.$data(document.querySelector("#eko-sampa-editor")) }).',
+                };
+            }
+            const o = opts || {};
+            const root = o.root || document;
+            const st = o.editorState || null;
+            const layers = window.ekoLayerDiagnostics.collect(root);
+            const validation = window.ekoLayerDiagnostics.validate(root, st);
+            const bounds = window.ekoVisualBoxDiagnostics.collect(root);
+            const zMap = (layers.elements || []).map((row) => ({
+                id: row.id,
+                layer_index: row.layer_index,
+                z: row.computed_z_index,
+            }));
+            const textMetrics =
+                typeof window.ekoTextEditDiagnostics.compareMetrics === 'function'
+                    ? window.ekoTextEditDiagnostics.compareMetrics(root)
+                    : null;
+            const editing = textMetrics && textMetrics.active ? textMetrics : null;
+            return {
+                enabled: true,
+                layer_stack: layers,
+                layer_validation: validation,
+                render_bounds: bounds,
+                overflow_clipping: bounds,
+                z_index_map: zMap,
+                editing_overlay_metrics: editing,
+                last_text_session: window.ekoTextEditDiagnostics.lastSession,
+            };
+        },
+    };
+
+    if (window.__ekoVisualRegressionDebug.enabled) {
+        try {
+            // eslint-disable-next-line no-console
+            console.info('[Eko] visual_regression_debug=1 — use window.__ekoVisualRegressionDebug.dump({ editorState: <Alpine $data> })');
+        } catch (e) {
+            void e;
+        }
+    }
+})();
 
 // Listener must exist before Alpine starts — enforced in PHP enqueue order, not script deps on Alpine.
 document.addEventListener('alpine:init', () => {

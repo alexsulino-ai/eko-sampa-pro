@@ -61,6 +61,6 @@ Se `failed_at === service_not_visible_for_order` e `service_exists === false`, m
 
 - Se `completed` + snapshot válido → `render_source: completed_snapshot`
 - Caso contrário → `live_template` ou `live_template_pre_snapshot_fallback`
-- Campo **`operational_meta`**: `{ order_id, order_title, status }` — só para cabeçalho operacional na UI; não faz parte do payload do canvas.
+- Campo **`operational_meta`**: `{ order_id, order_title, status }` — só para cabeçalho operacional na UI; não faz parte do payload do canvas. Na rota **`/eko-sampa_print/`**, o mesmo tipo de metadado no HTML **não** é enviado para papel/PDF — ver [../architecture/print-isolation.md](../architecture/print-isolation.md).
 
 Ver [../tutorials/create-order-step-by-step.md](../tutorials/create-order-step-by-step.md) e [../storage/storage-architecture.md](../storage/storage-architecture.md).

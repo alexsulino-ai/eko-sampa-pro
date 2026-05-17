@@ -135,6 +135,8 @@ final class Eko_Sampa_Database_Integrity {
 
         $report['orders_operational_title'] = $this->orders_order_title_metrics();
 
+        $report['snapshot_operational_consistency'] = $this->snapshot_operational_consistency();
+
         $report['orphans']['templates_missing_service'] = $this->find_templates_missing_service();
         $report['orphans']['templates_missing_client']  = $this->find_templates_missing_client();
         $report['orphans']['orders_missing_service']    = $this->find_orders_missing_service();
@@ -362,44 +364,236 @@ final class Eko_Sampa_Database_Integrity {
     }
 
     /**
-     * Operational order title column (DB 1.0.7+): presence and fill rate for diagnostics JSON.
+     * Operational order title: column presence, search strategy, index, title hygiene (diagnostics JSON).
      *
      * @return array<string, mixed>
      */
     private function orders_order_title_metrics(): array {
         global $wpdb;
 
+        $base = [
+            'search_strategy'          => 'like_contains',
+            'estimated_scalability'    => 'medium_table_ok_large_needs_fulltext_or_elasticsearch',
+            'recommended_index'        => 'secondary btree on order_title (prefix 191 utf8mb4); migrate 1.0.8',
+            'missing_index_warning'    => false,
+            'order_title_index_found'  => false,
+            'duplicate_titles_rows'    => null,
+            'completed_without_title'  => null,
+            'invalid_unicode_titles'   => null,
+            'oversized_titles'         => null,
+            'titles_needing_normalization_sample' => null,
+            'normalization_sample_size'=> 0,
+        ];
+
         if (! $this->database->table_exists_for_suffix('eko_sampa_orders')) {
-            return [
-                'table_exists'         => false,
-                'column_present'      => false,
-                'rows_without_title'  => null,
-                'readiness'           => 'no_table',
-            ];
+            return array_merge(
+                $base,
+                [
+                    'table_exists'        => false,
+                    'column_present'      => false,
+                    'rows_without_title'  => null,
+                    'readiness'           => 'no_table',
+                ]
+            );
         }
 
         $cols = $this->column_presence_report('eko_sampa_orders', ['order_title']);
-        $have  = ! empty($cols['order_title']);
+        $have = ! empty($cols['order_title']);
         if (! $have) {
-            return [
-                'table_exists'        => true,
-                'column_present'      => false,
-                'rows_without_title'  => null,
-                'readiness'           => 'migration_required',
-                'expected_db_version' => '1.0.7',
-            ];
+            return array_merge(
+                $base,
+                [
+                    'table_exists'        => true,
+                    'column_present'      => false,
+                    'rows_without_title'  => null,
+                    'readiness'           => 'migration_required',
+                    'expected_db_version' => '1.0.7',
+                    'missing_index_warning' => true,
+                ]
+            );
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_orders';
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $n = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE `order_title` IS NULL OR `order_title` = ''");
+
+        $index_found = false;
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $indexes = $wpdb->get_results("SHOW INDEX FROM `{$table}`", ARRAY_A);
+        if (is_array($indexes)) {
+            foreach ($indexes as $ix) {
+                if (! is_array($ix)) {
+                    continue;
+                }
+                $col = isset($ix['Column_name']) ? strtolower((string) $ix['Column_name']) : '';
+                $seq = isset($ix['Seq_in_index']) ? (int) $ix['Seq_in_index'] : 0;
+                if ($col === 'order_title' && $seq === 1) {
+                    $index_found = true;
+                    break;
+                }
+            }
+        }
+
+        $dup_rows = null;
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $dup = $wpdb->get_var(
+            "SELECT COUNT(*) FROM `{$table}` o INNER JOIN (
+                SELECT order_title FROM `{$table}`
+                WHERE order_title IS NOT NULL AND order_title <> ''
+                GROUP BY order_title HAVING COUNT(*) > 1
+            ) d ON o.order_title = d.order_title"
+        );
+        if (is_numeric($dup)) {
+            $dup_rows = (int) $dup;
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $completed_no = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM `{$table}` WHERE status = 'completed' AND (`order_title` IS NULL OR `order_title` = '')"
+        );
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $oversized = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM `{$table}` WHERE `order_title` IS NOT NULL AND CHAR_LENGTH(`order_title`) > 255"
+        );
+
+        $invalid_utf8 = 0;
+        $norm_drift   = 0;
+        $sample_size  = 800;
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $sample = $wpdb->get_results(
+            "SELECT order_title FROM `{$table}` WHERE order_title IS NOT NULL AND order_title <> '' LIMIT {$sample_size}",
+            ARRAY_A
+        );
+        if (is_array($sample)) {
+            foreach ($sample as $row) {
+                if (! is_array($row) || ! isset($row['order_title']) || ! is_string($row['order_title'])) {
+                    continue;
+                }
+                $t = $row['order_title'];
+                if (function_exists('mb_check_encoding') && ! mb_check_encoding($t, 'UTF-8')) {
+                    ++$invalid_utf8;
+                }
+                $norm = Eko_Sampa_Order::normalize_order_title_operational($t);
+                if ($norm !== $t) {
+                    ++$norm_drift;
+                }
+            }
+        }
+
+        $missing_index = ! $index_found;
+
+        return array_merge(
+            $base,
+            [
+                'table_exists'                         => true,
+                'column_present'                       => true,
+                'rows_without_title'                   => $n,
+                'readiness'                            => 'ok',
+                'missing_index_warning'                => $missing_index,
+                'order_title_index_found'              => $index_found,
+                'duplicate_titles_rows'                => $dup_rows,
+                'completed_without_title'              => $completed_no,
+                'invalid_unicode_titles'               => $invalid_utf8,
+                'oversized_titles'                     => $oversized,
+                'titles_needing_normalization_sample'  => $norm_drift,
+                'normalization_sample_size'            => is_array($sample) ? count($sample) : 0,
+                'normalized_title_changes'             => 'sampled_vs_normalize_order_title_operational',
+            ]
+        );
+    }
+
+    /**
+     * Read-only: completed snapshots vs operational metadata contract (no writes).
+     *
+     * @return array<string, mixed>
+     */
+    private function snapshot_operational_consistency(): array {
+        global $wpdb;
+
+        $out = [
+            'checked_snapshots'                      => 0,
+            'order_json_missing'                     => 0,
+            'order_json_parse_error'                 => 0,
+            'manifest_order_id_mismatch'             => 0,
+            'legacy_manifest_without_order_title_key'=> 0,
+            'note'                                   => 'Snapshots are immutable; missing order_title in order.json indicates snapshot written before plugin stored operational titles.',
+        ];
+
+        if (! $this->database->table_exists_for_suffix('eko_sampa_orders')
+            || ! class_exists('Eko_Sampa_Order_Completed_Snapshot', false)
+            || ! class_exists('Eko_Sampa_Storage_Manager', false)) {
+            $out['readiness'] = 'skipped';
+
+            return $out;
         }
 
         $table = $wpdb->prefix . 'eko_sampa_orders';
         // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $n = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE `order_title` IS NULL OR `order_title` = ''");
+        $rows = $wpdb->get_results(
+            "SELECT id, user_id FROM `{$table}` WHERE status = 'completed' ORDER BY id DESC LIMIT 30",
+            ARRAY_A
+        );
+        if (! is_array($rows)) {
+            return $out;
+        }
 
-        return [
-            'table_exists'        => true,
-            'column_present'      => true,
-            'rows_without_title'  => $n,
-            'readiness'           => 'ok',
-        ];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $oid = (int) ( $row['id'] ?? 0 );
+            $uid = (int) ( $row['user_id'] ?? 0 );
+            if ($oid <= 0 || $uid <= 0) {
+                continue;
+            }
+            if (! Eko_Sampa_Order_Completed_Snapshot::is_ready($uid, $oid)) {
+                continue;
+            }
+
+            ++$out['checked_snapshots'];
+
+            $dir = Eko_Sampa_Storage_Manager::completed_order_dir_abs($uid, $oid);
+            if ($dir === '') {
+                ++$out['order_json_missing'];
+
+                continue;
+            }
+
+            $path = trailingslashit($dir) . 'order.json';
+            if (! is_readable($path)) {
+                ++$out['order_json_missing'];
+
+                continue;
+            }
+
+            $raw = file_get_contents($path);
+            if (! is_string($raw) || $raw === '') {
+                ++$out['order_json_parse_error'];
+
+                continue;
+            }
+
+            $json = json_decode($raw, true);
+            if (JSON_ERROR_NONE !== json_last_error() || ! is_array($json)) {
+                ++$out['order_json_parse_error'];
+
+                continue;
+            }
+
+            if ((int) ( $json['order_id'] ?? 0 ) !== $oid) {
+                ++$out['manifest_order_id_mismatch'];
+            }
+
+            if (! array_key_exists('order_title', $json)) {
+                ++$out['legacy_manifest_without_order_title_key'];
+            }
+        }
+
+        $out['readiness'] = 'ok';
+
+        return $out;
     }
 
     /**

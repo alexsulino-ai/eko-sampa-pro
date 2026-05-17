@@ -44,6 +44,7 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [schema.md](database/schema.md) — tabelas, colunas, legado `servico_id` / `cliente_id`
 - [templates-schema.md](schema/templates-schema.md) — contrato canónico vs colunas legadas + bridge/repair
 - [orders-schema.md](schema/orders-schema.md) — `order_title` (rótulo operacional da OS)
+- [print-isolation.md](architecture/print-isolation.md) — UI operacional vs impressão física/PDF
 - [ensure-schema.md](database/ensure-schema.md) — `ensure_schema()`, alignment, `row_exists()`
 - [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.6
 - [integrity.md](database/integrity.md) — órfãos, repair, opções WP

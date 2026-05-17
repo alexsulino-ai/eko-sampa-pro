@@ -92,7 +92,7 @@ Thumbnail pipeline: rotas REST `/templates/{id}/thumbnail*` — ver código `cla
 | service_id, template_id | FKs lógicas |
 | woo_order_id | bridge WC |
 | status | `pending`, `in_progress`, `print_queue`, `completed` |
-| order_title | opcional; rótulo operacional (fila de produção); **≠** `templates.nome`; ver [../schema/orders-schema.md](../schema/orders-schema.md) |
+| order_title | opcional; rótulo operacional (fila de produção); **≠** `templates.nome`; ver [../schema/orders-schema.md](../schema/orders-schema.md); índice secundário (DB 1.0.8) |
 | dynamic_data_json | dados do formulário |
 | service_fields_snapshot_json | opcional (migração 1.0.3+) |
 | print_ready | |

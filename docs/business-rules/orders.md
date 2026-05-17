@@ -87,6 +87,14 @@ Ver [../troubleshooting/create-order-400.md](../troubleshooting/create-order-400
 - **Imutabilidade**: pedidos em `completed` **não** aceitam `update` via REST/model (resposta `409` `eko_sampa_order_immutable`).
 - **Nova revisão de produção:** `POST /orders/{id}/duplicate-revision` — só a partir de `completed`; cria nova OS `pending` (`duplicate_as_revision`).
 - **Render:** `GET /orders/{id}/render` usa snapshot quando `Order_Completed_Snapshot::is_ready`; pedidos `completed` legados sem snapshot usam template vivo com `render_source: live_template_pre_snapshot_fallback` (compatibilidade).
-- A resposta de render inclui `operational_meta` (`order_id`, `order_title`, `status`) — metadado para UI de impressão; **não** faz parte do HTML da arte.
+- A resposta de render inclui `operational_meta` — ver secção **Impressão** abaixo e [../architecture/print-isolation.md](../architecture/print-isolation.md).
 
 Ver [../storage/storage-architecture.md](../storage/storage-architecture.md).
+
+## Impressão (`/eko-sampa_print/{id}/`)
+
+- O bloco operacional (Order #, título, estado) existe **só para UI** no ecrã.
+- Em **`@media print`**, esse bloco (e o separador antes da arte) é removido por CSS (`print:hidden` + regras explícitas) para o spool/PDF conter **apenas** a superfície do template.
+- Isto é independente do campo `operational_meta` na resposta JSON de `GET /orders/{id}/render` (útil para outras UIs; também não entra no HTML da arte).
+
+Ver [../architecture/print-isolation.md](../architecture/print-isolation.md).

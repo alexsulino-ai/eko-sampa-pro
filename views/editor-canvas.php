@@ -34,6 +34,8 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addRectangle()"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-800 hover:bg-indigo-100" @click="openGallery()"><?php echo esc_html__('Gallery', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100" @click="deleteSelected()"><?php echo esc_html__('Delete', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="bringForward()" title="<?php echo esc_attr__('Move selected one step toward front (same as dragging up in the layer list)', 'eko-sampa'); ?>"><?php echo esc_html__('Bring forward', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="sendBackward()" title="<?php echo esc_attr__('Move selected one step toward back', 'eko-sampa'); ?>"><?php echo esc_html__('Send backward', 'eko-sampa'); ?></button>
             </div>
         </template>
         <template x-if="!previewOnly">
@@ -78,26 +80,23 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                             role="application"
                             @mousedown.self="clearSelectionIfCanvas($event)"
                         >
-                            <template x-for="item in elements" :key="item.id">
+                            <template x-for="(item, idx) in elements" :key="item.id">
                                 <div
                                     class="eko-sampa-editor__element group absolute touch-none select-none rounded-[1px]"
                                     :class="{
-                                        'z-50 shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
-                                        'z-30 shadow-lg ring-2 ring-indigo-500': selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
-                                        'z-30 ring-2 ring-indigo-400': selectedId === item.id && (inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
-                                        'z-10 hover:z-20 hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
+                                        'shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
+                                        'shadow-lg ring-2 ring-indigo-500': selectedId === item.id && !(inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
+                                        'ring-2 ring-indigo-400': selectedId === item.id && (inlineOpen && inlineTargetId === item.id) && draggingId !== item.id,
+                                        'hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
                                     }"
                                     :data-element-id="item.id"
+                                    :data-layer-index="idx"
                                     :style="elementPositionStyle(item)"
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent="(item.type === 'text' || item.type === 'placeholder') && openInlineEdit(item)"
                                 >
                                     <template x-if="item.type === 'image'">
-                                        <div
-                                            class="absolute inset-0 cursor-pointer"
-                                            :style="elementFrameCss(item)"
-                                            @click.stop="selectedId === item.id ? toggleImageFit(item) : select(item.id)"
-                                        >
+                                        <div class="absolute inset-0 cursor-pointer" :style="elementFrameCss(item)" @click.stop="select(item.id)">
                                             <img class="pointer-events-none h-full w-full max-h-full max-w-full" :style="imageImgCss(item)" :src="item.src || item.content" alt="" />
                                         </div>
                                     </template>
@@ -112,8 +111,9 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                                             <template x-if="inlineOpen && inlineTargetId === item.id">
                                                 <textarea
                                                     id="eko-inline-edit"
-                                                    class="eko-sampa-editor__inline-field pointer-events-auto absolute inset-0 z-[45] box-border resize-none rounded-sm border border-indigo-400/80 bg-white/95 p-1.5 text-sm text-slate-900 shadow-inner outline-none ring-1 ring-indigo-300/40"
-                                                    rows="3"
+                                                    class="eko-sampa-editor__inline-field pointer-events-auto absolute inset-0 box-border ring-1 ring-indigo-300/40 outline-none"
+                                                    rows="1"
+                                                    :style="inlineEditorTextareaCss(item)"
                                                     x-model="inlineValue"
                                                     placeholder="<?php echo esc_attr__('Ctrl+Enter to save · Line breaks allowed', 'eko-sampa'); ?>"
                                                     @mousedown.stop
@@ -168,7 +168,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 </button>
             </div>
             <ul class="max-h-48 overflow-auto p-2 text-sm lg:max-h-64" x-ref="layerList" x-show="!editorSidebarCollapsed">
-                <template x-for="(item, idx) in elements" :key="item.id">
+                <template x-for="(item, idx) in [...elements].reverse()" :key="item.id">
                     <li
                         class="mb-1 flex cursor-grab items-center gap-2 rounded border px-2 py-1 transition-colors"
                         :class="selectedId === item.id ? 'border-indigo-200 bg-indigo-50/90 ring-1 ring-indigo-200' : 'border-slate-100 bg-slate-50 hover:border-slate-200 hover:bg-slate-100'"
@@ -329,7 +329,7 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
             <template x-if="selectedElement && selectedElement.type === 'image'">
                     <div class="space-y-3">
                         <p class="text-[11px] font-medium text-slate-600"><?php echo esc_html__('Image', 'eko-sampa'); ?></p>
-                        <p class="text-[10px] leading-snug text-slate-500"><?php echo esc_html__('Tip: with the image selected, click it again to switch between cover (default) and contain.', 'eko-sampa'); ?></p>
+                        <p class="text-[10px] leading-snug text-slate-500"><?php echo esc_html__('Object fit: use Contain / Cover below (default is cover).', 'eko-sampa'); ?></p>
                         <label class="flex items-center gap-2">
                             <span class="text-slate-500"><?php echo esc_html__('Opacity', 'eko-sampa'); ?></span>
                             <input class="flex-1 accent-indigo-600" type="range" min="0.1" max="1" step="0.05" x-model.number="selectedElement.styles.opacity" />

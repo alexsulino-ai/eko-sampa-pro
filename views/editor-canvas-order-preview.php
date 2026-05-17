@@ -54,15 +54,16 @@ if (! defined('ABSPATH')) {
                             role="application"
                             @mousedown.self="clearSelectionIfCanvas($event)"
                         >
-                            <template x-for="item in elements" :key="item.id">
+                            <template x-for="(item, idx) in elements" :key="item.id">
                                 <div
                                     class="eko-sampa-editor__element group absolute touch-none select-none rounded-[1px]"
                                     :class="{
-                                        'z-50 shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
-                                        'z-30 shadow-lg ring-2 ring-indigo-500': selectedId === item.id && draggingId !== item.id,
-                                        'z-10 hover:z-20 hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
+                                        'shadow-xl ring-2 ring-indigo-500': draggingId === item.id,
+                                        'shadow-lg ring-2 ring-indigo-500': selectedId === item.id && draggingId !== item.id,
+                                        'hover:shadow-md hover:ring-1 hover:ring-slate-300/90': selectedId !== item.id && draggingId !== item.id,
                                     }"
                                     :data-element-id="item.id"
+                                    :data-layer-index="idx"
                                     :style="elementPositionStyle(item)"
                                     @mousedown="select(item.id)"
                                     @dblclick.prevent

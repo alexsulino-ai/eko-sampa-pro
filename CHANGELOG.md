@@ -6,6 +6,24 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.7.7] — 2026-05-16
+
+### Corrigido / produção
+
+- **Impressão:** metadados operacionais na página `eko-sampa_print` deixam de ir para papel/PDF — `print:hidden` + `@media print` explícito (`.eko-sampa-print-ui-only` / separador); superfície imprimível isolada (`.eko-sampa-print-surface`); `window.ekoSampaPrintIntegrity` para contrato de testes.
+- **`order_title`:** normalização reforçada (`normalize_order_title_operational`: invisíveis/zero-width, NBSP, colapso de espaços, UTF-8 truncado).
+
+### Adicionado
+
+- **DB 1.0.8:** índice `eko_sampa_orders_order_title` em `order_title(191)`.
+- **Diagnostics:** `orders_operational_title` expandido (estratégia de busca, índice, duplicados de texto, completed sem título, amostra normalização/UTF-8); `snapshot_operational_consistency` (somente leitura em `order.json`).
+
+### Documentação
+
+- `docs/architecture/print-isolation.md`; actualizações em `orders-schema`, `business-rules/orders`, `rest-api/orders`, `diagnostics/admin-tool`, `database/migrations`, `README`.
+
+---
+
 ## [1.7.6] — 2026-05-16
 
 ### Adicionado

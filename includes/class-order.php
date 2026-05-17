@@ -833,15 +833,32 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
-     * Operational label for production queue — never passed to {@see template_render_context()}.
+     * Operational title: normalize for storage / comparison (whitespace, invisible Unicode, length).
+     *
+     * Not used in {@see template_render_context()}; safe for queue labels only.
      */
-    private function sanitize_order_title_for_storage(mixed $value): ?string {
+    public static function normalize_order_title_operational(mixed $value): ?string {
         if ($value === null) {
             return null;
         }
 
         $s = is_string($value) ? wp_unslash($value) : (string) $value;
-        $s = trim(wp_check_invalid_utf8($s, true));
+        $s = wp_check_invalid_utf8($s, true);
+
+        $stripped = preg_replace(
+            '/[\x{0000}-\x{0008}\x{000B}\x{000C}\x{000E}-\x{001F}\x{007F}\x{00AD}\x{034F}\x{061C}\x{200B}-\x{200F}\x{2028}\x{2029}\x{2060}-\x{2064}\x{FEFF}]/u',
+            '',
+            $s
+        );
+        $s = is_string($stripped) ? $stripped : $s;
+
+        $s = str_replace(["\xC2\xA0", "\xE2\x80\xAF"], ' ', $s);
+
+        $s = preg_replace('/\R+/u', ' ', $s);
+        $s = is_string($s) ? $s : '';
+        $s = preg_replace('/\s+/u', ' ', $s);
+        $s = is_string($s) ? trim($s) : '';
+
         if ($s === '') {
             return null;
         }
@@ -856,15 +873,20 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Operational label for production queue — never passed to {@see template_render_context()}.
+     */
+    private function sanitize_order_title_for_storage(mixed $value): ?string {
+        return self::normalize_order_title_operational($value);
+    }
+
+    /**
      * Duplicate: same pattern as templates (`nome` + translated " (Copy)"), bounded by varchar(255).
      *
      * @param array<string, mixed> $source
      */
     private function build_duplicate_order_title(array $source): string {
-        $src = '';
-        if (isset($source['order_title']) && is_string($source['order_title'])) {
-            $src = trim(wp_check_invalid_utf8($source['order_title'], true));
-        }
+        $src = self::normalize_order_title_operational($source['order_title'] ?? null);
+        $src = $src !== null && $src !== '' ? $src : '';
 
         $suffix    = ' (' . __('Copy', 'eko-sampa') . ')';
         $suffixLen = function_exists('mb_strlen') ? mb_strlen($suffix, 'UTF-8') : strlen($suffix);

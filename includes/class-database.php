@@ -186,6 +186,7 @@ final class Eko_Sampa_Database {
             '1.0.5' => [$this, 'migrate_to_1_0_5'],
             '1.0.6' => [$this, 'migrate_to_1_0_6'],
             '1.0.7' => [$this, 'migrate_to_1_0_7'],
+            '1.0.8' => [$this, 'migrate_to_1_0_8'],
         ];
     }
 
@@ -781,6 +782,46 @@ final class Eko_Sampa_Database {
 
         global $wpdb;
         $this->schema_align_orders($wpdb);
+    }
+
+    /**
+     * Orders: secondary index on `order_title` for listing / prefix-friendly lookups (LIKE 'x%' can use index).
+     */
+    private function migrate_to_1_0_8(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+        if (! $this->table_exists($wpdb, 'eko_sampa_orders')) {
+            return;
+        }
+
+        $table = $wpdb->prefix . 'eko_sampa_orders';
+        $have  = $this->table_column_set($wpdb, $table);
+        if (! isset($have['order_title'])) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $indexes = $wpdb->get_results("SHOW INDEX FROM `{$table}`", ARRAY_A);
+        if (! is_array($indexes)) {
+            return;
+        }
+
+        foreach ($indexes as $ix) {
+            if (! is_array($ix)) {
+                continue;
+            }
+            $col = isset($ix['Column_name']) ? strtolower((string) $ix['Column_name']) : '';
+            $seq = isset($ix['Seq_in_index']) ? (int) $ix['Seq_in_index'] : 0;
+            if ($col === 'order_title' && $seq === 1) {
+                return;
+            }
+        }
+
+        // Prefix 191: utf8mb4 max key length compatibility on older InnoDB.
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query("ALTER TABLE `{$table}` ADD INDEX eko_sampa_orders_order_title (`order_title`(191))");
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
     }
 
     /**

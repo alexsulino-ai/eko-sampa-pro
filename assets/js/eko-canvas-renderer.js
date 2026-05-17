@@ -308,6 +308,19 @@
         };
     }
 
+    /**
+     * Stacking order for sibling canvas elements. Must stay aligned with PHP
+     * {@see Eko_Sampa_Template_Renderer::render_element} (same base + stride).
+     * Index 0 = back, last index = front. Not persisted in json_data.
+     */
+    const STACK_Z_BASE = 10;
+    const STACK_Z_STRIDE = 4;
+
+    function stackZFromIndex(stackIndex) {
+        const i = Math.max(0, Math.floor(Number(stackIndex) || 0));
+        return STACK_Z_BASE + i * STACK_Z_STRIDE;
+    }
+
     function canvasSurfaceStyle(widthPx, heightPx, options) {
         const w = Math.max(1, Math.round(Number(widthPx) || 1));
         const h = Math.max(1, Math.round(Number(heightPx) || 1));
@@ -324,7 +337,7 @@
         return s;
     }
 
-    function elementPositionStyle(item) {
+    function elementPositionStyle(item, stackIndex) {
         if (!item || typeof item !== 'object') {
             return 'position:absolute;left:0;top:0;width:100px;height:40px;box-sizing:border-box;';
         }
@@ -336,7 +349,11 @@
         const top = Number.isFinite(y) ? y : 0;
         const width = Number.isFinite(w) ? w : 10;
         const height = Number.isFinite(h) ? h : 10;
-        return `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-sizing:border-box;`;
+        let out = `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;box-sizing:border-box;`;
+        if (stackIndex !== undefined && stackIndex !== null && Number.isFinite(Number(stackIndex))) {
+            out += `z-index:${stackZFromIndex(stackIndex)};`;
+        }
+        return out;
     }
 
     function elementFrameCss(item) {
@@ -354,6 +371,7 @@
         if (bw > 0 && bs !== 'none') {
             border = `${bw}px ${bs} ${bc}`;
         }
+        const overflowMode = t === 'text' || t === 'placeholder' ? 'visible' : 'hidden';
         const parts = [
             'position:absolute',
             'left:0',
@@ -367,7 +385,7 @@
             `box-shadow:${sh}`,
             `transform:rotate(${rot}deg)`,
             'transform-origin:center center',
-            'overflow:hidden',
+            `overflow:${overflowMode}`,
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact',
         ];
@@ -507,12 +525,12 @@
         }
     }
 
-    function buildElementHtml(item, options) {
+    function buildElementHtml(item, options, stackIndex) {
         if (!item || typeof item !== 'object') {
             return '';
         }
         const type = String(item.type || 'text');
-        const pos = elementPositionStyle(item);
+        const pos = elementPositionStyle(item, stackIndex);
         const frame = elementFrameCss(item);
         const forPrint = options && options.forPrint;
 
@@ -550,11 +568,15 @@
         const surface = canvasSurfaceStyle(widthPx, heightPx, { showGrid: showGrid, gridSize: options && options.gridSize });
         const list = Array.isArray(elements) ? elements : [];
         let inner = '';
-        list.forEach((el) => {
-            inner += buildElementHtml(el, {
-                forPrint: forPrint,
-                forThumbnail: options && options.forThumbnail,
-            });
+        list.forEach((el, i) => {
+            inner += buildElementHtml(
+                el,
+                {
+                    forPrint: forPrint,
+                    forThumbnail: options && options.forThumbnail,
+                },
+                i
+            );
         });
         return `<div class="eko-sampa-canvas" style="${surface}">${inner}</div>`;
     }
@@ -913,6 +935,9 @@
 
     const api = {
         RENDER_SCHEMA_VERSION: RENDER_SCHEMA_VERSION,
+        STACK_Z_BASE: STACK_Z_BASE,
+        STACK_Z_STRIDE: STACK_Z_STRIDE,
+        stackZFromIndex: stackZFromIndex,
         RenderTargets: RenderTargets,
         RenderLifecycle: RenderLifecycle,
         CanvasUnitSystem: CanvasUnitSystem,
