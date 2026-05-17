@@ -14,9 +14,11 @@ if (! defined('ABSPATH')) {
 final class Eko_Sampa_Order_Relations_Inspector extends Eko_Sampa_Entity_Relations_Inspector {
 
     /**
+     * Static entrypoint (cannot be named `inspect`: parent declares `inspect()` final).
+     *
      * @return array<string, mixed>
      */
-    public static function inspect(int $order_id): array {
+    public static function inspect_for(int $order_id): array {
         return (new self())->inspect($order_id);
     }
 

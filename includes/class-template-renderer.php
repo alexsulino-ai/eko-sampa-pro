@@ -193,7 +193,7 @@ final class Eko_Sampa_Template_Renderer {
             $zi
         );
 
-        $frame_css = $this->build_frame_css($styles, $type);
+        $frame_css = $this->build_frame_css($styles, $type, $for_print);
         $text_css  = $this->build_text_inner_css($styles, $for_print);
         $text_wrap = $this->build_text_vertical_wrap_css($styles);
 
@@ -239,7 +239,7 @@ final class Eko_Sampa_Template_Renderer {
      *
      * @param array<string, mixed> $styles
      */
-    private function build_frame_css(array $styles, string $type = ''): string {
+    private function build_frame_css(array $styles, string $type = '', bool $for_print = false): string {
         $opacity = isset($styles['opacity']) ? (float) $styles['opacity'] : 1.0;
         if ($opacity < 0.0) {
             $opacity = 0.0;
@@ -270,6 +270,9 @@ final class Eko_Sampa_Template_Renderer {
         }
 
         $overflow = 'hidden';
+        if (( $type === 'text' || $type === 'placeholder' ) && ! $for_print) {
+            $overflow = 'visible';
+        }
 
         $css = sprintf(
             'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:%s;',
@@ -368,10 +371,12 @@ final class Eko_Sampa_Template_Renderer {
             $tt = 'none';
         }
 
-        $overflow = $for_print ? 'hidden' : 'auto';
+        $overflow = $for_print ? 'hidden' : 'visible';
+        $max_h   = $for_print ? '100%' : 'none';
 
         return sprintf(
-            'flex:0 1 auto;max-height:100%%;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
+            'flex:0 1 auto;max-height:%s;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
+            $max_h,
             $ff,
             $fs,
             $fw,

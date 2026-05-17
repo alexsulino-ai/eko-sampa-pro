@@ -339,6 +339,7 @@ function ekoEditorCanvasFactory() {
                             }
                             this.bindInteract();
                             this.bindLayersSort();
+                            this.fitAllTextElementsHeightsToContent();
                         });
                     }, 120);
                     this.markUnsaved();
@@ -450,6 +451,9 @@ function ekoEditorCanvasFactory() {
                 this.lastOkFingerprint = this.buildSaveFingerprint();
                 this.hasUnsavedChanges = false;
                 this.saveResult = '';
+                this.$nextTick(() => {
+                    this.$nextTick(() => this.fitAllTextElementsHeightsToContent());
+                });
                 return;
             }
             try {
@@ -491,6 +495,9 @@ function ekoEditorCanvasFactory() {
                 if (loaded.ok) {
                     this.saveResult = '';
                 }
+                this.$nextTick(() => {
+                    this.$nextTick(() => this.fitAllTextElementsHeightsToContent());
+                });
             } catch (e) {
                 this.syncLogicalCanvasSizeFromMm();
                 this.elements = this.defaultElements();
@@ -499,6 +506,9 @@ function ekoEditorCanvasFactory() {
                 this.lastOkFingerprint = this.buildSaveFingerprint();
                 this.hasUnsavedChanges = false;
                 this.saveResult = String(e.message || e);
+                this.$nextTick(() => {
+                    this.$nextTick(() => this.fitAllTextElementsHeightsToContent());
+                });
             }
         },
 
@@ -1136,6 +1146,9 @@ function ekoEditorCanvasFactory() {
             }
             const opts = options && typeof options === 'object' ? options : {};
             const omitRotate = !!opts.omitRotate;
+            const forPrint = !!opts.forPrint;
+            const forThumbnail = !!opts.forThumbnail;
+            const clipLikePrint = forPrint && !forThumbnail;
             const t = item && item.type;
             const st = item.styles || {};
             const op = this._clampNum(st.opacity, 0, 1, 1);
@@ -1149,6 +1162,8 @@ function ekoEditorCanvasFactory() {
             if (bw > 0 && bs !== 'none') {
                 border = `${bw}px ${bs} ${bc}`;
             }
+            const isTextish = t === 'text' || t === 'placeholder';
+            const overflowMode = isTextish && !clipLikePrint ? 'visible' : 'hidden';
             const parts = [
                 'position:absolute',
                 'left:0',
@@ -1160,7 +1175,7 @@ function ekoEditorCanvasFactory() {
                 `border-radius:${br}px`,
                 `border:${border}`,
                 `box-shadow:${sh}`,
-                'overflow:hidden',
+                `overflow:${overflowMode}`,
             ];
             if (!omitRotate) {
                 parts.push(`transform:rotate(${rot}deg)`, 'transform-origin:center center');
@@ -1202,7 +1217,7 @@ function ekoEditorCanvasFactory() {
             }
             const R = typeof window !== 'undefined' ? window.EkoCanvasRenderer : null;
             if (R && typeof R.textContentCss === 'function') {
-                return R.textContentCss(item, { forPrint: !!this.previewOnly });
+                return R.textContentCss(item, { forPrint: false, forThumbnail: false });
             }
             const st = item.styles || {};
             const d = this.defaultTextStyles();
@@ -1217,10 +1232,11 @@ function ekoEditorCanvasFactory() {
             const lineH = Number.isFinite(lh) && lh > 0 && lh <= 4 ? String(lh) : String(d.lineHeight);
             const ls = this._clampNum(st.letterSpacing, -20, 40, 0);
             const tt = String(st.textTransform || d.textTransform);
-            const overflow = this.previewOnly ? 'hidden' : 'auto';
+            /** Never `auto` here — inner scrollbar inside the text element (matches EkoCanvasRenderer). */
+            const overflow = 'visible';
             return [
                 'flex:0 1 auto',
-                'max-height:100%',
+                'max-height:none',
                 'min-width:0',
                 'min-height:0',
                 'width:100%',
@@ -1288,6 +1304,12 @@ function ekoEditorCanvasFactory() {
             this.inlineTargetId = null;
             this.inlineValue = '';
             this.inlineSnapshot = '';
+            if (el && (el.type === 'text' || el.type === 'placeholder')) {
+                const id = el.id;
+                this.$nextTick(() => {
+                    this.$nextTick(() => this.fitTextElementHeightToContent(id));
+                });
+            }
         },
 
         sanitizeNumber(v, fallback) {
@@ -1351,6 +1373,85 @@ function ekoEditorCanvasFactory() {
             item.height = Math.min(item.height, this.canvasHeight - item.y);
             item.width = Math.max(this.minElementWidth, item.width);
             item.height = Math.max(this.minElementHeight, item.height);
+        },
+
+        /**
+         * If the rendered text/textarea extends above or below the element host, grow `item.height`
+         * so the frame no longer clips (line breaks, large font, letter-spacing). Only increases height.
+         *
+         * @param {string|null|undefined} elementId
+         */
+        fitTextElementHeightToContent(elementId) {
+            if (this.previewOnly || elementId == null || String(elementId) === '') {
+                return;
+            }
+            const item = this.elements.find((x) => x && String(x.id) === String(elementId));
+            if (!item || (item.type !== 'text' && item.type !== 'placeholder')) {
+                return;
+            }
+            const root = this.$refs && this.$refs.editorCanvas;
+            if (!root || !root.querySelector) {
+                return;
+            }
+            const esc =
+                typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+                    ? CSS.escape(String(elementId))
+                    : String(elementId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const host = root.querySelector('[data-element-id="' + esc + '"]');
+            if (!host || host.nodeType !== 1) {
+                return;
+            }
+            const hit = host.querySelector('.eko-sampa-editor__inline-hit');
+            if (!hit) {
+                return;
+            }
+            const wrap = hit.querySelector(':scope > div');
+            const span = wrap ? wrap.querySelector('span') : null;
+            const ta = hit.querySelector('textarea.eko-sampa-editor__inline-field');
+            let node = null;
+            if (span && span.nodeType === 1) {
+                try {
+                    if (String(window.getComputedStyle(span).display || '').toLowerCase() !== 'none') {
+                        node = span;
+                    }
+                } catch (e) {
+                    void e;
+                }
+            }
+            if (!node && ta && ta.nodeType === 1) {
+                node = ta;
+            }
+            if (!node) {
+                return;
+            }
+            void host.offsetHeight;
+            const hr = host.getBoundingClientRect();
+            const sr = node.getBoundingClientRect();
+            const topOver = Math.max(0, Math.ceil(hr.top - sr.top));
+            const bottomOver = Math.max(0, Math.ceil(sr.bottom - hr.bottom));
+            if (topOver === 0 && bottomOver === 0) {
+                return;
+            }
+            const nh = Math.ceil(hr.height + topOver + bottomOver);
+            const prev = Number(item.height);
+            if (!Number.isFinite(prev)) {
+                return;
+            }
+            item.height = Math.max(prev, nh);
+            this.clampElementInCanvas(item);
+        },
+
+        /** @see fitTextElementHeightToContent */
+        fitAllTextElementsHeightsToContent() {
+            if (this.previewOnly || !Array.isArray(this.elements)) {
+                return;
+            }
+            for (let i = 0; i < this.elements.length; i++) {
+                const el = this.elements[i];
+                if (el && (el.type === 'text' || el.type === 'placeholder')) {
+                    this.fitTextElementHeightToContent(el.id);
+                }
+            }
         },
 
         /**
@@ -2195,6 +2296,11 @@ function ekoEditorCanvasFactory() {
                                 self.snapBox(item);
                                 self.clampElementInCanvas(item);
                                 self.triggerSnapFlash();
+                                if (item.type === 'text' || item.type === 'placeholder') {
+                                    self.$nextTick(() => {
+                                        self.$nextTick(() => self.fitTextElementHeightToContent(id));
+                                    });
+                                }
                                 self.$nextTick(() => {
                                     self.bindInteract();
                                     self.bindLayersSort();

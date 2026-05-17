@@ -64,7 +64,7 @@ function eko_sampa_safe_delete_template(int $template_id, array $options = []): 
         ];
     }
 
-    $inspect = Eko_Sampa_Template_Relations_Inspector::inspect($template_id);
+    $inspect = Eko_Sampa_Template_Relations_Inspector::inspect_for($template_id);
     if ($strict && ( new Eko_Sampa_Template_Relations_Inspector() )->delete_readiness($template_id)['has_blockers_for_strict_delete']) {
         return [
             'ok'      => false,
@@ -156,7 +156,7 @@ function eko_sampa_safe_delete_order(int $order_id, array $options = []): array 
         ];
     }
 
-    $inspect = Eko_Sampa_Order_Relations_Inspector::inspect($order_id);
+    $inspect = Eko_Sampa_Order_Relations_Inspector::inspect_for($order_id);
 
     $ok = $ord->delete($order_id);
     if (! $ok) {

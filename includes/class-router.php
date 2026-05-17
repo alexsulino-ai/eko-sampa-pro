@@ -129,7 +129,7 @@ final class Eko_Sampa_Router {
             } elseif ($action === 'inspect_service_delete') {
                 $inspect_sid = absint((int) wp_unslash($_POST['service_id'] ?? 0));
                 if ($inspect_sid > 0) {
-                    $inspect_snapshot = Eko_Sampa_Service_Relations_Inspector::inspect($inspect_sid);
+                    $inspect_snapshot = Eko_Sampa_Service_Relations_Inspector::inspect_for($inspect_sid);
                     $notice           = __('Service delete inspection completed.', 'eko-sampa');
                 } else {
                     $notice = __('Enter a valid numeric service ID.', 'eko-sampa');

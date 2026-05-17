@@ -151,7 +151,7 @@ function eko_sampa_safe_delete_service(int $service_id, array $options = []): ar
     $row   = $model->get_row_by_id($id);
     if (! is_array($row)) {
         $debug['failed_at']  = 'service_row_missing';
-        $debug['inspect']    = Eko_Sampa_Service_Relations_Inspector::inspect($id);
+        $debug['inspect']    = Eko_Sampa_Service_Relations_Inspector::inspect_for($id);
         $audit['outcome']    = 'not_found';
         eko_sampa_append_service_delete_audit($audit + ['ok' => false, 'code' => 'eko_sampa_not_found']);
 
@@ -166,7 +166,7 @@ function eko_sampa_safe_delete_service(int $service_id, array $options = []): ar
 
     if (! $model->can_actor_mutate_existing_row($row)) {
         $debug['failed_at']           = 'forbidden_ownership';
-        $debug['inspect']             = Eko_Sampa_Service_Relations_Inspector::inspect($id);
+        $debug['inspect']             = Eko_Sampa_Service_Relations_Inspector::inspect_for($id);
         $debug['owner_user_id']       = (int) ( $row['user_id'] ?? 0 );
         $debug['current_user_id']    = get_current_user_id();
         $audit['outcome']             = 'forbidden';
@@ -182,7 +182,7 @@ function eko_sampa_safe_delete_service(int $service_id, array $options = []): ar
         ];
     }
 
-    $inspect = Eko_Sampa_Service_Relations_Inspector::inspect($id);
+    $inspect = Eko_Sampa_Service_Relations_Inspector::inspect_for($id);
     $debug['inspect'] = $inspect;
 
     $linked_total = (int) ( $inspect['templates_count'] ?? 0 )
@@ -217,7 +217,7 @@ function eko_sampa_safe_delete_service(int $service_id, array $options = []): ar
         $repairs                    = eko_sampa_repair_service_relations($id);
         $debug['repairs']           = $repairs;
         $audit['repairs_applied']   = $repairs;
-        $inspect                    = Eko_Sampa_Service_Relations_Inspector::inspect($id);
+        $inspect                    = Eko_Sampa_Service_Relations_Inspector::inspect_for($id);
         $debug['inspect_post_repair'] = $inspect;
     }
 

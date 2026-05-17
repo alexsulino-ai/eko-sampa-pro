@@ -451,6 +451,10 @@
     function elementFrameCss(item, options) {
         const opts = options && typeof options === 'object' ? options : {};
         const omitRotate = !!opts.omitRotate;
+        const forPrint = !!opts.forPrint;
+        const forThumbnail = !!opts.forThumbnail;
+        /** True only for imposition/PDF-style output — not browser editor, not raster thumbnails. */
+        const clipLikePrint = forPrint && !forThumbnail;
         const t = item && item.type;
         const rawSt = item && item.styles;
         const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
@@ -465,7 +469,8 @@
         if (bw > 0 && bs !== 'none') {
             border = `${bw}px ${bs} ${bc}`;
         }
-        const overflowMode = 'hidden';
+        const isTextish = t === 'text' || t === 'placeholder';
+        const overflowMode = isTextish && !clipLikePrint ? 'visible' : 'hidden';
         const parts = [
             'position:absolute',
             'left:0',
@@ -511,7 +516,9 @@
         const rawSt = item && item.styles;
         const st = rawSt && typeof rawSt === 'object' && !Array.isArray(rawSt) ? rawSt : {};
         const d = defaultTextStyles();
-        const forPrint = options && options.forPrint;
+        const forPrint = !!(options && options.forPrint);
+        const forThumbnail = !!(options && options.forThumbnail);
+        const clipLikePrint = forPrint && !forThumbnail;
         const ff = resolveFontFamily(st.fontFamily || d.fontFamily);
         const fs = Math.round(clampNum(st.fontSize, 6, 200, d.fontSize));
         const fw = String(st.fontWeight || d.fontWeight);
@@ -523,10 +530,12 @@
         const lineH = Number.isFinite(lh) && lh > 0 && lh <= 4 ? String(lh) : String(d.lineHeight);
         const ls = clampNum(st.letterSpacing, -20, 40, 0);
         const tt = String(st.textTransform || d.textTransform);
-        const overflow = forPrint ? 'hidden' : 'auto';
+        /** Never `auto` on this span — it creates an inner scrollbar inside the text box. */
+        const overflow = clipLikePrint ? 'hidden' : 'visible';
+        const maxHeight = clipLikePrint ? 'max-height:100%' : 'max-height:none';
         return [
             'flex:0 1 auto',
-            'max-height:100%',
+            maxHeight,
             'min-width:0',
             'min-height:0',
             'width:100%',
@@ -647,8 +656,10 @@
         }
         const type = String(item.type || 'text');
         const pos = elementPositionStyle(item, stackIndex);
-        const frame = elementFrameCss(item);
-        const forPrint = options && options.forPrint;
+        const forPrint = !!(options && options.forPrint);
+        const forThumbnail = !!(options && options.forThumbnail);
+        const frameOpts = { forPrint, forThumbnail };
+        const frame = elementFrameCss(item, frameOpts);
 
         if (type === 'image') {
             const src = resolveImageSrc(item);
@@ -669,7 +680,7 @@
         }
 
         const text = escapeHtml(item.content != null ? item.content : '');
-        const inner = textContentCss(item, { forPrint: forPrint });
+        const inner = textContentCss(item, frameOpts);
         const wrap = textVerticalWrapCss(item);
         return (
             `<div class="eko-sampa-canvas__element" style="${pos}">` +
