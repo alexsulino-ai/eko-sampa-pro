@@ -325,6 +325,76 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/quick-print/options',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_quick_print_options'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_quick_print_jobs_create'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs/(?P<id>\d+)',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_quick_print_job_get'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs/(?P<id>\d+)/cancel',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_quick_print_job_cancel'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs/(?P<id>\d+)/browser-handoff',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_quick_print_job_browser_handoff'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs/(?P<id>\d+)/complete',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_quick_print_job_complete'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/quick-print/jobs/(?P<id>\d+)/reprint',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_quick_print_job_reprint'],
+                'permission_callback' => [$this, 'quick_print_permission'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/orders',
             [
                 [
@@ -1681,6 +1751,358 @@ final class Eko_Sampa_Rest_Api {
             'order_title' => $t,
             'status'      => sanitize_key((string) ($order['status'] ?? '')),
         ];
+    }
+
+    /**
+     * Quick print (editor) — feature-gated; uses template capability (same surface as template REST).
+     */
+    public function quick_print_permission(): bool {
+        if (! apply_filters('eko_sampa_quick_print_enabled', true)) {
+            return false;
+        }
+
+        return $this->require_templates_cap();
+    }
+
+    public function route_quick_print_options(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        unset($request);
+
+        $printers = apply_filters(
+            'eko_sampa_quick_print_printers',
+            [
+                [
+                    'id'    => '__system__',
+                    'label' => __('System print dialog (OS chooses printer)', 'eko-sampa'),
+                ],
+            ]
+        );
+
+        $presets = apply_filters(
+            'eko_sampa_quick_print_presets',
+            [
+                [
+                    'id'    => 'default',
+                    'label' => __('Default', 'eko-sampa'),
+                ],
+                [
+                    'id'    => 'color_accurate',
+                    'label' => __('Color-accurate (browser hint)', 'eko-sampa'),
+                ],
+            ]
+        );
+
+        return new \WP_REST_Response(
+            [
+                'printers' => is_array($printers) ? $printers : [],
+                'presets'  => is_array($presets) ? $presets : [],
+            ]
+        );
+    }
+
+    /**
+     * Quick-print snapshot must be supplied by the editor (live canvas); never rebuilt from DB here.
+     *
+     * @param array<string, mixed> $preview
+     */
+    private function validate_quick_print_client_snapshot(array $preview): ?\WP_Error {
+        $enc = wp_json_encode($preview, JSON_UNESCAPED_UNICODE);
+        if (! is_string($enc) || $enc === '') {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_snapshot',
+                __('Invalid quick print snapshot.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        if (strlen($enc) > self::MAX_TEMPLATE_JSON_BYTES) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_snapshot_too_large',
+                __('Quick print snapshot is too large.', 'eko-sampa'),
+                ['status' => 413]
+            );
+        }
+
+        if (! isset($preview['elements']) || ! is_array($preview['elements'])) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_snapshot',
+                __('Quick print snapshot must include an elements array.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $count = count($preview['elements']);
+        if ($count < 1 || $count > 400) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_snapshot',
+                __('Quick print snapshot must have between 1 and 400 elements.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $wm = (int) ( $preview['width_mm'] ?? 0 );
+        $hm = (int) ( $preview['height_mm'] ?? 0 );
+        if ($wm < 1 || $wm > 2000 || $hm < 1 || $hm > 2000) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_snapshot',
+                __('Quick print snapshot has invalid dimensions.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        foreach ($preview['elements'] as $el) {
+            if (! is_array($el)) {
+                continue;
+            }
+            if (sanitize_key((string) ( $el['type'] ?? '' )) !== 'image') {
+                continue;
+            }
+            $src = isset($el['src']) ? trim((string) $el['src']) : '';
+            if ($src === '') {
+                $src = isset($el['content']) ? trim((string) $el['content']) : '';
+            }
+            if ($src === '') {
+                return new \WP_Error(
+                    'eko_sampa_quick_print_invalid_image',
+                    __('Quick print snapshot has an image element without a source URL.', 'eko-sampa'),
+                    ['status' => 400]
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $preview Validated client snapshot
+     *
+     * @return array<string, mixed>
+     */
+    private function sanitize_quick_print_snapshot_for_response(array $preview): array {
+        $wm = max(1, min(2000, (int) ( $preview['width_mm'] ?? 210 )));
+        $hm = max(1, min(2000, (int) ( $preview['height_mm'] ?? 297 )));
+        $bg  = isset($preview['background_color']) ? (string) $preview['background_color'] : '#ffffff';
+        $els = $preview['elements'];
+
+        return Eko_Sampa_Render_Schema::envelope(
+            [
+                'width_mm'          => $wm,
+                'height_mm'         => $hm,
+                'background_color' => $bg,
+                'elements'          => is_array($els) ? $els : [],
+            ]
+        );
+    }
+
+    public function route_quick_print_jobs_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $params = $this->json_params($request);
+        $tid    = (int) ( $params['template_id'] ?? 0 );
+        if ($tid <= 0) {
+            return new \WP_Error('eko_sampa_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $preview_in = $params['editor_preview'] ?? null;
+        if (! is_array($preview_in)) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_missing_snapshot',
+                __('Live editor snapshot (editor_preview) is required.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $snap_err = $this->validate_quick_print_client_snapshot($preview_in);
+        if ($snap_err instanceof \WP_Error) {
+            return $snap_err;
+        }
+
+        $preview = $this->sanitize_quick_print_snapshot_for_response($preview_in);
+
+        $model = new Eko_Sampa_Quick_Print_Job();
+        if (! $model->is_storage_ready()) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_unavailable',
+                __('Quick print jobs table is not installed yet.', 'eko-sampa'),
+                ['status' => 503]
+            );
+        }
+
+        $uid = (int) get_current_user_id();
+        $qty = (int) ( $params['quantity'] ?? 1 );
+        $pk  = isset($params['printer_key']) ? (string) $params['printer_key'] : '__system__';
+        $preset = isset($params['preset_key']) ? (string) $params['preset_key'] : 'default';
+
+        $job = $model->create($uid, $tid, $qty, $pk, $preset);
+        if ($job instanceof \WP_Error) {
+            return $job;
+        }
+
+        $qty_eff = is_array($job) ? (int) ( $job['quantity'] ?? 1 ) : max(1, $qty);
+        $hint    = $qty_eff > 1
+            ? sprintf(
+                /* translators: %d: number of sheets printed from the quick-print preview in one dialog */
+                __( 'The print dialog will output %d sheet(s) from the preview (one dialog). Use your printer’s “copies” only if you need duplicates of the whole set.', 'eko-sampa' ),
+                max(1, $qty_eff)
+            )
+            : __(
+                'Browsers print one sheet per dialog. Set “copies” in the system printer UI to match the quantity when supported.',
+                'eko-sampa'
+            );
+
+        return new \WP_REST_Response(
+            [
+                'job'            => $job,
+                'editor_preview' => $preview,
+                'quantity_hint'  => $hint,
+            ],
+            201
+        );
+    }
+
+    public function route_quick_print_job_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id  = (int) $request['id'];
+        $uid = (int) get_current_user_id();
+        $row = ( new Eko_Sampa_Quick_Print_Job() )->get_for_user($id, $uid);
+        if ($row === null) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        return new \WP_REST_Response($row);
+    }
+
+    public function route_quick_print_job_cancel(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id    = (int) $request['id'];
+        $uid   = (int) get_current_user_id();
+        $model = new Eko_Sampa_Quick_Print_Job();
+        $row   = $model->get_for_user($id, $uid);
+        if ($row === null) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        if ( ( $row['status'] ?? '' ) !== Eko_Sampa_Quick_Print_Job::STATUS_QUEUED) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_state',
+                __('Only queued jobs can be cancelled.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_CANCELLED);
+        if ($r instanceof \WP_Error) {
+            return $r;
+        }
+
+        return new \WP_REST_Response($model->get_for_user($id, $uid));
+    }
+
+    public function route_quick_print_job_browser_handoff(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id    = (int) $request['id'];
+        $uid   = (int) get_current_user_id();
+        $model = new Eko_Sampa_Quick_Print_Job();
+        $row   = $model->get_for_user($id, $uid);
+        if ($row === null) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $st = (string) ( $row['status'] ?? '' );
+        if ($st !== Eko_Sampa_Quick_Print_Job::STATUS_QUEUED) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_state',
+                __('Job is not in a printable queue state.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_SENT_TO_BROWSER);
+        if ($r instanceof \WP_Error) {
+            return $r;
+        }
+
+        return new \WP_REST_Response($model->get_for_user($id, $uid));
+    }
+
+    public function route_quick_print_job_complete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id    = (int) $request['id'];
+        $uid   = (int) get_current_user_id();
+        $model = new Eko_Sampa_Quick_Print_Job();
+        $row   = $model->get_for_user($id, $uid);
+        if ($row === null) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $st = (string) ( $row['status'] ?? '' );
+        if ($st !== Eko_Sampa_Quick_Print_Job::STATUS_SENT_TO_BROWSER) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_invalid_state',
+                __('Job must be in “sent to browser” state to complete.', 'eko-sampa'),
+                ['status' => 409]
+            );
+        }
+
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_COMPLETED);
+        if ($r instanceof \WP_Error) {
+            return $r;
+        }
+
+        return new \WP_REST_Response($model->get_for_user($id, $uid));
+    }
+
+    public function route_quick_print_job_reprint(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $id     = (int) $request['id'];
+        $uid    = (int) get_current_user_id();
+        $model  = new Eko_Sampa_Quick_Print_Job();
+        $source = $model->get_for_user($id, $uid);
+        if ($source === null) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $params = $this->json_params($request);
+        $raw    = $params['editor_preview'] ?? null;
+        if (! is_array($raw)) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_missing_snapshot',
+                __('Live editor snapshot (editor_preview) is required for reprint.', 'eko-sampa'),
+                ['status' => 400]
+            );
+        }
+
+        $snap_err = $this->validate_quick_print_client_snapshot($raw);
+        if ($snap_err instanceof \WP_Error) {
+            return $snap_err;
+        }
+
+        $preview = $this->sanitize_quick_print_snapshot_for_response($raw);
+        $tid     = (int) ( $source['template_id'] ?? 0 );
+        if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        if (! $model->is_storage_ready()) {
+            return new \WP_Error(
+                'eko_sampa_quick_print_unavailable',
+                __('Quick print jobs table is not installed yet.', 'eko-sampa'),
+                ['status' => 503]
+            );
+        }
+
+        $qty = isset($params['quantity']) ? (int) $params['quantity'] : (int) ( $source['quantity'] ?? 1 );
+        $pk  = isset($params['printer_key']) ? (string) $params['printer_key'] : (string) ( $source['printer_key'] ?? '__system__' );
+        $preset = isset($params['preset_key']) ? (string) $params['preset_key'] : (string) ( $source['preset_key'] ?? 'default' );
+
+        $job = $model->create($uid, $tid, $qty, $pk, $preset);
+        if ($job instanceof \WP_Error) {
+            return $job;
+        }
+
+        return new \WP_REST_Response(
+            [
+                'job'            => $job,
+                'editor_preview' => $preview,
+            ],
+            201
+        );
     }
 
     /**

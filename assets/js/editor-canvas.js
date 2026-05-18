@@ -69,6 +69,26 @@ function ekoEditorCanvasFactory() {
         galleryOpen: false,
         galleryItems: [],
         galleryLoading: false,
+        quickPrint: {
+            open: false,
+            loading: false,
+            error: '',
+            job: null,
+            editorPreview: null,
+            quantityHint: '',
+            options: { printers: [], presets: [] },
+            quantity: 1,
+            printerKey: '__system__',
+            presetKey: 'default',
+            previewStatus: '',
+        },
+        _quickPrintAfterPrintBound: null,
+        _quickPrintAbortController: null,
+        quickPrintJobCreating: false,
+        /** Prevents overlapping system print / handoff while a dialog is in flight. */
+        _quickPrintPrintInProgress: false,
+        /** Restores modal preview HTML after multi-copy print layout. */
+        _quickPrintMountHtmlBackup: null,
         /** True when canvas document (elements + mm) differs from last successful save */
         hasUnsavedChanges: false,
         /** Last completed save message (e.g. Gravado) or error text */
@@ -391,6 +411,11 @@ function ekoEditorCanvasFactory() {
         },
 
         destroy() {
+            try {
+                this.closeQuickPrintManager();
+            } catch (e) {
+                void e;
+            }
             if (this._orderPreviewResizeObserver) {
                 try {
                     this._orderPreviewResizeObserver.disconnect();
@@ -439,6 +464,961 @@ function ekoEditorCanvasFactory() {
 
         cfg() {
             return window.ekoSampaEditor || {};
+        },
+
+        quickPrintFeatureEnabled() {
+            const q = this.cfg().quickPrint;
+            return !!(q && q.enabled);
+        },
+
+        canCreateOrderFromEditor() {
+            const tid = Number(this.cfg().templateId || 0);
+            if (tid <= 0) {
+                return false;
+            }
+            if (this.cfg().canOrderCreate === true) {
+                return true;
+            }
+            if (typeof window.ekoSampaCan === 'function') {
+                return window.ekoSampaCan('order.create');
+            }
+            return false;
+        },
+
+        async createOrderFromEditor() {
+            const tid = Number(this.cfg().templateId || 0);
+            if (!tid) {
+                return;
+            }
+            if (typeof window.ekoSampaEditorCreateOrderFromTemplate !== 'function') {
+                const msg = 'Order flow unavailable (app bundle not loaded).';
+                if (window.ekoSampaToast) {
+                    window.ekoSampaToast.show({ type: 'error', message: msg, duration: 5000 });
+                } else {
+                    // eslint-disable-next-line no-alert
+                    alert(msg);
+                }
+                return;
+            }
+            await window.ekoSampaEditorCreateOrderFromTemplate(tid);
+        },
+
+        _abortQuickPrintRequests() {
+            if (this._quickPrintAbortController) {
+                try {
+                    this._quickPrintAbortController.abort();
+                } catch (e) {
+                    void e;
+                }
+                this._quickPrintAbortController = null;
+            }
+        },
+
+        quickPrintToast(message, type) {
+            const t = type || 'error';
+            if (window.ekoSampaToast) {
+                window.ekoSampaToast.show({ type: t, message: String(message || ''), duration: 5000 });
+            }
+        },
+
+        quickPrintValidationMessage(code) {
+            const c = String(code || '');
+            const map = {
+                empty_payload: 'Quick print: empty canvas snapshot.',
+                no_elements: 'Quick print: add at least one element before printing.',
+                invalid_size: 'Quick print: invalid page size.',
+                too_many_elements: 'Quick print: too many elements.',
+                image_missing_src: 'Quick print: an image element is missing a source URL.',
+                no_canvas_root: 'Quick print: editor canvas is not ready.',
+                canvas_not_laid_out: 'Quick print: canvas has no size yet — try again in a moment.',
+            };
+            return map[c] || 'Quick print: invalid snapshot.';
+        },
+
+        /**
+         * Live editor surface for decode / layout checks. Prefer x-ref; fall back when Alpine has not bound the ref yet.
+         *
+         * @returns {Element|null}
+         */
+        _quickPrintResolveEditorCanvasEl() {
+            const fromRef = this.$refs && this.$refs.editorCanvas;
+            if (fromRef && fromRef.nodeType === 1 && typeof fromRef.querySelectorAll === 'function') {
+                return fromRef;
+            }
+            if (this.$el && typeof this.$el.querySelector === 'function') {
+                const q = this.$el.querySelector('.eko-sampa-editor__canvas');
+                if (q && q.nodeType === 1) {
+                    return q;
+                }
+            }
+            if (typeof document !== 'undefined' && document.querySelector) {
+                const g = document.querySelector('#eko-sampa-editor .eko-sampa-editor__canvas');
+                if (g && g.nodeType === 1) {
+                    return g;
+                }
+            }
+            return null;
+        },
+
+        /**
+         * @returns {string} error code or ''
+         */
+        validateQuickPrintEditorDomReady() {
+            const root = this._quickPrintResolveEditorCanvasEl();
+            if (root && typeof root.offsetWidth === 'number') {
+                const w = root.offsetWidth;
+                const h = root.offsetHeight;
+                if (w > 0 && h > 0) {
+                    return '';
+                }
+            }
+            /* html.eko-modal-open uses overflow:hidden on body; the live canvas can measure 0 while the logical page is still valid. */
+            const cw = Math.round(Number(this.canvasWidth) || 0);
+            const ch = Math.round(Number(this.canvasHeight) || 0);
+            const els = Array.isArray(this.elements) ? this.elements : [];
+            if (cw > 1 && ch > 1 && els.length >= 1) {
+                return '';
+            }
+            if (!root) {
+                return 'no_canvas_root';
+            }
+            return 'canvas_not_laid_out';
+        },
+
+        /**
+         * Estabilização antes de snapshot (Quick Print / payloads visuais): fonts.ready + decode de imgs + 2× rAF.
+         * Não encurtar sem medir regressão — payloads gerados a meio do layout geram preview em branco ou tipografia errada.
+         */
+        async waitVisualRenderStable() {
+            if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+                try {
+                    await document.fonts.ready;
+                } catch (e) {
+                    void e;
+                }
+            }
+            await this.decodeEditorCanvasImages();
+            await this.$nextTick();
+            await new Promise(function (resolve) {
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(resolve);
+                });
+            });
+            let domErr = this.validateQuickPrintEditorDomReady();
+            if (domErr) {
+                await this.$nextTick();
+                await new Promise(function (resolve) {
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(resolve);
+                    });
+                });
+                domErr = this.validateQuickPrintEditorDomReady();
+            }
+            return domErr;
+        },
+
+        async decodeEditorCanvasImages() {
+            const root = this._quickPrintResolveEditorCanvasEl();
+            if (!root || typeof root.querySelectorAll !== 'function') {
+                return;
+            }
+            const imgs = root.querySelectorAll('img');
+            const tasks = [];
+            imgs.forEach(function (img) {
+                if (!img) {
+                    return;
+                }
+                if (typeof img.decode === 'function') {
+                    tasks.push(
+                        img.decode().catch(function () {
+                            return null;
+                        })
+                    );
+                    return;
+                }
+                if (img.complete) {
+                    return;
+                }
+                tasks.push(
+                    new Promise(function (resolve) {
+                        const done = function () {
+                            img.removeEventListener('load', done);
+                            img.removeEventListener('error', done);
+                            resolve(null);
+                        };
+                        img.addEventListener('load', done);
+                        img.addEventListener('error', done);
+                    })
+                );
+            });
+            if (tasks.length) {
+                await Promise.all(tasks);
+            }
+        },
+
+        buildLiveQuickPrintPayload() {
+            const wm = Math.max(1, Math.round(Number(this.widthMm) || 210));
+            const hm = Math.max(1, Math.round(Number(this.heightMm) || 297));
+            let els;
+            try {
+                els = JSON.parse(JSON.stringify(this.elements));
+            } catch (e) {
+                void e;
+                return null;
+            }
+            if (!Array.isArray(els)) {
+                return null;
+            }
+            const bg = this._safeCssColor(this.templateBackgroundColor, '#ffffff');
+            const raw = {
+                width_mm: wm,
+                height_mm: hm,
+                background_color: bg,
+                elements: els,
+            };
+            const R = window.EkoCanvasRenderer;
+            if (R && typeof R.normalizePayload === 'function') {
+                return R.normalizePayload(raw);
+            }
+            return raw;
+        },
+
+        validateQuickPrintLivePayload(payload) {
+            if (!payload || typeof payload !== 'object') {
+                return 'empty_payload';
+            }
+            const els = payload.elements;
+            if (!Array.isArray(els) || els.length < 1) {
+                return 'no_elements';
+            }
+            const wm = Number(payload.width_mm);
+            const hm = Number(payload.height_mm);
+            if (!Number.isFinite(wm) || wm < 1 || !Number.isFinite(hm) || hm < 1) {
+                return 'invalid_size';
+            }
+            if (els.length > 400) {
+                return 'too_many_elements';
+            }
+            const badImage = els.some(function (el) {
+                if (!el || typeof el !== 'object') {
+                    return false;
+                }
+                if (String(el.type || '') !== 'image') {
+                    return false;
+                }
+                const src = el.src != null ? el.src : el.content;
+                return src == null || String(src).trim() === '';
+            });
+            if (badImage) {
+                return 'image_missing_src';
+            }
+            return '';
+        },
+
+        _removeQuickPrintPrintStyle() {
+            const el = document.getElementById('eko-sampa-quick-print-page-style');
+            if (el && el.parentNode) {
+                el.parentNode.removeChild(el);
+            }
+        },
+
+        /**
+         * Quick print preview host lives inside x-teleport; Alpine may not expose x-ref immediately.
+         *
+         * @returns {HTMLElement|null}
+         */
+        _quickPrintResolveMountEl() {
+            const fromRef = this.$refs && this.$refs.quickPrintMount;
+            if (fromRef && fromRef.nodeType === 1) {
+                return fromRef;
+            }
+            if (typeof document !== 'undefined' && document.getElementById) {
+                const byId = document.getElementById('eko-sampa-quick-print-mount');
+                if (byId && byId.nodeType === 1) {
+                    return byId;
+                }
+            }
+            return null;
+        },
+
+        _quickPrintResolvedQuantity() {
+            const n = Number(this.quickPrint.quantity);
+            const q = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+            return Math.max(1, Math.min(500, q));
+        },
+
+        /**
+         * CSS de isolamento para window.print(): só #eko-sampa-quick-print-layer fica visível em body.
+         * NÃO colocar o mount dentro de um ancestral com .eko-quick-print-hide-print (impressão vazia).
+         * Ver docs/contracts/DO-NOT-BREAK.md e docs/quick-print/README.md.
+         */
+        _injectQuickPrintPrintStyle(payload) {
+            this._removeQuickPrintPrintStyle();
+            const p = payload || this.quickPrint.editorPreview;
+            if (!p || typeof document === 'undefined') {
+                return;
+            }
+            const wm = Math.max(1, parseInt(String(p.width_mm || 210), 10) || 210);
+            const hm = Math.max(1, parseInt(String(p.height_mm || 297), 10) || 297);
+            const st = document.createElement('style');
+            st.id = 'eko-sampa-quick-print-page-style';
+            st.textContent = [
+                '@media print {',
+                '  @page { size: ' + wm + 'mm ' + hm + 'mm; margin: 0; }',
+                '  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }',
+                '  body > *:not(#eko-sampa-quick-print-layer) { display: none !important; }',
+                '  #eko-sampa-quick-print-layer {',
+                '    position: static !important;',
+                '    inset: auto !important;',
+                '    display: block !important;',
+                '    width: 100% !important;',
+                '    max-width: none !important;',
+                '    min-height: 0 !important;',
+                '    height: auto !important;',
+                '    padding: 0 !important;',
+                '    margin: 0 !important;',
+                '    background: #fff !important;',
+                '    overflow: visible !important;',
+                '  }',
+                '  #eko-sampa-quick-print-layer .eko-quick-print-panel {',
+                '    max-width: none !important;',
+                '    width: 100% !important;',
+                '    height: auto !important;',
+                '    max-height: none !important;',
+                '    overflow: visible !important;',
+                '    box-shadow: none !important;',
+                '    border: 0 !important;',
+                '    border-radius: 0 !important;',
+                '  }',
+                '  .eko-quick-print-hide-print { display: none !important; }',
+                '  #eko-sampa-quick-print-mount .eko-sampa-quick-print-sheet { display: block !important; width: 100% !important; }',
+                '  #eko-sampa-quick-print-mount .eko-sampa-print-root {',
+                '    overflow: visible !important;',
+                '    break-inside: avoid;',
+                '    page-break-inside: avoid;',
+                '    box-shadow: none !important;',
+                '  }',
+                '  #eko-sampa-quick-print-mount .eko-sampa-canvas { overflow: visible !important; }',
+                '  #eko-sampa-quick-print-mount .eko-sampa-print-root * {',
+                '    -webkit-print-color-adjust: exact !important;',
+                '    print-color-adjust: exact !important;',
+                '  }',
+                '  #eko-sampa-quick-print-mount .eko-sampa-canvas__img {',
+                '    display: block !important;',
+                '    max-width: 100% !important;',
+                '    max-height: none !important;',
+                '    height: auto !important;',
+                '    -webkit-print-color-adjust: exact !important;',
+                '    print-color-adjust: exact !important;',
+                '    visibility: visible !important;',
+                '    opacity: 1 !important;',
+                '  }',
+                '}',
+            ].join('\n');
+            document.head.appendChild(st);
+        },
+
+        /**
+         * @param {Element|null} root
+         * @returns {Promise<void>}
+         */
+        async _quickPrintWaitImagesInContainer(root) {
+            if (!root || typeof root.querySelectorAll !== 'function') {
+                return;
+            }
+            const imgs = root.querySelectorAll('img');
+            const tasks = [];
+            imgs.forEach(function (img) {
+                if (!img) {
+                    return;
+                }
+                if (typeof img.decode === 'function') {
+                    tasks.push(
+                        img.decode().catch(function () {
+                            return null;
+                        })
+                    );
+                    return;
+                }
+                if (img.complete) {
+                    return;
+                }
+                tasks.push(
+                    new Promise(function (resolve) {
+                        const done = function () {
+                            img.removeEventListener('load', done);
+                            img.removeEventListener('error', done);
+                            resolve(null);
+                        };
+                        img.addEventListener('load', done);
+                        img.addEventListener('error', done);
+                    })
+                );
+            });
+            if (tasks.length) {
+                await Promise.all(tasks);
+            }
+        },
+
+        /**
+         * Many browsers omit remote images in the physical print path; inlining as data URLs fixes same-origin media
+         * and improves reliability before window.print().
+         *
+         * @param {Element|null} root
+         * @returns {Promise<void>}
+         */
+        async _quickPrintMaterializeImagesForDevicePrint(root) {
+            if (!root || typeof root.querySelectorAll !== 'function') {
+                return;
+            }
+            const imgs = Array.prototype.slice.call(root.querySelectorAll('img[src]'));
+            const self = this;
+            await Promise.all(
+                imgs.map(function (img) {
+                    return self._quickPrintOneImageSrcToDataUrlIfNeeded(img);
+                })
+            );
+        },
+
+        /**
+         * @param {HTMLImageElement} img
+         * @returns {Promise<void>}
+         */
+        async _quickPrintOneImageSrcToDataUrlIfNeeded(img) {
+            if (!img || img.nodeType !== 1) {
+                return;
+            }
+            const src = String(img.getAttribute('src') || img.src || '').trim();
+            if (!src || src.indexOf('data:') === 0) {
+                return;
+            }
+            try {
+                let blob;
+                if (src.indexOf('blob:') === 0) {
+                    const rb = await fetch(src);
+                    if (!rb.ok) {
+                        return;
+                    }
+                    blob = await rb.blob();
+                } else {
+                    let r = await fetch(src, { mode: 'cors', credentials: 'same-origin', cache: 'force-cache' });
+                    if (!r.ok) {
+                        r = await fetch(src, { mode: 'cors', credentials: 'include', cache: 'force-cache' });
+                    }
+                    if (!r.ok) {
+                        return;
+                    }
+                    blob = await r.blob();
+                }
+                const dataUrl = await new Promise(function (resolve, reject) {
+                    const reader = new FileReader();
+                    reader.onload = function () {
+                        resolve(reader.result);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                img.setAttribute('src', dataUrl);
+            } catch (e) {
+                void e;
+            }
+        },
+
+        disposeQuickPrintPreview() {
+            const mount = this._quickPrintResolveMountEl();
+            if (mount) {
+                mount.innerHTML = '';
+            }
+            this.quickPrint.previewStatus = '';
+            this.quickPrint.editorPreview = null;
+        },
+
+        /**
+         * @param {object} payload Normalized print payload (live editor snapshot).
+         * @returns {Promise<boolean>}
+         */
+        async mountQuickPrintPreview(payload) {
+            const R = window.EkoCanvasRenderer;
+            if (!R || !payload) {
+                this.quickPrint.previewStatus = !R ? 'Renderer missing.' : 'Invalid preview payload.';
+                return false;
+            }
+            let mount = this._quickPrintResolveMountEl();
+            for (let attempt = 0; !mount && attempt < 8; attempt++) {
+                await this.$nextTick();
+                mount = this._quickPrintResolveMountEl();
+            }
+            if (!mount) {
+                this.quickPrint.previewStatus = 'Preview mount not found.';
+                return false;
+            }
+            mount.innerHTML = '';
+            this.quickPrint.previewStatus = 'Rendering…';
+            const norm = typeof R.normalizePayload === 'function' ? R.normalizePayload(payload) : payload;
+            if (!Array.isArray(norm.elements) || norm.elements.length < 1) {
+                this.quickPrint.previewStatus = 'Invalid preview payload.';
+                return false;
+            }
+            try {
+                const pipeline =
+                    typeof R.runRenderPipeline === 'function'
+                        ? R.runRenderPipeline(mount, norm, {
+                              forPrint: true,
+                              target: R.RenderTargets && R.RenderTargets.PRINT,
+                          })
+                        : R.mountInto(mount, norm, { forPrint: true });
+                await pipeline;
+                await new Promise(function (resolve) {
+                    requestAnimationFrame(resolve);
+                });
+                const printRoot = mount.querySelector('.eko-sampa-print-root');
+                const canvasEl = mount.querySelector('.eko-sampa-canvas');
+                if (!printRoot || !canvasEl) {
+                    this.quickPrint.previewStatus = 'Preview layout missing.';
+                    return false;
+                }
+                let pw = 0;
+                let ph = 0;
+                try {
+                    const br = printRoot.getBoundingClientRect();
+                    pw = br.width;
+                    ph = br.height;
+                } catch (e) {
+                    void e;
+                }
+                if (!pw || !ph) {
+                    await new Promise(function (resolve) {
+                        requestAnimationFrame(resolve);
+                    });
+                    try {
+                        const br2 = printRoot.getBoundingClientRect();
+                        pw = br2.width;
+                        ph = br2.height;
+                    } catch (e2) {
+                        void e2;
+                    }
+                }
+                if (!pw || !ph) {
+                    pw = printRoot.offsetWidth || mount.offsetWidth;
+                    ph = printRoot.offsetHeight || mount.offsetHeight;
+                }
+                if (!pw || !ph) {
+                    const wm = Number(norm.width_mm) || 0;
+                    const hm = Number(norm.height_mm) || 0;
+                    if (wm >= 1 && hm >= 1) {
+                        pw = 1;
+                        ph = 1;
+                    }
+                }
+                if (!pw || !ph) {
+                    this.quickPrint.previewStatus = 'Preview has no dimensions yet.';
+                    return false;
+                }
+                this.quickPrint.editorPreview = norm;
+                this.quickPrint.previewStatus = '';
+                return true;
+            } catch (e) {
+                this.quickPrint.previewStatus = String((e && e.message) || e || 'Render failed.');
+                return false;
+            }
+        },
+
+        /**
+         * Quick Print: abre modal, GET options, hidrata preview ao vivo. Ao fechar, closeQuickPrintManager DEVE
+         * remover afterprint, abortar fetch, estilo print e preview — omitir qualquer passo deixa estado partido ou jobs duplicados.
+         * Fluxo oficial de produção continua a ser Orders (OS); isto é atalho com snapshot transacional.
+         */
+        async openQuickPrintManager() {
+            if (!this.quickPrintFeatureEnabled() || this.previewOnly) {
+                return;
+            }
+            const tid = Number(this.cfg().templateId || 0);
+            if (!tid) {
+                this.quickPrintToast('Save the template first to enable quick print.', 'warning');
+                return;
+            }
+            if (this.hasUnsavedChanges) {
+                await this.saveNow();
+                if (this.hasUnsavedChanges) {
+                    this.quickPrintToast('Save your changes before quick print.', 'error');
+                    return;
+                }
+            }
+            this._abortQuickPrintRequests();
+            this._quickPrintAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            this.quickPrint.open = true;
+            this.quickPrint.loading = true;
+            this.quickPrint.error = '';
+            this.quickPrint.job = null;
+            this.quickPrint.editorPreview = null;
+            this.quickPrint.quantityHint = '';
+            this.quickPrint.previewStatus = '';
+            this.quickPrint.quantity = 1;
+            this.quickPrintJobCreating = false;
+            this._quickPrintPrintInProgress = false;
+            this._quickPrintMountHtmlBackup = null;
+            const sig = this._quickPrintAbortController ? this._quickPrintAbortController.signal : undefined;
+            try {
+                const opt = await window.ekoSampaApi('quick-print/options', { method: 'GET', signal: sig });
+                this.quickPrint.options = {
+                    printers: Array.isArray(opt.printers) ? opt.printers : [],
+                    presets: Array.isArray(opt.presets) ? opt.presets : [],
+                };
+                const p0 = this.quickPrint.options.printers[0];
+                const s0 = this.quickPrint.options.presets[0];
+                this.quickPrint.printerKey = String((p0 && p0.id) || '__system__');
+                this.quickPrint.presetKey = String((s0 && s0.id) || 'default');
+            } catch (e) {
+                if (e && e.name === 'AbortError') {
+                    return;
+                }
+                this.quickPrint.error = String((e && e.message) || e || 'Could not load print options.');
+            } finally {
+                this.quickPrint.loading = false;
+            }
+            await this.$nextTick();
+            await this.$nextTick();
+            if (!this.quickPrint.open) {
+                return;
+            }
+            if (this._quickPrintAbortController && this._quickPrintAbortController.signal.aborted) {
+                return;
+            }
+            try {
+                await this._quickPrintHydrateLivePreviewSilent();
+            } catch (e) {
+                if (e && e.name !== 'AbortError') {
+                    void e;
+                }
+            }
+            if (this.quickPrint.open) {
+                try {
+                    document.documentElement.classList.add('eko-modal-open');
+                } catch (e) {
+                    void e;
+                }
+            }
+        },
+
+        closeQuickPrintManager() {
+            if (this._quickPrintAfterPrintBound) {
+                try {
+                    window.removeEventListener('afterprint', this._quickPrintAfterPrintBound);
+                } catch (e) {
+                    void e;
+                }
+                this._quickPrintAfterPrintBound = null;
+            }
+            this._abortQuickPrintRequests();
+            this.quickPrintJobCreating = false;
+            this._quickPrintPrintInProgress = false;
+            this._quickPrintMountHtmlBackup = null;
+            this._removeQuickPrintPrintStyle();
+            this.disposeQuickPrintPreview();
+            this.quickPrint.open = false;
+            this.quickPrint.loading = false;
+            this.quickPrint.error = '';
+            this.quickPrint.job = null;
+            this.quickPrint.quantityHint = '';
+            try {
+                document.documentElement.classList.remove('eko-modal-open');
+            } catch (e) {
+                void e;
+            }
+        },
+
+        /**
+         * Live snapshot → modal preview only (no job). Caller controls quickPrint.loading.
+         *
+         * @returns {Promise<boolean>}
+         */
+        async _quickPrintHydrateLivePreviewSilent() {
+            if (!this.quickPrint.open || this.previewOnly) {
+                return false;
+            }
+            if (this.quickPrintJobCreating || this._quickPrintPrintInProgress) {
+                return false;
+            }
+            const sig = this._quickPrintAbortController && this._quickPrintAbortController.signal;
+            const domErr = await this.waitVisualRenderStable();
+            if (sig && sig.aborted) {
+                return false;
+            }
+            if (!this.quickPrint.open) {
+                return false;
+            }
+            if (domErr) {
+                this.quickPrintToast(this.quickPrintValidationMessage(domErr), 'error');
+                return false;
+            }
+            const payload = this.buildLiveQuickPrintPayload();
+            const verr = this.validateQuickPrintLivePayload(payload);
+            if (verr) {
+                this.quickPrintToast(this.quickPrintValidationMessage(verr), 'error');
+                return false;
+            }
+            await this.$nextTick();
+            if (sig && sig.aborted) {
+                return false;
+            }
+            if (!this.quickPrint.open) {
+                return false;
+            }
+            const ok = await this.mountQuickPrintPreview(payload);
+            if (!ok) {
+                this.quickPrintToast(
+                    String(this.quickPrint.previewStatus || '').trim() || 'Could not load print preview.',
+                    'error'
+                );
+                return false;
+            }
+            this._injectQuickPrintPrintStyle(this.quickPrint.editorPreview);
+            return true;
+        },
+
+        /**
+         * Remount preview from live canvas only (no REST job).
+         */
+        async quickPrintApplySettings() {
+            if (this.quickPrintJobCreating || this.quickPrint.loading || this._quickPrintPrintInProgress) {
+                return;
+            }
+            this.quickPrint.loading = true;
+            this.quickPrint.error = '';
+            try {
+                await this._quickPrintHydrateLivePreviewSilent();
+            } finally {
+                this.quickPrint.loading = false;
+            }
+        },
+
+        /**
+         * Live snapshot → mount (EkoCanvasRenderer) → POST /quick-print/jobs. No system print.
+         *
+         * @returns {Promise<boolean>}
+         */
+        async _quickPrintExecuteSnapshotPipelineAndPost() {
+            const tid = Number(this.cfg().templateId || 0);
+            const sig = this._quickPrintAbortController ? this._quickPrintAbortController.signal : undefined;
+            if (!tid) {
+                return false;
+            }
+            if (this.hasUnsavedChanges) {
+                await this.saveNow();
+                if (this.hasUnsavedChanges) {
+                    this.quickPrintToast('Save your changes first.', 'error');
+                    return false;
+                }
+            }
+            const domErr = await this.waitVisualRenderStable();
+            if (domErr) {
+                this.quickPrintToast(this.quickPrintValidationMessage(domErr), 'error');
+                return false;
+            }
+            const payload = this.buildLiveQuickPrintPayload();
+            const verr = this.validateQuickPrintLivePayload(payload);
+            if (verr) {
+                this.quickPrintToast(this.quickPrintValidationMessage(verr), 'error');
+                return false;
+            }
+            await this.$nextTick();
+            const ok = await this.mountQuickPrintPreview(payload);
+            if (!ok) {
+                this.quickPrintToast('Preview render failed — job not created.', 'error');
+                return false;
+            }
+            this._injectQuickPrintPrintStyle(this.quickPrint.editorPreview);
+            const snap = this.quickPrint.editorPreview;
+            const res = await window.ekoSampaApi('quick-print/jobs', {
+                method: 'POST',
+                signal: sig,
+                body: {
+                    template_id: tid,
+                    quantity: this._quickPrintResolvedQuantity(),
+                    printer_key: String(this.quickPrint.printerKey || '__system__'),
+                    preset_key: String(this.quickPrint.presetKey || 'default'),
+                    editor_preview: snap,
+                },
+            });
+            this.quickPrint.job = res.job || null;
+            this.quickPrint.quantityHint = res.quantity_hint || '';
+            return true;
+        },
+
+        /**
+         * Primary: register live snapshot + open system print in one gesture when possible.
+         * If job is already queued with a mounted preview, only runs the system print step.
+         */
+        async quickPrintFooterPrimaryClick() {
+            if (this.quickPrintJobCreating || this._quickPrintPrintInProgress) {
+                return;
+            }
+            const st0 = this.quickPrint.job ? String(this.quickPrint.job.status || '') : '';
+            if (st0 === 'sent_to_browser') {
+                this.quickPrintToast('Print dialog is still active or finishing.', 'warning');
+                return;
+            }
+            const jid = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
+            if (jid && this.quickPrint.job && this.quickPrint.job.status === 'queued' && this.quickPrint.editorPreview) {
+                await this.quickPrintRunBrowser();
+                return;
+            }
+            this.quickPrintJobCreating = true;
+            this.quickPrint.loading = true;
+            this.quickPrint.error = '';
+            try {
+                const ok = await this._quickPrintExecuteSnapshotPipelineAndPost();
+                if (!ok) {
+                    return;
+                }
+                await this.quickPrintRunBrowser();
+            } catch (e) {
+                if (e && e.name === 'AbortError') {
+                    return;
+                }
+                this.quickPrint.error = String((e && e.message) || e || 'Could not register quick print.');
+            } finally {
+                this.quickPrint.loading = false;
+                this.quickPrintJobCreating = false;
+            }
+        },
+
+        async quickPrintCancelJob() {
+            const jid = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
+            if (!jid) {
+                return;
+            }
+            try {
+                const row = await window.ekoSampaApi('quick-print/jobs/' + jid + '/cancel', { method: 'POST' });
+                this.quickPrint.job = row;
+            } catch (e) {
+                this.quickPrint.error = String((e && e.message) || e || 'Cancel failed.');
+            }
+        },
+
+        async quickPrintReprint() {
+            if (this.quickPrintJobCreating || this.quickPrint.loading || this._quickPrintPrintInProgress) {
+                return;
+            }
+            const prevId = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
+            if (prevId && this.quickPrint.job && this.quickPrint.job.status === 'queued') {
+                try {
+                    await window.ekoSampaApi('quick-print/jobs/' + prevId + '/cancel', { method: 'POST' });
+                } catch (e) {
+                    void e;
+                }
+            }
+            this.quickPrintJobCreating = true;
+            this.quickPrint.loading = true;
+            this.quickPrint.error = '';
+            try {
+                await this._quickPrintExecuteSnapshotPipelineAndPost();
+            } catch (e) {
+                if (e && e.name !== 'AbortError') {
+                    this.quickPrint.error = String((e && e.message) || e || 'Reprint failed.');
+                }
+            } finally {
+                this.quickPrint.loading = false;
+                this.quickPrintJobCreating = false;
+            }
+        },
+
+        async quickPrintRunBrowser() {
+            if (this._quickPrintPrintInProgress) {
+                return;
+            }
+            const jid = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
+            if (!jid || !this.quickPrint.editorPreview) {
+                return;
+            }
+            this._quickPrintPrintInProgress = true;
+            try {
+                const row = await window.ekoSampaApi('quick-print/jobs/' + jid + '/browser-handoff', { method: 'POST' });
+                this.quickPrint.job = row;
+            } catch (e) {
+                this._quickPrintPrintInProgress = false;
+                this.quickPrint.error = String((e && e.message) || e || 'Could not update job.');
+                return;
+            }
+            this._injectQuickPrintPrintStyle(this.quickPrint.editorPreview);
+            const self = this;
+            const done = function () {
+                window.removeEventListener('afterprint', done);
+                self._quickPrintAfterPrintBound = null;
+                const mountRestore = self._quickPrintResolveMountEl();
+                if (mountRestore && self._quickPrintMountHtmlBackup != null) {
+                    mountRestore.innerHTML = self._quickPrintMountHtmlBackup;
+                    self._quickPrintMountHtmlBackup = null;
+                }
+                self._quickPrintPrintInProgress = false;
+                const id = self.quickPrint.job && self.quickPrint.job.id ? parseInt(String(self.quickPrint.job.id), 10) : 0;
+                if (!id) {
+                    return;
+                }
+                window.ekoSampaApi('quick-print/jobs/' + id + '/complete', { method: 'POST' })
+                    .then(function (row) {
+                        self.quickPrint.job = row;
+                    })
+                    .catch(function () {
+                        void 0;
+                    });
+            };
+            this._quickPrintAfterPrintBound = done;
+            window.addEventListener('afterprint', done);
+            try {
+                const mount = this._quickPrintResolveMountEl();
+                const qty = this._quickPrintResolvedQuantity();
+                this._quickPrintMountHtmlBackup = mount ? mount.innerHTML : null;
+                if (mount) {
+                    const root = mount.querySelector('.eko-sampa-print-root');
+                    if (root) {
+                        const proto = root.cloneNode(true);
+                        mount.innerHTML = '';
+                        for (let i = 0; i < qty; i++) {
+                            const sheet = document.createElement('div');
+                            sheet.className = 'eko-sampa-quick-print-sheet';
+                            if (i < qty - 1) {
+                                sheet.style.pageBreakAfter = 'always';
+                                sheet.style.breakAfter = 'page';
+                            }
+                            sheet.appendChild(proto.cloneNode(true));
+                            mount.appendChild(sheet);
+                        }
+                    }
+                    await this._quickPrintWaitImagesInContainer(mount);
+                    await this._quickPrintMaterializeImagesForDevicePrint(mount);
+                    await this._quickPrintWaitImagesInContainer(mount);
+                    await new Promise(function (resolve) {
+                        requestAnimationFrame(function () {
+                            requestAnimationFrame(resolve);
+                        });
+                    });
+                }
+                window.print();
+            } catch (e) {
+                window.removeEventListener('afterprint', done);
+                this._quickPrintAfterPrintBound = null;
+                this._quickPrintPrintInProgress = false;
+                const mountErr = this._quickPrintResolveMountEl();
+                if (mountErr && this._quickPrintMountHtmlBackup != null) {
+                    mountErr.innerHTML = this._quickPrintMountHtmlBackup;
+                    this._quickPrintMountHtmlBackup = null;
+                }
+                this.quickPrint.error = String((e && e.message) || e || 'Print failed.');
+            }
+        },
+
+        async quickPrintRefreshJob() {
+            const jid = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
+            if (!jid) {
+                return;
+            }
+            try {
+                const row = await window.ekoSampaApi('quick-print/jobs/' + jid, { method: 'GET' });
+                this.quickPrint.job = row;
+            } catch (e) {
+                this.quickPrint.error = String((e && e.message) || e || 'Refresh failed.');
+            }
         },
 
         async loadFromServer() {
@@ -1696,7 +2676,7 @@ function ekoEditorCanvasFactory() {
         },
 
         clearSelectionIfCanvas(ev) {
-            if (this.galleryOpen) {
+            if (this.galleryOpen || this.quickPrint.open) {
                 return;
             }
             if (ev && typeof ev.button === 'number' && ev.button !== 0) {
@@ -1712,12 +2692,17 @@ function ekoEditorCanvasFactory() {
             if (this.previewOnly) {
                 return;
             }
-            if (ev.key === 'Escape' && this.inlineOpen && !this.galleryOpen) {
+            if (ev.key === 'Escape' && this.inlineOpen && !this.galleryOpen && !this.quickPrint.open) {
                 ev.preventDefault();
                 this.cancelInlineEdit();
                 return;
             }
-            if (ev.key === 'Delete' && !this.inlineOpen && !this.galleryOpen) {
+            if (ev.key === 'Escape' && this.quickPrint.open) {
+                ev.preventDefault();
+                this.closeQuickPrintManager();
+                return;
+            }
+            if (ev.key === 'Delete' && !this.inlineOpen && !this.galleryOpen && !this.quickPrint.open) {
                 this.deleteSelected();
             }
         },

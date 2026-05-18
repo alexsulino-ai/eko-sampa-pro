@@ -4,6 +4,9 @@
  * Client JPEG export uses html2canvas (foreignObjectRendering: false) → real bitmap →
  * high-quality downscale → JPEG flatten. Live editor path clones the canvas into an offscreen
  * “presentation” subtree (no grid, selection chrome, zoom parent, or inline textarea) before raster.
+ *
+ * REGRESSÃO: não remover lock por template/runId, checks isRunCurrent, debounce da fila, nem strip de bindings
+ * no clone — causam overwrite de JPEG, thumb antiga, ou raster com x-show=false. Ver docs/contracts/DO-NOT-BREAK.md.
  */
 (function (global) {
     'use strict';
@@ -60,7 +63,10 @@
         return { retryable: true, kind: 'unknown' };
     }
 
-    /** Per-template generation slot (lock + abort). */
+    /**
+     * Slots por templateId: uma corrida ativa por ID; runId novo aborta a anterior antes do upload.
+     * Isto é a proteção principal contra overwrite e “thumb a saltar” entre duas edições rápidas.
+     */
     const slots = new Map();
 
     function getSlot(templateId) {
@@ -1254,6 +1260,8 @@
 
     /**
      * Live editor: rasterize a presentation-only clone (offscreen) — no grid, selection, zoom parent, or inline textarea.
+     * Ordem interna: clone → tipografia/layout sincronizados do live → flatten de img → html2canvas.
+     * Não reordenar nem saltar fases sem medir regressão (WYSIWYG / JPEG vazio). Ver docs/contracts/DO-NOT-BREAK.md.
      *
      * @param {HTMLElement} liveRoot
      * @param {object} ctx

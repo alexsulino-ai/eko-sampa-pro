@@ -2560,6 +2560,24 @@ window.ekoServicesFactory = ekoServicesFactory;
 window.ekoTemplatesFactory = ekoTemplatesFactory;
 window.ekoOrdersFactory = ekoOrdersFactory;
 
+/**
+ * Visual editor — same order-creation path as template details (ekoTemplatesFactory).
+ *
+ * @param {number|string} templateId
+ * @returns {Promise<void>}
+ */
+window.ekoSampaEditorCreateOrderFromTemplate = async function (templateId) {
+    const tid = parseInt(String(templateId || 0), 10);
+    if (!tid) {
+        return;
+    }
+    const ctx = ekoTemplatesFactory();
+    ctx.recordId = tid;
+    ctx.mode = 'view';
+    ctx.state.record = Object.assign({}, ctx.state.record, { id: tid });
+    await ctx.createOrderFromTemplate({ id: tid });
+};
+
 (function registerEkoModulesProbe() {
     var keys = ['ekoShellFactory', 'ekoClientsFactory', 'ekoServicesFactory', 'ekoTemplatesFactory', 'ekoOrdersFactory'];
     window.EkoModules = Object.assign(window.EkoModules || {}, {

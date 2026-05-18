@@ -628,8 +628,12 @@
     function resolveImageSrc(item) {
         const raw = item && item.src != null && String(item.src) !== '' ? String(item.src) : String((item && item.content) || '');
         const s = raw.trim();
-        if (s === '' || /^(blob:|data:|javascript:)/i.test(s)) {
+        if (s === '' || /^(javascript:)/i.test(s)) {
             return '';
+        }
+        /* Keep blob:/data: — stripping them produced empty <img> in print/quick preview; javascript: stays blocked above. */
+        if (/^(blob:|data:)/i.test(s)) {
+            return s;
         }
         return s;
     }
@@ -670,7 +674,7 @@
             return (
                 `<div class="eko-sampa-canvas__element" style="${pos}">` +
                 `<div class="eko-sampa-canvas__frame" style="${frame}">` +
-                `<img class="eko-sampa-canvas__img" style="${img}" src="${escapeHtml(src)}" alt="" loading="eager" decoding="sync"${options && options.forThumbnail && isCrossOriginImageUrl(src) ? ' crossorigin="anonymous"' : ''} />` +
+                `<img class="eko-sampa-canvas__img" style="${img}" src="${escapeHtml(src)}" alt="" loading="eager" decoding="sync"${((options && options.forThumbnail) || (options && options.forPrint)) && isCrossOriginImageUrl(src) ? ' crossorigin="anonymous"' : ''} />` +
                 `</div></div>`
             );
         }

@@ -686,8 +686,35 @@ final class Eko_Sampa_Assets {
                         'root'           => esc_url_raw(rest_url('eko-sampa/v1/')),
                         'nonce'          => wp_create_nonce('wp_rest'),
                         'pluginVersion'  => EKO_SAMPA_VERSION,
+                        'quickPrint'     => [
+                            'enabled' => (bool) apply_filters('eko_sampa_quick_print_enabled', true),
+                        ],
+                        'canOrderCreate' => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
+                        'render'         => [
+                            'schemaVersion' => Eko_Sampa_Render_Schema::VERSION,
+                            'units'         => Eko_Sampa_Render_Schema::units_meta(),
+                            'debug'         => (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG)
+                                || (isset($_GET['eko_render_debug']) && (string) $_GET['eko_render_debug'] === '1'),
+                        ],
                     ]
                 );
+                if (wp_script_is(self::HANDLE_EKO_CANVAS_RENDERER, 'registered')) {
+                    wp_add_inline_script(
+                        self::HANDLE_EKO_CANVAS_RENDERER,
+                        'window.ekoSampaRender=Object.assign(window.ekoSampaRender||{},'
+                            . wp_json_encode(
+                                [
+                                    'schemaVersion' => Eko_Sampa_Render_Schema::VERSION,
+                                    'units'         => Eko_Sampa_Render_Schema::units_meta(),
+                                    'debug'         => (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG)
+                                        || (isset($_GET['eko_render_debug']) && (string) $_GET['eko_render_debug'] === '1'),
+                                ],
+                                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                            )
+                            . ');',
+                        'after'
+                    );
+                }
             }
         } elseif ($this->is_frontend_orders_view()) {
             if (wp_script_is(self::HANDLE_SORTABLE, 'registered')) {

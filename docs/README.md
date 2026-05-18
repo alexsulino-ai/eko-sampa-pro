@@ -2,9 +2,15 @@
 
 Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/v1`, Alpine CRUD). Objetivo: blindar o domínio contra regressões — cada regra crítica tem arquivo, contrato e ponto de código rastreável.
 
-**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (1.7.5+)  
-**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` = `1.0.6`  
+**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (ex.: 1.7.7)  
+**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` (ex.: 1.0.10 — inclui quick print jobs)  
 **Opção WordPress:** `eko_sampa_db_version`
+
+---
+
+## Pacote de continuidade (arquitetura + anti-regressão)
+
+Índice único para onboarding técnico do estado atual: [CONSOLIDATION-INDEX.md](CONSOLIDATION-INDEX.md) (editor visual, thumbnails, quick print, contratos, **DO-NOT-BREAK**, limitações, changelog técnico).
 
 ---
 
@@ -27,6 +33,10 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 
 ### Arquitetura
 
+- [CONSOLIDATION-INDEX.md](CONSOLIDATION-INDEX.md) — **índice** continuidade (thumbnail, quick print, contratos)
+- [PROJECT-CONTINUITY-OVERVIEW.md](architecture/PROJECT-CONTINUITY-OVERVIEW.md) — visão transversal
+- [EDITOR-VISUAL-SYSTEM.md](architecture/EDITOR-VISUAL-SYSTEM.md) — lifecycle editor, DOM vivo, persistência
+- [RECENT-ARCHITECTURAL-DECISIONS.md](architecture/RECENT-ARCHITECTURAL-DECISIONS.md) — decisões recentes explícitas
 - [overview.md](architecture/overview.md) — camadas, bootstrap, fluxos principais
 - [plugin-layout.md](architecture/plugin-layout.md) — pastas e classes
 - [domain-contracts.md](architecture/domain-contracts.md) — contratos Template / Order / Service / Client
@@ -45,12 +55,14 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [templates-schema.md](schema/templates-schema.md) — contrato canónico vs colunas legadas + bridge/repair
 - [orders-schema.md](schema/orders-schema.md) — `order_title` (rótulo operacional da OS)
 - [print-isolation.md](architecture/print-isolation.md) — UI operacional vs impressão física/PDF
+- [VISUAL-PIPELINE.md](rendering/VISUAL-PIPELINE.md) — `EkoCanvasRenderer`, alvos PRINT / THUMBNAIL
 - [ensure-schema.md](database/ensure-schema.md) — `ensure_schema()`, alignment, `row_exists()`
 - [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.6
 - [integrity.md](database/integrity.md) — órfãos, repair, opções WP
 
 ### Regras de negócio
 
+- [DOMAIN-CONSOLIDATED.md](business-rules/DOMAIN-CONSOLIDATED.md) — índice consolidado (templates, orders, quick print)
 - [templates.md](business-rules/templates.md)
 - [thumbnail-pipeline.md](templates/thumbnail-pipeline.md) — DOM → JPEG, fonts, assets, fallback servidor
 - [Visual Render Contract](architecture/visual-render-contract.md) — layout unificado print/thumbnail
@@ -66,6 +78,23 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [overview.md](frontend/overview.md) — rotas virtuais, Alpine factories
 - [alpine-crud.md](frontend/alpine-crud.md) — list/view/edit/new
 - [create-order.md](frontend/create-order.md) — JS: payload e pré-validação
+
+### Contratos, limitações e changelog técnico
+
+- [contracts/README.md](contracts/README.md) — payloads, invariantes
+- [contracts/DO-NOT-BREAK.md](contracts/DO-NOT-BREAK.md) — **sistemas sensíveis**
+- [known-limitations/README.md](known-limitations/README.md) — limitações reais (html2canvas, `window.print`, CORS)
+- [changelogs/TECH-RECENT.md](changelogs/TECH-RECENT.md) — changelog técnico recente
+
+### Quick Print e thumbnails (pacote)
+
+- [quick-print/README.md](quick-print/README.md) — objetivo, diferença vs Orders, modal, jobs
+- [quick-print/LIFECYCLE-AND-CONTRACTS.md](quick-print/LIFECYCLE-AND-CONTRACTS.md) — sequência canónica
+- [thumbnail-system/README.md](thumbnail-system/README.md) — regra de ouro, pipeline atual (html2canvas)
+
+### Editor (índice)
+
+- [editor/README.md](editor/README.md) — ligação ao pacote de continuidade + relatórios em `docs/editor/*`
 
 ### Backend e API
 

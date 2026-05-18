@@ -188,6 +188,7 @@ final class Eko_Sampa_Database {
             '1.0.7' => [$this, 'migrate_to_1_0_7'],
             '1.0.8' => [$this, 'migrate_to_1_0_8'],
             '1.0.9' => [$this, 'migrate_to_1_0_9'],
+            '1.0.10' => [$this, 'migrate_to_1_0_10'],
         ];
     }
 
@@ -834,6 +835,34 @@ final class Eko_Sampa_Database {
 
         global $wpdb;
         $this->schema_align_templates($wpdb);
+    }
+
+    /**
+     * Quick print jobs (editor) — no link to orders table.
+     */
+    private function migrate_to_1_0_10(string $charset_collate): void {
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+        global $wpdb;
+
+        $suffix = ' ) ENGINE=InnoDB ' . $charset_collate . ';';
+        $table   = $wpdb->prefix . 'eko_sampa_quick_print_jobs';
+        $sql     = "CREATE TABLE {$table} (
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			user_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			template_id bigint(20) unsigned NOT NULL DEFAULT 0,
+			status varchar(32) NOT NULL DEFAULT 'queued',
+			quantity smallint(5) unsigned NOT NULL DEFAULT 1,
+			printer_key varchar(191) NOT NULL DEFAULT '',
+			preset_key varchar(191) NOT NULL DEFAULT '',
+			created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			PRIMARY KEY  (id),
+			KEY user_created (user_id, created_at),
+			KEY template_id (template_id)
+		{$suffix}";
+
+        dbDelta($sql);
     }
 
     /**
