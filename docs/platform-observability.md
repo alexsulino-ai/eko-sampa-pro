@@ -38,3 +38,7 @@ Returns a JSON document including:
 
 - Avoid **synchronous** popularity recompute on every catalog request.
 - Prefer **hooks + small increments** over scanning history tables for dashboards.
+
+## User governance (admin)
+
+Operational user metrics for **Eko Sampa → Users** reuse the same philosophy: the list screen reads **cached usage snapshots** (`Eko_Sampa_Capabilities::get_usage_snapshot`) instead of running heavy `COUNT(*)` across all tables on every request. The optional analytics strip on that page samples at most the **200 most recently registered** accounts for blocked / near-template-quota signals — it is indicative, not a full audit trail. See [user-management-architecture.md](user-management-architecture.md).

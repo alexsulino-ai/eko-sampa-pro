@@ -2,7 +2,7 @@
 
 Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/v1`, Alpine CRUD). Objetivo: blindar o domínio contra regressões — cada regra crítica tem arquivo, contrato e ponto de código rastreável.
 
-**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (ex.: 1.10.0)  
+**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (ex.: 1.11.0)  
 **Versão do schema (código):** `EKO_SAMPA_DB_VERSION` (ex.: 1.0.12 — hardening de sessão + quick print `expires_at` / `abandoned_at`)  
 **Opção WordPress:** `eko_sampa_db_version`
 
@@ -30,6 +30,9 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 ### Segurança e permissões
 
 - [permission-matrix.md](security/permission-matrix.md) — REST ↔ models, drift, `explain_row_visibility`
+- [user-management-architecture.md](user-management-architecture.md) — papéis Eko, estado operacional, admin Users, extensão
+- [roles-and-capabilities.md](roles-and-capabilities.md) — mapa de capabilities e onde são aplicadas
+- [quota-system.md](quota-system.md) — limites por utilizador, snapshots, enforcement REST
 
 ### Marketing público e convidados
 

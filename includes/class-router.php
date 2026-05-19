@@ -40,7 +40,7 @@ final class Eko_Sampa_Router {
         add_menu_page(
             __('Eko Sampa', 'eko-sampa'),
             __('Eko Sampa', 'eko-sampa'),
-            'manage_options',
+            Eko_Sampa_Roles::CAP_MANAGE_EKO_PLATFORM,
             self::MENU_SLUG,
             [$this, 'render_admin_app_shell'],
             'dashicons-art',
@@ -51,9 +51,18 @@ final class Eko_Sampa_Router {
             self::MENU_SLUG,
             __('Visual editor', 'eko-sampa'),
             __('Editor', 'eko-sampa'),
-            'manage_options',
+            Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES,
             self::EDITOR_SLUG,
             [$this, 'render_editor_canvas']
+        );
+
+        add_submenu_page(
+            self::MENU_SLUG,
+            __('Users', 'eko-sampa'),
+            __('Users', 'eko-sampa'),
+            Eko_Sampa_Roles::CAP_MANAGE_EKO_USERS,
+            Eko_Sampa_User_Admin::MENU_SLUG,
+            [$this, 'render_users_admin_page']
         );
 
         add_submenu_page(
@@ -69,7 +78,7 @@ final class Eko_Sampa_Router {
             self::MENU_SLUG,
             __('Public home & guests', 'eko-sampa'),
             __('Public & guests', 'eko-sampa'),
-            'manage_options',
+            Eko_Sampa_Roles::CAP_MANAGE_EKO_PLATFORM,
             self::MENU_SLUG . '-public-experience',
             [$this, 'render_public_experience_page']
         );
@@ -79,7 +88,7 @@ final class Eko_Sampa_Router {
      * Dashboard shell: sidebar, header, content (layout only).
      */
     public function render_admin_app_shell(): void {
-        if (! current_user_can('manage_options')) {
+        if (! Eko_Sampa_Capabilities::can_access_eko_wp_admin()) {
             wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
         }
 
@@ -93,7 +102,7 @@ final class Eko_Sampa_Router {
      * Visual editor: canvas viewport, grid, zoom (layout only).
      */
     public function render_editor_canvas(): void {
-        if (! current_user_can('manage_options')) {
+        if (! current_user_can('manage_options') && ! current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES)) {
             wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
         }
 
@@ -181,8 +190,29 @@ final class Eko_Sampa_Router {
         }
     }
 
+    public function render_users_admin_page(): void {
+        if (! Eko_Sampa_Capabilities::can_manage_eko_users_screen()) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
+        }
+
+        $uid = isset($_GET['user_id']) ? absint((int) $_GET['user_id']) : 0;
+        if ($uid > 0 && current_user_can('edit_user', $uid)) {
+            $view = EKO_SAMPA_PLUGIN_DIR . 'views/admin-user-detail.php';
+            if (is_readable($view)) {
+                require $view;
+
+                return;
+            }
+        }
+
+        $view = EKO_SAMPA_PLUGIN_DIR . 'views/admin-users-list.php';
+        if (is_readable($view)) {
+            require $view;
+        }
+    }
+
     public function render_public_experience_page(): void {
-        if (! current_user_can('manage_options')) {
+        if (! Eko_Sampa_Capabilities::can_access_eko_wp_admin()) {
             wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
         }
 

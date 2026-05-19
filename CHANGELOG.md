@@ -6,6 +6,26 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.11.0] — 2026-05-18
+
+### Adicionado
+
+- **Papéis Eko (WP):** `eko_manager`, `eko_designer`, `eko_operator` com capacidades dedicadas (`manage_eko_platform`, `manage_eko_users`, `view_eko_templates`, `view_eko_analytics_admin`, `manage_eko_quotas`, …) sem substituir `administrator`.
+- **`Eko_Sampa_Capabilities`:** estado operacional `eko_user_status` (active / pending / paused / blocked), quotas efetivas por utilizador (user meta + opções globais), snapshots de uso em transient (~2 min), filtro `rest_pre_dispatch` em rotas autenticadas `eko-sampa/v1`, filtros `eko_sampa_effective_quotas_for_user` e `eko_sampa_usage_snapshot_for_user` para evolução futura (billing / planos).
+- **Admin Eko → Users:** listagem, detalhe, ações rápidas (ativo / pendente / pausa / bloqueio, limpar jobs QP abertos, reset quotas, hook `eko_sampa_user_admin_impersonate_requested`), fatia leve de analytics na lista (amostra recente).
+- **Perfil WordPress:** secção “Eko Sampa” (papel, estado, uso, overrides de quota para quem pode).
+- **REST / frontend:** leitura de templates para operadores (`view_eko_templates`), listagem `GET /templates` alinhada; quick print para quem tem orders + visibilidade de templates; quotas em `POST` clients / templates / orders; `GET /users` com `manage_eko_users`; `/me` com `eko_user_status`, quotas e uso; endurecimento alinhado ao estado (já no pre-dispatch).
+- **Sincronização de caps:** `Eko_Sampa_Roles::sync_roles_from_codebase()` em atualizações de plugin (`eko_sampa_roles_sync_version`).
+- **Docs:** `docs/user-management-architecture.md`, `docs/roles-and-capabilities.md`, `docs/quota-system.md`.
+
+### Alterado
+
+- **Menu admin:** entrada principal `manage_eko_platform`; submenu Users `manage_eko_users`; Diagnostics mantém `manage_options`.
+- **`Eko_Sampa_Admin_Redirect`:** utilizadores com `access_eko_dashboard` podem permanecer em `admin.php?page=eko-sampa*` e em `profile.php` (antes eram expulsos de todo o wp-admin).
+- **`helpers-capabilities.php`:** mapa frontend delegado a `Eko_Sampa_Capabilities::frontend_capability_map()`.
+
+---
+
 ## [1.10.0] — 2026-05-18
 
 ### Adicionado

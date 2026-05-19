@@ -180,6 +180,11 @@ final class Eko_Sampa_Frontend_Router {
             wp_die(esc_html__('You do not have permission to view this page.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 403]);
         }
 
+        $block = self::crud_write_policy_block_reason($view);
+        if ($block !== '') {
+            wp_die(esc_html($block), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 403]);
+        }
+
         if ($view === 'print') {
             $oid = self::current_order_id();
             if ($oid <= 0 || ! is_array((new Eko_Sampa_Order())->get($oid))) {
@@ -220,6 +225,36 @@ final class Eko_Sampa_Frontend_Router {
     }
 
     /**
+     * Blocks CRUD write surfaces for paused accounts and template writes for view-only roles.
+     *
+     * @return string Empty string when allowed, otherwise a translated message for wp_die / UI.
+     */
+    private static function crud_write_policy_block_reason(string $view): string {
+        if (! in_array($view, self::CRUD_VIEWS, true)) {
+            return '';
+        }
+        $action = self::current_action();
+        if (! in_array($action, ['new', 'edit'], true)) {
+            return '';
+        }
+        $uid = (int) get_current_user_id();
+        if ($uid <= 0) {
+            return '';
+        }
+        $st = Eko_Sampa_Capabilities::get_user_status($uid);
+        if ($st === Eko_Sampa_Capabilities::STATUS_PAUSED) {
+            return __('Your Eko Sampa account is read-only. You can browse existing records but cannot create or edit until an administrator reactivates it.', 'eko-sampa');
+        }
+        if ($view === 'templates' && ! current_user_can('manage_options') && ! current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES)) {
+            return __('You can view templates but cannot create or edit them with your current role.', 'eko-sampa');
+        }
+
+        $filtered = apply_filters('eko_sampa_frontend_crud_write_block', '', $view, $action, $uid);
+
+        return is_string($filtered) ? $filtered : '';
+    }
+
+    /**
      * Route-level capability guard (frontend + shortcode).
      */
     private static function viewer_can_access(string $view): bool {
@@ -233,7 +268,9 @@ final class Eko_Sampa_Frontend_Router {
             'dashboard', 'profile' => current_user_can(Eko_Sampa_Roles::CAP_ACCESS_DASHBOARD),
             'clients' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
             'services' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
-            'templates', 'editor' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
+            'templates' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES)
+                || current_user_can(Eko_Sampa_Roles::CAP_VIEW_EKO_TEMPLATES),
+            'editor' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
             'orders' => current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
             default => false,
         };
@@ -535,6 +572,13 @@ final class Eko_Sampa_Frontend_Router {
             return;
         }
 
+        $block = self::crud_write_policy_block_reason($view);
+        if ($block !== '') {
+            echo '<p class="eko-sampa-gate text-amber-700">' . esc_html($block) . '</p>';
+
+            return;
+        }
+
         if ($view === 'print') {
             $print = EKO_SAMPA_PLUGIN_DIR . 'views/frontend-print.php';
             if (is_readable($print)) {
@@ -557,8 +601,24 @@ final class Eko_Sampa_Frontend_Router {
     }
 
     private static function current_user_may_use_app(): bool {
-        return current_user_can('manage_options')
-            || current_user_can(Eko_Sampa_Roles::CAP_ACCESS_DASHBOARD);
+        if (! is_user_logged_in()) {
+            return false;
+        }
+        if (current_user_can('manage_options')) {
+            return true;
+        }
+        if (! current_user_can(Eko_Sampa_Roles::CAP_ACCESS_DASHBOARD)) {
+            return false;
+        }
+        $uid = (int) get_current_user_id();
+        if (Eko_Sampa_Capabilities::user_bypasses_eko_gates($uid)) {
+            return true;
+        }
+        if (Eko_Sampa_Capabilities::get_user_status($uid) === Eko_Sampa_Capabilities::STATUS_BLOCKED) {
+            return false;
+        }
+
+        return true;
     }
 
     private static function render_shortcode_gate(): void {

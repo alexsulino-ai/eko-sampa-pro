@@ -17,27 +17,7 @@ if (! defined('ABSPATH')) {
  * @return array<string, bool>
  */
 function eko_sampa_frontend_capabilities(): array {
-    $admin = current_user_can('manage_options');
-
-    return [
-        'client.view'     => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
-        'client.edit'     => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
-        'client.delete'   => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_CLIENTS),
-        'service.view'    => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
-        'service.edit'    => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
-        'service.delete'  => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_SERVICES),
-        'template.view'   => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
-        'template.edit'   => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
-        'template.editor' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
-        'template.duplicate' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
-        'template.delete' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES),
-        'order.view'      => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-        'order.create'    => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-        'order.edit'      => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-        'order.print'     => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-        'order.duplicate' => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-        'order.delete'    => $admin || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
-    ];
+    return Eko_Sampa_Capabilities::frontend_capability_map();
 }
 
 /**

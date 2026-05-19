@@ -61,9 +61,12 @@ final class Eko_Sampa_Plugin {
      */
     public function boot(): void {
         $this->maybe_upgrade_database();
+        $this->maybe_sync_roles_capabilities();
         add_action('init', [$this, 'load_textdomain_on_init'], 1);
 
         $this->roles->register_hooks();
+        Eko_Sampa_Capabilities::register_hooks();
+        Eko_Sampa_User_Admin::register_hooks();
         $this->frontend_router->register_hooks();
         $this->admin_redirect->register_hooks();
         $this->shortcodes->register_hooks();
@@ -119,6 +122,20 @@ final class Eko_Sampa_Plugin {
      */
     private function maybe_upgrade_database(): void {
         $this->database->ensure_schema();
+    }
+
+    /**
+     * Ensure new capabilities reach existing installs when the plugin is updated without re-running activation.
+     */
+    private function maybe_sync_roles_capabilities(): void {
+        $key = 'eko_sampa_roles_sync_version';
+        if (get_option($key, '') === EKO_SAMPA_VERSION) {
+            return;
+        }
+        if (class_exists('Eko_Sampa_Roles', false)) {
+            Eko_Sampa_Roles::sync_roles_from_codebase();
+        }
+        update_option($key, EKO_SAMPA_VERSION, false);
     }
 
     public function load_textdomain_on_init(): void {

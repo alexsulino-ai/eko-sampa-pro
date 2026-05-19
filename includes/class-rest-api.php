@@ -109,7 +109,7 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::READABLE,
                 'callback'            => [$this, 'route_users'],
-                'permission_callback' => [$this, 'require_admin'],
+                'permission_callback' => [$this, 'require_manage_eko_users_or_admin'],
                 'args'                => [
                     'search' => ['type' => 'string', 'required' => false],
                 ],
@@ -366,7 +366,7 @@ final class Eko_Sampa_Rest_Api {
                 [
                     'methods'             => \WP_REST_Server::READABLE,
                     'callback'            => [$this, 'route_templates_list'],
-                    'permission_callback' => [$this, 'require_templates_cap'],
+                    'permission_callback' => [$this, 'require_templates_list_cap'],
                 ],
                 [
                     'methods'             => \WP_REST_Server::CREATABLE,
@@ -659,8 +659,24 @@ final class Eko_Sampa_Rest_Api {
         return current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES);
     }
 
+    /**
+     * List templates (operators may read visible rows only; same list handler applies ownership filters).
+     */
+    public function require_templates_list_cap(): bool {
+        return $this->require_templates_cap()
+            || current_user_can(Eko_Sampa_Roles::CAP_VIEW_EKO_TEMPLATES);
+    }
+
+    public function require_manage_eko_users_or_admin(): bool {
+        return current_user_can('manage_options')
+            || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_EKO_USERS);
+    }
+
     public function template_rest_read_permission(\WP_REST_Request $request): bool {
         if ($this->require_templates_cap()) {
+            return true;
+        }
+        if (current_user_can(Eko_Sampa_Roles::CAP_VIEW_EKO_TEMPLATES)) {
             return true;
         }
 
@@ -781,12 +797,17 @@ final class Eko_Sampa_Rest_Api {
 
         $u = wp_get_current_user();
 
+        $uid = (int) $u->ID;
+
         return new \WP_REST_Response(
             [
-                'id'           => $u->ID,
-                'display_name' => $u->display_name,
-                'email'        => $u->user_email,
-                'is_admin'     => current_user_can('manage_options'),
+                'id'               => $u->ID,
+                'display_name'     => $u->display_name,
+                'email'            => $u->user_email,
+                'is_admin'         => current_user_can('manage_options'),
+                'eko_user_status'  => Eko_Sampa_Capabilities::get_user_status($uid),
+                'eko_quotas'       => Eko_Sampa_Capabilities::get_effective_quotas($uid),
+                'eko_usage'        => Eko_Sampa_Capabilities::get_usage_snapshot($uid),
             ]
         );
     }
@@ -861,6 +882,10 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_clients_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $quota = Eko_Sampa_Capabilities::check_client_quota_before_create((int) get_current_user_id());
+        if ($quota instanceof \WP_Error) {
+            return $quota;
+        }
         $id = (new Eko_Sampa_Client())->create($this->json_params($request));
         if (! $id) {
             return new \WP_Error(
@@ -871,6 +896,8 @@ final class Eko_Sampa_Rest_Api {
         }
 
         $row = (new Eko_Sampa_Client())->get((int) $id);
+
+        Eko_Sampa_Capabilities::invalidate_usage_cache((int) get_current_user_id());
 
         return new \WP_REST_Response($row, 201);
     }
@@ -1240,6 +1267,17 @@ final class Eko_Sampa_Rest_Api {
             return $err;
         }
 
+        $actor = (int) get_current_user_id();
+        $q1    = Eko_Sampa_Capabilities::check_template_quota_before_create($actor);
+        if ($q1 instanceof \WP_Error) {
+            return $q1;
+        }
+        $bytes = strlen((string) ( $params['json_data'] ?? '' ));
+        $q2    = Eko_Sampa_Capabilities::check_storage_quota_for_template_payload($actor, $bytes);
+        if ($q2 instanceof \WP_Error) {
+            return $q2;
+        }
+
         $id = (new Eko_Sampa_Template())->create($params);
         if (! $id) {
             return new \WP_Error(
@@ -1254,6 +1292,8 @@ final class Eko_Sampa_Rest_Api {
             Eko_Sampa_Template_Thumbnail_Generator::generate_for_id((int) $id, ['request_source' => 'template_write_hook']);
             $row = (new Eko_Sampa_Template())->get((int) $id);
         }
+
+        Eko_Sampa_Capabilities::invalidate_usage_cache($actor);
 
         return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row, 201);
     }
@@ -1817,6 +1857,11 @@ final class Eko_Sampa_Rest_Api {
             $params['service_id'] = (int) $relations['debug']['service_id'];
         }
 
+        $quota_o = Eko_Sampa_Capabilities::check_order_quota_before_create((int) get_current_user_id());
+        if ($quota_o instanceof \WP_Error) {
+            return $quota_o;
+        }
+
         $id = $order->create($params);
         if (! $id) {
             return new \WP_Error(
@@ -1836,6 +1881,11 @@ final class Eko_Sampa_Rest_Api {
                 'guest_template_flow'   => $guest_flow,
             ]
         );
+
+        $actor_oid = (int) get_current_user_id();
+        if ($actor_oid > 0) {
+            Eko_Sampa_Capabilities::invalidate_usage_cache($actor_oid);
+        }
 
         $created = $order->get((int) $id);
 
@@ -2203,6 +2253,13 @@ final class Eko_Sampa_Rest_Api {
         }
 
         if ($this->require_templates_cap()) {
+            return true;
+        }
+
+        if (is_user_logged_in()
+            && $this->require_orders_cap()
+            && (current_user_can(Eko_Sampa_Roles::CAP_VIEW_EKO_TEMPLATES) || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES))
+        ) {
             return true;
         }
 
