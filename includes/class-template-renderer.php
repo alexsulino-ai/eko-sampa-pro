@@ -16,9 +16,47 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Template_Renderer {
 
-    private const DESIGN_WIDTH = 800.0;
+    /** Logical px per mm (CSS 96dpi). Must match `MM_TO_PX` in `assets/js/editor-canvas.js`. */
+    private const MM_TO_CSS_PX = 96.0 / 25.4;
 
-    private const DESIGN_HEIGHT = 1131.0;
+    /**
+     * @return array{0: float, 1: float} Design canvas width/height in px (same basis as editor).
+     */
+    private function design_canvas_px(int $width_mm, int $height_mm): array {
+        $w = max(1, (int) round($width_mm * self::MM_TO_CSS_PX));
+        $h = max(1, (int) round($height_mm * self::MM_TO_CSS_PX));
+
+        return [ (float) $w, (float) $h ];
+    }
+
+    /**
+     * Payload for EkoCanvasRenderer / order live preview (px canvas, tokens applied).
+     *
+     * @param array<string, mixed> $template_row
+     * @param array<string, string> $context
+     *
+     * @return array{width_mm: int, height_mm: int, elements: array<int, array<string, mixed>>}
+     */
+    public function build_editor_preview_payload(array $template_row, array $context): array {
+        $width_mm  = max(1, (int) ($template_row['width_mm'] ?? 210));
+        $height_mm = max(1, (int) ($template_row['height_mm'] ?? 297));
+        $page_bg   = $this->sanitize_css_color($template_row['background_color'] ?? '#ffffff', '#ffffff');
+        if (strtolower($page_bg) === 'transparent') {
+            $page_bg = '#ffffff';
+        }
+
+        return Eko_Sampa_Render_Schema::envelope(
+            [
+                'width_mm'          => $width_mm,
+                'height_mm'         => $height_mm,
+                'background_color' => $page_bg,
+                'elements'          => $this->apply_context_to_elements(
+                    $this->parse_elements_from_template_row($template_row),
+                    $context
+                ),
+            ]
+        );
+    }
 
     /**
      * @param array<string, mixed> $template_row Row from wp_eko_sampa_templates.
@@ -27,41 +65,45 @@ final class Eko_Sampa_Template_Renderer {
      * @return array{width_mm: int, height_mm: int, html: string}
      */
     public function render(array $template_row, array $context, bool $for_print = false): array {
-        $width_mm  = max(1, (int) ($template_row['width_mm'] ?? 210));
-        $height_mm = max(1, (int) ($template_row['height_mm'] ?? 297));
+        $preview   = $this->build_editor_preview_payload($template_row, $context);
+        $width_mm  = (int) $preview['width_mm'];
+        $height_mm = (int) $preview['height_mm'];
+        [ $canvas_w, $canvas_h ] = $this->design_canvas_px($width_mm, $height_mm);
 
-        $raw = $template_row['json_data'] ?? null;
-        $doc = [];
-        if (is_string($raw) && $raw !== '') {
-            $decoded = json_decode($raw, true);
-            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
-                $doc = $decoded;
-            }
+        $page_bg = $this->sanitize_css_color($preview['background_color'] ?? '#ffffff', '#ffffff');
+        if (strtolower($page_bg) === 'transparent') {
+            $page_bg = '#ffffff';
         }
-
-        $elements = [];
-        if (isset($doc['elements']) && is_array($doc['elements'])) {
-            $elements = $doc['elements'];
-        } elseif (isset($doc[0]) && is_array($doc[0])) {
-            $elements = $doc;
-        }
-
-        $frame_style = sprintf(
-            'position:relative;width:%dmm;height:%dmm;background:#fff;overflow:hidden;box-sizing:border-box;',
+        $print_adjust = '-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;';
+        $root_style   = sprintf(
+            'position:relative;width:%dmm;height:%dmm;%soverflow:hidden;box-sizing:border-box;background:%s;',
             $width_mm,
-            $height_mm
+            $height_mm,
+            $for_print ? $print_adjust : '',
+            $page_bg
+        );
+        $surface_style = sprintf(
+            'width:%dpx;height:%dpx;position:relative;box-sizing:border-box;background:%s;overflow:hidden;%s',
+            (int) $canvas_w,
+            (int) $canvas_h,
+            $page_bg,
+            $for_print ? $print_adjust : ''
         );
 
         $inner = '';
-        foreach ($elements as $el) {
+        $stack_i = 0;
+        foreach ($preview['elements'] as $el) {
             if (! is_array($el)) {
                 continue;
             }
-            $inner .= $this->render_element($el, $context, $for_print);
+            $inner .= $this->render_element($el, $for_print, $stack_i);
+            ++$stack_i;
         }
 
         $wrap = $for_print ? 'eko-sampa-print-root' : 'eko-sampa-preview-root';
-        $html = '<div class="' . esc_attr($wrap) . '" style="' . esc_attr($frame_style) . '">' . $inner . '</div>';
+        $html = '<div class="' . esc_attr($wrap) . '" style="' . esc_attr($root_style) . '">'
+            . '<div class="eko-sampa-canvas" style="' . esc_attr($surface_style) . '">' . $inner . '</div>'
+            . '</div>';
 
         return [
             'width_mm'  => $width_mm,
@@ -71,80 +113,360 @@ final class Eko_Sampa_Template_Renderer {
     }
 
     /**
-     * @param array<string, mixed> $el
-     * @param array<string, string> $context
+     * @param array<string, mixed> $template_row
+     *
+     * @return array<int, array<string, mixed>>
      */
-    private function render_element(array $el, array $context, bool $for_print): string {
+    public function parse_elements_from_template_row(array $template_row): array {
+        $raw = $template_row['json_data'] ?? null;
+        $doc = [];
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (JSON_ERROR_NONE === json_last_error() && is_array($decoded)) {
+                $doc = $decoded;
+            }
+        }
+
+        if (isset($doc['elements']) && is_array($doc['elements'])) {
+            return $doc['elements'];
+        }
+        if (isset($doc[0]) && is_array($doc[0])) {
+            return $doc;
+        }
+
+        return [];
+    }
+
+    /**
+     * Deep-merge placeholder tokens into text/placeholder elements (same rules as {@see render()}).
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @param array<string, string>            $context
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function apply_context_to_elements(array $elements, array $context): array {
+        $out = [];
+        foreach ($elements as $el) {
+            if (! is_array($el)) {
+                continue;
+            }
+            $json = wp_json_encode($el);
+            if (! is_string($json)) {
+                continue;
+            }
+            $copy = json_decode($json, true);
+            if (! is_array($copy)) {
+                continue;
+            }
+            $type = sanitize_key((string) ($copy['type'] ?? ''));
+            if ($type === 'text' || $type === 'placeholder') {
+                $raw            = (string) ($copy['content'] ?? '');
+                $copy['content'] = Eko_Sampa_Placeholder_Tokens::replace_in_text($raw, $context);
+            }
+            $out[] = $copy;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $el
+     * @param int                  $stack_index Sibling paint order (0 = back). Must match `EkoCanvasRenderer.stackZFromIndex` (10 + index).
+     */
+    private function render_element(array $el, bool $for_print, int $stack_index = 0): string {
         $x      = (float) ($el['x'] ?? 0);
         $y      = (float) ($el['y'] ?? 0);
-        $w      = (float) ($el['width'] ?? 1);
-        $h      = (float) ($el['height'] ?? 1);
+        $w      = (float) ($el['width'] ?? 10);
+        $h      = (float) ($el['height'] ?? 10);
         $type   = sanitize_key((string) ($el['type'] ?? 'text'));
         $styles = isset($el['styles']) && is_array($el['styles']) ? $el['styles'] : [];
 
-        $left   = max(0.0, min(100.0, ($x / self::DESIGN_WIDTH) * 100.0));
-        $top    = max(0.0, min(100.0, ($y / self::DESIGN_HEIGHT) * 100.0));
-        $width  = max(0.0, min(100.0, ($w / self::DESIGN_WIDTH) * 100.0));
-        $height = max(0.0, min(100.0, ($h / self::DESIGN_HEIGHT) * 100.0));
+        $zi = 10 + max(0, $stack_index);
 
-        $base = sprintf(
-            'position:absolute;left:%F%%;top:%F%%;width:%F%%;height:%F%%;box-sizing:border-box;',
-            $left,
-            $top,
-            $width,
-            $height
+        $pos = sprintf(
+            'position:absolute;left:%Fpx;top:%Fpx;width:%Fpx;height:%Fpx;box-sizing:border-box;z-index:%d;',
+            $x,
+            $y,
+            $w,
+            $h,
+            $zi
         );
 
-        $font_size = isset($styles['fontSize']) ? (int) $styles['fontSize'] : 14;
-        $color     = isset($styles['color']) ? sanitize_hex_color((string) $styles['color']) : '#111827';
-        if (! $color) {
-            $color = '#111827';
-        }
+        $frame_css = $this->build_frame_css($styles, $type, $for_print);
+        $text_css  = $this->build_text_inner_css($styles, $for_print);
+        $text_wrap = $this->build_text_vertical_wrap_css($styles);
 
         switch ($type) {
             case 'image':
-                $src = isset($el['src']) ? esc_url((string) $el['src']) : '';
-                if ($src === '') {
-                    $src = isset($el['content']) ? esc_url((string) $el['content']) : '';
+                $raw_src = isset($el['src']) ? (string) $el['src'] : '';
+                if ($raw_src === '') {
+                    $raw_src = isset($el['content']) ? (string) $el['content'] : '';
                 }
+                $src = $this->resolve_public_url($raw_src);
                 if ($src === '') {
-                    return '<div style="' . esc_attr($base . 'background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>';
+                    return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                        . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css . ';background:#e5e7eb;border:1px dashed #94a3b8;') . '"></div>'
+                        . '</div>';
                 }
+                $img_css = $this->build_image_img_css($styles);
 
-                return '<div style="' . esc_attr($base) . '">'
-                    . '<img alt="" src="' . $src . '" style="width:100%;height:100%;object-fit:contain;display:block;" />'
-                    . '</div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '">'
+                    . '<img class="eko-sampa-canvas__img" alt="" src="' . $src . '" style="' . esc_attr($img_css) . '" loading="eager" decoding="sync" />'
+                    . '</div></div>';
 
             case 'rectangle':
-                return '<div style="' . esc_attr($base . 'background:#f1f5f9;border:1px solid #cbd5e1;') . '"></div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '"></div>'
+                    . '</div>';
 
             case 'placeholder':
             case 'text':
             default:
-                $raw_content = (string) ($el['content'] ?? '');
-                $text        = $this->replace_tokens($raw_content, $context);
-                $style       = $base . 'font-size:' . max(8, min(120, $font_size)) . 'px;color:' . $color . ';'
-                    . 'display:flex;align-items:flex-start;justify-content:flex-start;padding:2px;overflow:hidden;word-break:break-word;';
+                $text = (string) ($el['content'] ?? '');
 
-                return '<div style="' . esc_attr($style) . '">' . esc_html($text) . '</div>';
+                return '<div class="eko-sampa-canvas__element" style="' . esc_attr($pos) . '">'
+                    . '<div class="eko-sampa-canvas__frame" style="' . esc_attr($frame_css) . '">'
+                    . '<div class="eko-sampa-canvas__text-wrap" style="' . esc_attr($text_wrap) . '">'
+                    . '<span class="eko-sampa-canvas__text" style="' . esc_attr($text_css) . '">' . esc_html($text) . '</span>'
+                    . '</div></div></div>';
         }
     }
 
     /**
-     * @param array<string, string> $context
+     * Outer frame: opacity, border, radius, shadow, rotation (matches editor `elementFrameCss`).
+     *
+     * @param array<string, mixed> $styles
      */
-    private function replace_tokens(string $text, array $context): string {
-        return (string) preg_replace_callback(
-            '/\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/',
-            static function (array $m) use ($context): string {
-                $key = strtolower((string) ($m[1] ?? ''));
-                if ($key === '') {
-                    return '';
-                }
+    private function build_frame_css(array $styles, string $type = '', bool $for_print = false): string {
+        $opacity = isset($styles['opacity']) ? (float) $styles['opacity'] : 1.0;
+        if ($opacity < 0.0) {
+            $opacity = 0.0;
+        }
+        if ($opacity > 1.0) {
+            $opacity = 1.0;
+        }
 
-                return $context[ $key ] ?? $m[0];
-            },
-            $text
+        $br = isset($styles['borderRadius']) ? max(0, (int) $styles['borderRadius']) : 0;
+        $bw = isset($styles['borderWidth']) ? max(0, (int) $styles['borderWidth']) : 0;
+        $bs = isset($styles['borderStyle']) ? strtolower((string) $styles['borderStyle']) : 'solid';
+        if (! in_array($bs, [ 'solid', 'dashed', 'dotted', 'none' ], true)) {
+            $bs = 'solid';
+        }
+        $bc = $this->sanitize_css_color($styles['borderColor'] ?? '#cbd5e1', '#cbd5e1');
+        $sh = $this->sanitize_box_shadow($styles['boxShadow'] ?? 'none');
+        $rot = isset($styles['rotate']) ? (float) $styles['rotate'] : 0.0;
+        if ($rot < -360.0) {
+            $rot = -360.0;
+        }
+        if ($rot > 360.0) {
+            $rot = 360.0;
+        }
+
+        $border = 'none';
+        if ($bw > 0 && $bs !== 'none') {
+            $border = sprintf('%dpx %s %s', $bw, $bs, $bc);
+        }
+
+        $overflow = 'hidden';
+        if (( $type === 'text' || $type === 'placeholder' ) && ! $for_print) {
+            $overflow = 'visible';
+        }
+
+        $css = sprintf(
+            'position:absolute;left:0;top:0;width:100%%;height:100%%;box-sizing:border-box;opacity:%F;border-radius:%dpx;border:%s;box-shadow:%s;transform:rotate(%Fdeg);transform-origin:center center;overflow:%s;',
+            $opacity,
+            $br,
+            $border,
+            $sh,
+            $rot,
+            $overflow
+        );
+
+        if ($type === 'rectangle') {
+            $css .= 'background:#f1f5f9;';
+        }
+
+        if ($type === 'text' || $type === 'placeholder') {
+            $bgf = $this->sanitize_css_color($styles['backgroundColor'] ?? 'transparent', 'transparent');
+            $css .= sprintf('background-color:%s;display:flex;flex-direction:column;min-height:0;', $bgf);
+        }
+
+        if ($type === 'image') {
+            $css .= 'background-color:transparent;';
+        }
+
+        if (in_array($type, [ 'text', 'placeholder', 'image', 'rectangle' ], true)) {
+            $css .= $this->build_frame_padding_css($styles, $type);
+        }
+
+        return $css;
+    }
+
+    /**
+     * Frame-only padding (matches `EkoCanvasRenderer.framePaddingCss`).
+     *
+     * @param array<string, mixed> $styles
+     */
+    private function build_frame_padding_css(array $styles, string $type): string {
+        $textish = ( $type === 'text' || $type === 'placeholder' );
+        $dt       = $textish ? 4 : 0;
+        $dr       = $textish ? 6 : 0;
+        $db       = $textish ? 4 : 0;
+        $dl       = $textish ? 6 : 0;
+
+        $pt = isset($styles['paddingTop']) ? max(0, min(120, (int) $styles['paddingTop'])) : $dt;
+        $pr = isset($styles['paddingRight']) ? max(0, min(120, (int) $styles['paddingRight'])) : $dr;
+        $pb = isset($styles['paddingBottom']) ? max(0, min(120, (int) $styles['paddingBottom'])) : $db;
+        $pl = isset($styles['paddingLeft']) ? max(0, min(120, (int) $styles['paddingLeft'])) : $dl;
+
+        return sprintf('padding:%dpx %dpx %dpx %dpx;', $pt, $pr, $pb, $pl);
+    }
+
+    /**
+     * Vertical distribution of the text block inside the frame (flex column).
+     *
+     * @param array<string, mixed> $styles
+     */
+    private function build_text_vertical_wrap_css(array $styles): string {
+        $av = isset($styles['alignVertical']) ? strtolower((string) $styles['alignVertical']) : 'top';
+        if (! in_array($av, [ 'top', 'center', 'bottom' ], true)) {
+            $av = 'top';
+        }
+        $jc = $av === 'center' ? 'center' : ( $av === 'bottom' ? 'flex-end' : 'flex-start' );
+
+        return sprintf(
+            'flex:1;min-width:0;min-height:0;width:100%%;display:flex;flex-direction:column;justify-content:%s;',
+            $jc
         );
     }
+
+    /**
+     * @param array<string, mixed> $styles
+     */
+    private function build_text_inner_css(array $styles, bool $for_print = false): string {
+        $ff = $this->sanitize_font_family($styles['fontFamily'] ?? 'system-ui, sans-serif');
+        $fs = isset($styles['fontSize']) ? max(6, min(200, (int) $styles['fontSize'])) : 16;
+        $fw = isset($styles['fontWeight']) ? (string) $styles['fontWeight'] : '400';
+        $n  = (int) round((float) $fw);
+        $fw = ($n >= 100 && $n <= 900) ? (string) $n : '400';
+        $fst = isset($styles['fontStyle']) && strtolower((string) $styles['fontStyle']) === 'italic' ? 'italic' : 'normal';
+        $td  = isset($styles['textDecoration']) ? strtolower((string) $styles['textDecoration']) : 'none';
+        if (! in_array($td, [ 'none', 'underline', 'line-through', 'underline line-through' ], true)) {
+            $td = 'none';
+        }
+        $ta = isset($styles['textAlign']) ? strtolower((string) $styles['textAlign']) : 'left';
+        if (! in_array($ta, [ 'left', 'center', 'right', 'justify' ], true)) {
+            $ta = 'left';
+        }
+        $color = $this->sanitize_css_color($styles['color'] ?? '#111827', '#111827');
+        $lh    = isset($styles['lineHeight']) ? (float) $styles['lineHeight'] : 1.35;
+        if ($lh < 0.8 || $lh > 4.0) {
+            $lh = 1.35;
+        }
+        $ls = isset($styles['letterSpacing']) ? max(-20.0, min(40.0, (float) $styles['letterSpacing'])) : 0.0;
+        $tt = isset($styles['textTransform']) ? strtolower((string) $styles['textTransform']) : 'none';
+        if (! in_array($tt, [ 'none', 'uppercase', 'lowercase', 'capitalize' ], true)) {
+            $tt = 'none';
+        }
+
+        $overflow = $for_print ? 'hidden' : 'visible';
+        $max_h   = $for_print ? '100%' : 'none';
+
+        return sprintf(
+            'flex:0 1 auto;max-height:%s;min-width:0;min-height:0;width:100%%;margin:0;padding:0;box-sizing:border-box;font-family:%s;font-size:%dpx;font-weight:%s;font-style:%s;text-decoration:%s;text-align:%s;color:%s;line-height:%F;letter-spacing:%Fpx;text-transform:%s;white-space:pre-wrap;word-break:break-word;overflow:%s;display:block;',
+            $max_h,
+            $ff,
+            $fs,
+            $fw,
+            $fst,
+            $td,
+            $ta,
+            $color,
+            $lh,
+            $ls,
+            $tt,
+            $overflow
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $styles
+     */
+    private function build_image_img_css(array $styles): string {
+        $fit = isset($styles['objectFit']) ? strtolower((string) $styles['objectFit']) : 'cover';
+        if (! in_array($fit, [ 'contain', 'cover', 'fill', 'none', 'scale-down' ], true)) {
+            $fit = 'cover';
+        }
+
+        return sprintf(
+            'width:100%%;height:100%%;max-width:100%%;max-height:100%%;display:block;object-fit:%s;-webkit-print-color-adjust:exact;print-color-adjust:exact;',
+            $fit
+        );
+    }
+
+    /**
+     * Turn editor-stored paths into absolute URLs so print/preview pass esc_url + wp_kses and browsers load images.
+     */
+    private function resolve_public_url(string $raw): string {
+        $s = trim($raw);
+        if ($s === '') {
+            return '';
+        }
+        if (preg_match('#^(blob:|data:|javascript:)#i', $s)) {
+            return '';
+        }
+        if (preg_match('#^https?://#i', $s)) {
+            return esc_url($s);
+        }
+        if (str_starts_with($s, '//')) {
+            $prefix = is_ssl() ? 'https:' : 'http:';
+
+            return esc_url($prefix . $s);
+        }
+        if (str_starts_with($s, '/')) {
+            return esc_url(home_url($s));
+        }
+
+        return esc_url(home_url('/' . ltrim($s, '/')));
+    }
+
+    private function sanitize_font_family(string $raw): string {
+        $t = trim($raw);
+        if ($t === '' || strlen($t) > 220 || preg_match('/[<>{}"\'`;]/', $t)) {
+            return 'system-ui, sans-serif';
+        }
+
+        return $t;
+    }
+
+    private function sanitize_css_color(mixed $raw, string $fallback): string {
+        $s = trim((string) $raw);
+        if ($s === '' || strtolower($s) === 'transparent') {
+            return 'transparent';
+        }
+        $hex = sanitize_hex_color($s);
+        if ($hex) {
+            return $hex;
+        }
+        if (preg_match('/^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)$/i', $s)) {
+            return $s;
+        }
+
+        return $fallback;
+    }
+
+    private function sanitize_box_shadow(mixed $raw): string {
+        $t = trim((string) $raw);
+        if ($t === '' || strtolower($t) === 'none') {
+            return 'none';
+        }
+        if (strlen($t) > 180 || preg_match('/[<>;{}]|url\s*\(/i', $t)) {
+            return 'none';
+        }
+
+        return $t;
+    }
+
 }

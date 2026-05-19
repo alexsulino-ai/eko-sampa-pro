@@ -13,6 +13,10 @@ if (! defined('ABSPATH')) {
 
 $failed = isset($_GET['login']) && sanitize_key(wp_unslash((string) $_GET['login'])) === 'failed';
 $action = Eko_Sampa_Frontend_Router::ACTION_LOGIN;
+$redirect_to = '';
+if (isset($_GET['redirect_to'])) {
+    $redirect_to = wp_validate_redirect(wp_unslash((string) $_GET['redirect_to']), '');
+}
 
 ?>
 <div class="eko-sampa-login flex min-h-screen flex-col items-center justify-center bg-slate-100 px-4 py-12">
@@ -33,6 +37,9 @@ $action = Eko_Sampa_Frontend_Router::ACTION_LOGIN;
         <form class="mt-6 space-y-4" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="<?php echo esc_attr($action); ?>">
             <?php wp_nonce_field($action); ?>
+            <?php if ($redirect_to !== '') : ?>
+                <input type="hidden" name="redirect_to" value="<?php echo esc_attr($redirect_to); ?>">
+            <?php endif; ?>
 
             <div>
                 <label class="block text-sm font-medium text-slate-700" for="eko-sampa-user-login">

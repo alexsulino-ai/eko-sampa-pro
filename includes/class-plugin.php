@@ -61,15 +61,24 @@ final class Eko_Sampa_Plugin {
      */
     public function boot(): void {
         $this->maybe_upgrade_database();
-        $this->load_textdomain();
+        $this->maybe_sync_roles_capabilities();
+        add_action('init', [$this, 'load_textdomain_on_init'], 1);
 
         $this->roles->register_hooks();
+        Eko_Sampa_Capabilities::register_hooks();
+        Eko_Sampa_User_Admin::register_hooks();
         $this->frontend_router->register_hooks();
         $this->admin_redirect->register_hooks();
         $this->shortcodes->register_hooks();
         $this->rest_api->register_hooks();
+        Eko_Sampa_Template_Derivation::register_cron();
         $this->router->register_hooks();
         $this->assets->register_hooks();
+        Eko_Sampa_Public_Experience::register_hooks();
+
+        if (class_exists('WooCommerce', false)) {
+            (new Eko_Sampa_Wc_Bridge())->register_hooks();
+        }
 
         /**
          * Fires after Eko Sampa core services are registered.
@@ -109,18 +118,27 @@ final class Eko_Sampa_Plugin {
     }
 
     /**
-     * Run migrations when the stored DB version is behind EKO_SAMPA_DB_VERSION.
+     * Run migrations and repair missing core tables when the stored version is stale or incomplete.
      */
     private function maybe_upgrade_database(): void {
-        $stored = (string) get_option('eko_sampa_db_version', '0');
-        if (version_compare($stored, EKO_SAMPA_DB_VERSION, '>=')) {
-            return;
-        }
-
-        $this->database->migrate();
+        $this->database->ensure_schema();
     }
 
-    private function load_textdomain(): void {
+    /**
+     * Ensure new capabilities reach existing installs when the plugin is updated without re-running activation.
+     */
+    private function maybe_sync_roles_capabilities(): void {
+        $key = 'eko_sampa_roles_sync_version';
+        if (get_option($key, '') === EKO_SAMPA_VERSION) {
+            return;
+        }
+        if (class_exists('Eko_Sampa_Roles', false)) {
+            Eko_Sampa_Roles::sync_roles_from_codebase();
+        }
+        update_option($key, EKO_SAMPA_VERSION, false);
+    }
+
+    public function load_textdomain_on_init(): void {
         load_plugin_textdomain(
             'eko-sampa',
             false,

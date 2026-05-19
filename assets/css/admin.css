@@ -1,0 +1,11 @@
+/**
+ * Eko Sampa — wp-admin screens (minimal; shell is layout-only).
+ *
+ * @package Eko_Sampa
+ */
+
+/* Intentionally minimal: Tailwind CDN may load on plugin admin pages via class-assets.php */
+
+[x-cloak] {
+    display: none !important;
+}

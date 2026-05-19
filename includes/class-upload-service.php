@@ -1,6 +1,6 @@
 <?php
 /**
- * User-scoped gallery uploads under wp-content/uploads/eko-sampa/galeria/user-{id}/.
+ * User-scoped gallery uploads (new: users/user-{id}/gallery; legacy: eko-sampa/galeria/user-{id}).
  *
  * @package Eko_Sampa
  */
@@ -16,22 +16,42 @@ if (! defined('ABSPATH')) {
  */
 final class Eko_Sampa_Upload_Service {
 
-    private const SUBDIR = 'eko-sampa/galeria';
-
     public function gallery_dir_for_user(int $user_id): string {
         $user_id = max(0, $user_id);
-        $upload   = wp_upload_dir();
-        $base     = trailingslashit((string) ($upload['basedir'] ?? ''));
 
-        return $base . self::SUBDIR . '/user-' . $user_id;
+        return Eko_Sampa_Storage_Manager::user_gallery_dir_abs($user_id);
+    }
+
+    public function legacy_gallery_dir_for_user(int $user_id): string {
+        return Eko_Sampa_Storage_Manager::legacy_gallery_dir_abs(max(0, $user_id));
     }
 
     public function gallery_url_for_user(int $user_id): string {
         $user_id = max(0, $user_id);
-        $upload   = wp_upload_dir();
-        $base     = trailingslashit((string) ($upload['baseurl'] ?? ''));
+        $dirs    = Eko_Sampa_Storage_Manager::upload_dirs();
+        if ($dirs['error'] || $dirs['baseurl'] === '') {
+            return '';
+        }
+        $rel = Eko_Sampa_Storage_Manager::relative_from_abs($this->gallery_dir_for_user($user_id));
+        if ($rel === '') {
+            return '';
+        }
 
-        return $base . self::SUBDIR . '/user-' . $user_id;
+        return trailingslashit($dirs['baseurl']) . str_replace('\\', '/', $rel);
+    }
+
+    public function legacy_gallery_url_for_user(int $user_id): string {
+        $user_id = max(0, $user_id);
+        $dirs    = Eko_Sampa_Storage_Manager::upload_dirs();
+        if ($dirs['error'] || $dirs['baseurl'] === '') {
+            return '';
+        }
+        $rel = Eko_Sampa_Storage_Manager::relative_from_abs($this->legacy_gallery_dir_for_user($user_id));
+        if ($rel === '') {
+            return '';
+        }
+
+        return trailingslashit($dirs['baseurl']) . str_replace('\\', '/', $rel);
     }
 
     public function ensure_gallery_dir(int $user_id): bool {
@@ -40,11 +60,16 @@ final class Eko_Sampa_Upload_Service {
             return false;
         }
 
-        if (! wp_mkdir_p($dir)) {
+        if (! Eko_Sampa_Storage_Manager::ensure_dir($dir)) {
             return false;
         }
 
         $this->write_htaccess($dir);
+
+        $legacy = $this->legacy_gallery_dir_for_user($user_id);
+        if ($legacy !== '' && is_dir($legacy)) {
+            return true;
+        }
 
         return is_dir($dir);
     }
@@ -53,15 +78,49 @@ final class Eko_Sampa_Upload_Service {
      * @return array<int, array{name: string, url: string}>
      */
     public function list_images(int $user_id): array {
-        if ($user_id <= 0 || ! $this->ensure_gallery_dir($user_id)) {
+        if ($user_id <= 0) {
             return [];
         }
 
-        $dir = $this->gallery_dir_for_user($user_id);
+        $primary = $this->gallery_dir_for_user($user_id);
+        Eko_Sampa_Storage_Manager::ensure_dir($primary);
+
+        $by_name = [];
+
+        foreach ($this->scan_dir_urls($primary, $this->gallery_url_for_user($user_id)) as $item) {
+            $by_name[ $item['name'] ] = $item;
+        }
+
+        $legacy_dir = $this->legacy_gallery_dir_for_user($user_id);
+        if ($legacy_dir !== '' && is_dir($legacy_dir)) {
+            foreach ($this->scan_dir_urls($legacy_dir, $this->legacy_gallery_url_for_user($user_id)) as $item) {
+                if (! isset($by_name[ $item['name'] ])) {
+                    $by_name[ $item['name'] ] = $item;
+                }
+            }
+        }
+
+        $out = array_values($by_name);
+        usort(
+            $out,
+            static function (array $a, array $b): int {
+                return strcmp($a['name'], $b['name']);
+            }
+        );
+
+        return $out;
+    }
+
+    /**
+     * @return array<int, array{name: string, url: string}>
+     */
+    private function scan_dir_urls(string $dir, string $base_url): array {
+        if ($dir === '' || ! is_dir($dir) || $base_url === '') {
+            return [];
+        }
+
         $files = glob($dir . '/*.{jpg,jpeg,png,gif,webp}', GLOB_BRACE) ?: [];
         $out   = [];
-        $base  = $this->gallery_url_for_user($user_id);
-
         foreach ($files as $path) {
             if (! is_file($path)) {
                 continue;
@@ -72,16 +131,9 @@ final class Eko_Sampa_Upload_Service {
             }
             $out[] = [
                 'name' => $name,
-                'url'  => trailingslashit($base) . rawurlencode($name),
+                'url'  => trailingslashit($base_url) . rawurlencode($name),
             ];
         }
-
-        usort(
-            $out,
-            static function (array $a, array $b): int {
-                return strcmp($a['name'], $b['name']);
-            }
-        );
 
         return $out;
     }
@@ -132,13 +184,17 @@ final class Eko_Sampa_Upload_Service {
             return false;
         }
 
-        $path = trailingslashit($this->gallery_dir_for_user($user_id)) . $name;
-
-        if (! is_file($path)) {
-            return false;
+        foreach ([$this->gallery_dir_for_user($user_id), $this->legacy_gallery_dir_for_user($user_id)] as $dir) {
+            if ($dir === '') {
+                continue;
+            }
+            $path = trailingslashit($dir) . $name;
+            if (is_file($path)) {
+                return false !== unlink($path);
+            }
         }
 
-        return false !== unlink($path);
+        return false;
     }
 
     private function is_safe_filename(string $name): bool {

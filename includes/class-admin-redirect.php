@@ -33,7 +33,7 @@ final class Eko_Sampa_Admin_Redirect {
             return;
         }
 
-        if ($this->is_pure_administrator()) {
+        if ($this->should_remain_in_wp_admin()) {
             return;
         }
 
@@ -43,6 +43,29 @@ final class Eko_Sampa_Admin_Redirect {
 
         wp_safe_redirect(Eko_Sampa_Frontend_Router::get_url('dashboard'));
         exit;
+    }
+
+    /**
+     * Administrators always stay. Eko roles may use Eko submenu pages under admin.php?page=eko-sampa*
+     * and their WordPress profile (operational meta is shown there).
+     */
+    private function should_remain_in_wp_admin(): bool {
+        if ($this->is_pure_administrator()) {
+            return true;
+        }
+        if (current_user_can(Eko_Sampa_Roles::CAP_MANAGE_EKO_PLATFORM)) {
+            return true;
+        }
+        if (! current_user_can(Eko_Sampa_Roles::CAP_ACCESS_DASHBOARD)) {
+            return false;
+        }
+        $page = isset($_GET['page']) ? sanitize_key((string) wp_unslash((string) $_GET['page'])) : '';
+        if ($page !== '' && str_starts_with($page, 'eko-sampa')) {
+            return true;
+        }
+        $script = isset($_SERVER['PHP_SELF']) ? wp_basename((string) $_SERVER['PHP_SELF']) : '';
+
+        return $script === 'profile.php';
     }
 
     private function is_pure_administrator(): bool {
