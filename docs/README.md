@@ -2,8 +2,8 @@
 
 Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/v1`, Alpine CRUD). Objetivo: blindar o domínio contra regressões — cada regra crítica tem arquivo, contrato e ponto de código rastreável.
 
-**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (ex.: 1.7.7)  
-**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` (ex.: 1.0.10 — inclui quick print jobs)  
+**Versão do plugin (código):** `EKO_SAMPA_VERSION` em `eko-sampa.php` (ex.: 1.10.0)  
+**Versão do schema (código):** `EKO_SAMPA_DB_VERSION` (ex.: 1.0.12 — hardening de sessão + quick print `expires_at` / `abandoned_at`)  
 **Opção WordPress:** `eko_sampa_db_version`
 
 ---
@@ -31,6 +31,16 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 
 - [permission-matrix.md](security/permission-matrix.md) — REST ↔ models, drift, `explain_row_visibility`
 
+### Marketing público e convidados
+
+- [public-experience-architecture.md](public-experience-architecture.md) — camada de serviço, quotas, SEO, telemetria leve
+- [analytics-architecture.md](analytics-architecture.md) — contadores, rollups, snapshots, cron de analytics
+- [platform-observability.md](platform-observability.md) — health REST, painéis admin, pipelines
+- [healthcheck-and-cleanup.md](healthcheck-and-cleanup.md) — cron de limpeza, hooks pós-cleanup, healthcheck
+- [guest-conversion-flow.md](guest-conversion-flow.md) — modal de conversão, redirect, recuperação
+- [public-home-flow.md](public-home-flow.md) — home `/eko-sampa/`, REST de catálogo, conversão
+- [guest-session-lifecycle.md](guest-session-lifecycle.md) — sessão convidado, quotas, quick print
+
 ### Arquitetura
 
 - [CONSOLIDATION-INDEX.md](CONSOLIDATION-INDEX.md) — **índice** continuidade (thumbnail, quick print, contratos)
@@ -57,13 +67,15 @@ Documentação **alinhada ao código atual** do plugin (PHP 8+, REST `eko-sampa/
 - [print-isolation.md](architecture/print-isolation.md) — UI operacional vs impressão física/PDF
 - [VISUAL-PIPELINE.md](rendering/VISUAL-PIPELINE.md) — `EkoCanvasRenderer`, alvos PRINT / THUMBNAIL
 - [ensure-schema.md](database/ensure-schema.md) — `ensure_schema()`, alignment, `row_exists()`
-- [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.6
+- [migrations.md](database/migrations.md) — versões 1.0.0 → 1.0.12
 - [integrity.md](database/integrity.md) — órfãos, repair, opções WP
 
 ### Regras de negócio
 
 - [DOMAIN-CONSOLIDATED.md](business-rules/DOMAIN-CONSOLIDATED.md) — índice consolidado (templates, orders, quick print)
 - [templates.md](business-rules/templates.md)
+- [template-derivation-system.md](template-derivation-system.md) — master → sessão → utilizador; cleanup; limites
+- [session-hardening.md](session-hardening.md) — fingerprint, quick-print TTL/abandon, autosave, observabilidade, flags de catálogo
 - [thumbnail-pipeline.md](templates/thumbnail-pipeline.md) — DOM → JPEG, fonts, assets, fallback servidor
 - [Visual Render Contract](architecture/visual-render-contract.md) — layout unificado print/thumbnail
 - [duplicate-lifecycle.md](templates/duplicate-lifecycle.md) — POST duplicate, `try_create`, `duplicate-diagnostics`, insert diagnostics

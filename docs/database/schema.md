@@ -57,14 +57,21 @@ Tipos: `text`, `textarea`, `number`, `select`, `date`.
 | Coluna | Notas |
 |--------|-------|
 | id | PK |
-| user_id | **obrigatório** (owner) |
+| user_id | owner; **0** = sessão temporária (`template_type = session`) |
 | client_id | opcional; 0/null = sem cliente (1.0.4+) |
 | service_id | FK lógica; create order exige > 0 válido |
 | product_id | Woo opcional |
 | nome, categoria, descricao | |
 | width_mm, height_mm, preview_image | |
 | json_data | layout editor (JSON, não HTML) |
-| created_at, updated_at | |
+| template_type | `user` (defeito), `master`, `session` — ver [../template-derivation-system.md](../template-derivation-system.md) |
+| parent_template_id | FK lógica para template origem (sessão → master) |
+| session_token | segredo de sessão (apenas `session`) |
+| expires_at, last_activity_at | TTL / atividade (sessão) |
+| saved_from_session_id | rastreio persistência a partir de sessão |
+| allow_personalization | permite fork público “Usar template” |
+| is_public | catálogo público na app |
+| created_at, updated_at | auditoria |
 
 Thumbnail pipeline: rotas REST `/templates/{id}/thumbnail*` — ver código `class-template-thumbnail*.php`.
 

@@ -19,7 +19,7 @@ Authoritative install and user flow: **`INSTALL.md`**, **`MANUAL.md`**. Pre-prod
 
 ## How the app is reached
 
-1. **Virtual rewrites** (no theme chrome): `/eko-sampa_dashboard/`, `/eko-sampa_login/`, `/eko-sampa_clients/`, `/eko-sampa_services/`, `/eko-sampa_templates/`, `/eko-sampa_editor/`, `/eko-sampa_orders/`, `/eko-sampa_profile/`, `/eko-sampa_print/{id}/`  
+1. **Virtual rewrites** (no theme chrome): `/eko-sampa/` (public catalog, optional), `/eko-sampa_dashboard/`, `/eko-sampa_login/`, `/eko-sampa_clients/`, `/eko-sampa_services/`, `/eko-sampa_templates/`, `/eko-sampa_editor/`, `/eko-sampa_orders/`, `/eko-sampa_profile/`, `/eko-sampa_print/{id}/`  
    After install or rewrite changes: **Settings → Permalinks → Save** once.
 
 2. **Shortcodes** (optional, inside theme pages):  
@@ -54,10 +54,12 @@ includes/
   class-wc-bridge.php          # optional WooCommerce admin link
 views/
   frontend-shell.php, frontend-login.php, editor-canvas.php, frontend-print.php
+  frontend-public-home.php, frontend-guest-editor-wrap.php, frontend-guest-session-expired.php
+  partials/public-experience/*.php
   frontend-partial-*.php, admin-dashboard-shell.php
 assets/
   css/frontend.css
-  js/frontend-app.js, editor-canvas.js
+  js/frontend-app.js, editor-canvas.js, public-home.js
 templates/frontend-blank.php
 docs/*.md
 INSTALL.md, MANUAL.md

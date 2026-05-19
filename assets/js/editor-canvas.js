@@ -82,6 +82,8 @@ function ekoEditorCanvasFactory() {
             presetKey: 'default',
             previewStatus: '',
         },
+        quickPrintUserMessage: '',
+        quickPrintPhase: '',
         _quickPrintAfterPrintBound: null,
         _quickPrintAbortController: null,
         quickPrintJobCreating: false,
@@ -91,6 +93,11 @@ function ekoEditorCanvasFactory() {
         _quickPrintMountHtmlBackup: null,
         /** True when canvas document (elements + mm) differs from last successful save */
         hasUnsavedChanges: false,
+        showSessionRecoveryBanner: false,
+        sessionRecoveryDismissed: false,
+        _sessionAutosaveTimer: null,
+        _lastSessionThumbAt: 0,
+        _forceSessionThumb: false,
         /** Last completed save message (e.g. Gravado) or error text */
         saveResult: '',
         /** JSON fingerprint of last persisted payload (null until first load/save baseline) */
@@ -105,6 +112,7 @@ function ekoEditorCanvasFactory() {
         _persistRunning: false,
         /** Embedded orders live preview: same canvas, no REST save / no interact */
         previewOnly: false,
+        guestConversionModal: false,
         _orderPreviewListener: null,
         /** Last JSON string of elements array that was saved successfully (for revert) */
         lastOkElementsJson: null,
@@ -332,6 +340,7 @@ function ekoEditorCanvasFactory() {
             }
             this.syncLogicalCanvasSizeFromMm();
             this.layoutPropsPanelDefault();
+            this.showSessionRecoveryBanner = !!this.cfg().showSessionRecoveryBanner;
             this._propsPanelResizeBound = () => {
                 this.clampPropsPanelIntoViewport();
             };
@@ -385,6 +394,9 @@ function ekoEditorCanvasFactory() {
                 this.markUnsaved();
             });
             this.loadFromServer();
+            if (this.cfg().guestEditor) {
+                void this.emitPublicTelemetry('editor_boot');
+            }
         },
 
         applyOrderLivePreview(detail) {
@@ -433,8 +445,10 @@ function ekoEditorCanvasFactory() {
                 this._orderPreviewListener = null;
             }
             clearTimeout(this.interactDebounceTimer);
+            clearTimeout(this._sessionAutosaveTimer);
             clearTimeout(this._snapFlashTimer);
             this.interactDebounceTimer = null;
+            this._sessionAutosaveTimer = null;
             if (this.layerSort) {
                 try {
                     this.layerSort.destroy();
@@ -459,11 +473,178 @@ function ekoEditorCanvasFactory() {
             if (typeof window.ekoSampaApi !== 'function') {
                 return Promise.reject(new Error('API unavailable'));
             }
-            return window.ekoSampaApi(path, opts);
+            let p = String(path || '');
+            const o = opts ? Object.assign({}, opts) : {};
+            const cfg = this.cfg() || {};
+            const tok = String(cfg.templateSessionToken || '').trim();
+            if (tok) {
+                if (/^\s*templates\//.test(p)) {
+                    const sep = p.indexOf('?') >= 0 ? '&' : '?';
+                    p = p + sep + 'session_token=' + encodeURIComponent(tok);
+                } else if (/^\s*quick-print\//.test(p)) {
+                    const method = String(o.method || 'GET').toUpperCase();
+                    if (method === 'GET' || method === 'HEAD' || method === 'DELETE') {
+                        const sep = p.indexOf('?') >= 0 ? '&' : '?';
+                        p = p + sep + 'session_token=' + encodeURIComponent(tok);
+                    } else if (o.body && typeof o.body === 'object' && !(o.body instanceof FormData)) {
+                        o.body = Object.assign({}, o.body, { session_token: tok });
+                    }
+                }
+            }
+            return window.ekoSampaApi(p, o);
+        },
+
+        _quickPrintJobBlocksNewCreate() {
+            const j = this.quickPrint.job;
+            if (!j || !j.id) {
+                return false;
+            }
+            const st = String(j.status || '').toLowerCase();
+            return st === 'queued' || st === 'sent_to_browser';
+        },
+
+        maybeOpenQuickPrintFromQuery() {
+            if (this.previewOnly || !this.quickPrintFeatureEnabled()) {
+                return;
+            }
+            if (!this.cfg().guestEditor) {
+                return;
+            }
+            try {
+                const u = new URL(window.location.href);
+                if (u.searchParams.get('eko_open_qp') !== '1') {
+                    return;
+                }
+                u.searchParams.delete('eko_open_qp');
+                window.history.replaceState({}, '', u.toString());
+            } catch (e) {
+                void e;
+                return;
+            }
+            const self = this;
+            setTimeout(function () {
+                void self.openQuickPrintManager();
+            }, 0);
+        },
+
+        discardGuestRecovery() {
+            this.sessionRecoveryDismissed = true;
+            try {
+                const u = new URL(window.location.href);
+                u.searchParams.delete('eko_recover_session');
+                window.history.replaceState({}, '', u.toString());
+            } catch (e) {
+                void e;
+            }
         },
 
         cfg() {
             return window.ekoSampaEditor || {};
+        },
+
+        async emitPublicTelemetry(event) {
+            const ev = String(event || '').trim();
+            if (!ev) {
+                return;
+            }
+            try {
+                await this.api('public/telemetry', {
+                    method: 'POST',
+                    body: { event: ev },
+                });
+            } catch (e) {
+                void e;
+            }
+        },
+
+        quickPrintPhaseLabel() {
+            const m = {
+                preparing: 'Preparando',
+                rendering: 'A renderizar',
+                ready: 'Pronto',
+                printing: 'A imprimir',
+                completed: 'Concluído',
+                failed: 'Falhou',
+            };
+            return m[this.quickPrintPhase] || '';
+        },
+
+        sessionTokenPresent() {
+            return String((this.cfg() || {}).templateSessionToken || '').trim() !== '';
+        },
+
+        scheduleSessionAutosave() {
+            if (this.previewOnly || !this.sessionTokenPresent()) {
+                return;
+            }
+            const ms = Number((this.cfg() || {}).sessionAutosaveDebounceMs) || 12000;
+            clearTimeout(this._sessionAutosaveTimer);
+            this._sessionAutosaveTimer = setTimeout(() => {
+                void this.sessionAutosaveFlush();
+            }, ms);
+        },
+
+        async sessionAutosaveFlush() {
+            if (this.previewOnly || !this.sessionTokenPresent() || !this.hasUnsavedChanges || this._persistRunning) {
+                return;
+            }
+            const id = Number(this.cfg().templateId || 0);
+            if (!id) {
+                return;
+            }
+            const v = this.validateElementsForSave(this.elements);
+            if (!v.ok) {
+                return;
+            }
+            this._persistRunning = true;
+            try {
+                await this.api('templates/' + id, {
+                    method: 'PATCH',
+                    body: { json_data: { elements: this.elements } },
+                });
+                this.saveResult = 'Rascunho da sessão guardado';
+            } catch (e) {
+                this.saveResult = String((e && e.message) || e || '');
+            } finally {
+                this._persistRunning = false;
+            }
+        },
+
+        async persistToMyTemplates() {
+            if (this.previewOnly) {
+                return;
+            }
+            const id = Number(this.cfg().templateId || 0);
+            if (!id || !this.sessionTokenPresent()) {
+                return;
+            }
+            if (!this.cfg().isLoggedIn) {
+                this.guestConversionModal = true;
+                void this.emitPublicTelemetry('conversion_modal_open');
+                return;
+            }
+            if (this._persistRunning) {
+                return;
+            }
+            this._persistRunning = true;
+            try {
+                const created = await this.api('templates/' + id + '/persist-to-mine', {
+                    method: 'POST',
+                    body: {},
+                });
+                const nid = created && created.id ? parseInt(String(created.id), 10) : 0;
+                if (nid) {
+                    const u = new URL(window.location.href);
+                    u.searchParams.set('template_id', String(nid));
+                    u.searchParams.delete('session_token');
+                    u.searchParams.delete('eko_recover_session');
+                    window.location.assign(u.toString());
+                }
+            } catch (e) {
+                this.saveResult = String((e && e.message) || e || '');
+            } finally {
+                this._persistRunning = false;
+            }
         },
 
         quickPrintFeatureEnabled() {
@@ -488,6 +669,11 @@ function ekoEditorCanvasFactory() {
         async createOrderFromEditor() {
             const tid = Number(this.cfg().templateId || 0);
             if (!tid) {
+                return;
+            }
+            if (this.cfg().guestEditor) {
+                this.guestConversionModal = true;
+                void this.emitPublicTelemetry('conversion_modal_open');
                 return;
             }
             if (typeof window.ekoSampaEditorCreateOrderFromTemplate !== 'function') {
@@ -1032,6 +1218,9 @@ function ekoEditorCanvasFactory() {
             if (!this.quickPrintFeatureEnabled() || this.previewOnly) {
                 return;
             }
+            if (this.quickPrint.open || this.quickPrint.loading) {
+                return;
+            }
             const tid = Number(this.cfg().templateId || 0);
             if (!tid) {
                 this.quickPrintToast('Save the template first to enable quick print.', 'warning');
@@ -1053,13 +1242,15 @@ function ekoEditorCanvasFactory() {
             this.quickPrint.editorPreview = null;
             this.quickPrint.quantityHint = '';
             this.quickPrint.previewStatus = '';
+            this.quickPrintUserMessage = 'A preparar impressão rápida…';
+            this.quickPrintPhase = 'preparing';
             this.quickPrint.quantity = 1;
             this.quickPrintJobCreating = false;
             this._quickPrintPrintInProgress = false;
             this._quickPrintMountHtmlBackup = null;
             const sig = this._quickPrintAbortController ? this._quickPrintAbortController.signal : undefined;
             try {
-                const opt = await window.ekoSampaApi('quick-print/options', { method: 'GET', signal: sig });
+                const opt = await this.api('quick-print/options', { method: 'GET', signal: sig });
                 this.quickPrint.options = {
                     printers: Array.isArray(opt.printers) ? opt.printers : [],
                     presets: Array.isArray(opt.presets) ? opt.presets : [],
@@ -1084,6 +1275,8 @@ function ekoEditorCanvasFactory() {
             if (this._quickPrintAbortController && this._quickPrintAbortController.signal.aborted) {
                 return;
             }
+            this.quickPrintUserMessage = 'A gerar pré-visualização…';
+            this.quickPrintPhase = 'rendering';
             try {
                 await this._quickPrintHydrateLivePreviewSilent();
             } catch (e) {
@@ -1097,6 +1290,13 @@ function ekoEditorCanvasFactory() {
                 } catch (e) {
                     void e;
                 }
+            }
+            if (this.quickPrint.open && !this.quickPrint.error) {
+                this.quickPrintUserMessage = 'Pré-visualização pronta — confirme as opções e toque em Imprimir.';
+                this.quickPrintPhase = 'ready';
+            } else if (this.quickPrint.error) {
+                this.quickPrintUserMessage = '';
+                this.quickPrintPhase = 'failed';
             }
         },
 
@@ -1120,6 +1320,8 @@ function ekoEditorCanvasFactory() {
             this.quickPrint.error = '';
             this.quickPrint.job = null;
             this.quickPrint.quantityHint = '';
+            this.quickPrintUserMessage = '';
+            this.quickPrintPhase = '';
             try {
                 document.documentElement.classList.remove('eko-modal-open');
             } catch (e) {
@@ -1203,6 +1405,13 @@ function ekoEditorCanvasFactory() {
             if (!tid) {
                 return false;
             }
+            if (this._quickPrintJobBlocksNewCreate()) {
+                this.quickPrintToast(
+                    'Já existe uma impressão em andamento. Conclua, cancele ou feche o diálogo antes de criar outra.',
+                    'warning'
+                );
+                return false;
+            }
             if (this.hasUnsavedChanges) {
                 await this.saveNow();
                 if (this.hasUnsavedChanges) {
@@ -1229,7 +1438,7 @@ function ekoEditorCanvasFactory() {
             }
             this._injectQuickPrintPrintStyle(this.quickPrint.editorPreview);
             const snap = this.quickPrint.editorPreview;
-            const res = await window.ekoSampaApi('quick-print/jobs', {
+            const res = await this.api('quick-print/jobs', {
                 method: 'POST',
                 signal: sig,
                 body: {
@@ -1253,6 +1462,11 @@ function ekoEditorCanvasFactory() {
             if (this.quickPrintJobCreating || this._quickPrintPrintInProgress) {
                 return;
             }
+            const ps = String(this.quickPrint.previewStatus || '').trim();
+            if (ps) {
+                this.quickPrintToast('Aguarde até a pré-visualização ficar estável ou corrija o erro indicado.', 'warning');
+                return;
+            }
             const st0 = this.quickPrint.job ? String(this.quickPrint.job.status || '') : '';
             if (st0 === 'sent_to_browser') {
                 this.quickPrintToast('Print dialog is still active or finishing.', 'warning');
@@ -1266,11 +1480,15 @@ function ekoEditorCanvasFactory() {
             this.quickPrintJobCreating = true;
             this.quickPrint.loading = true;
             this.quickPrint.error = '';
+            this.quickPrintUserMessage = 'A registar trabalho de impressão…';
+            this.quickPrintPhase = 'preparing';
             try {
                 const ok = await this._quickPrintExecuteSnapshotPipelineAndPost();
                 if (!ok) {
                     return;
                 }
+                this.quickPrintUserMessage = 'Pronto — a abrir o diálogo de impressão do sistema.';
+                this.quickPrintPhase = 'printing';
                 await this.quickPrintRunBrowser();
             } catch (e) {
                 if (e && e.name === 'AbortError') {
@@ -1289,7 +1507,7 @@ function ekoEditorCanvasFactory() {
                 return;
             }
             try {
-                const row = await window.ekoSampaApi('quick-print/jobs/' + jid + '/cancel', { method: 'POST' });
+                const row = await this.api('quick-print/jobs/' + jid + '/cancel', { method: 'POST' });
                 this.quickPrint.job = row;
             } catch (e) {
                 this.quickPrint.error = String((e && e.message) || e || 'Cancel failed.');
@@ -1303,7 +1521,7 @@ function ekoEditorCanvasFactory() {
             const prevId = this.quickPrint.job && this.quickPrint.job.id ? parseInt(String(this.quickPrint.job.id), 10) : 0;
             if (prevId && this.quickPrint.job && this.quickPrint.job.status === 'queued') {
                 try {
-                    await window.ekoSampaApi('quick-print/jobs/' + prevId + '/cancel', { method: 'POST' });
+                    await this.api('quick-print/jobs/' + prevId + '/cancel', { method: 'POST' });
                 } catch (e) {
                     void e;
                 }
@@ -1333,11 +1551,12 @@ function ekoEditorCanvasFactory() {
             }
             this._quickPrintPrintInProgress = true;
             try {
-                const row = await window.ekoSampaApi('quick-print/jobs/' + jid + '/browser-handoff', { method: 'POST' });
+                const row = await this.api('quick-print/jobs/' + jid + '/browser-handoff', { method: 'POST' });
                 this.quickPrint.job = row;
             } catch (e) {
                 this._quickPrintPrintInProgress = false;
                 this.quickPrint.error = String((e && e.message) || e || 'Could not update job.');
+                this.quickPrintPhase = 'failed';
                 return;
             }
             this._injectQuickPrintPrintStyle(this.quickPrint.editorPreview);
@@ -1355,9 +1574,12 @@ function ekoEditorCanvasFactory() {
                 if (!id) {
                     return;
                 }
-                window.ekoSampaApi('quick-print/jobs/' + id + '/complete', { method: 'POST' })
+                self
+                    .api('quick-print/jobs/' + id + '/complete', { method: 'POST' })
                     .then(function (row) {
                         self.quickPrint.job = row;
+                        self.quickPrintPhase = 'completed';
+                        self.quickPrintUserMessage = 'Impressão registada como concluída.';
                     })
                     .catch(function () {
                         void 0;
@@ -1414,7 +1636,7 @@ function ekoEditorCanvasFactory() {
                 return;
             }
             try {
-                const row = await window.ekoSampaApi('quick-print/jobs/' + jid, { method: 'GET' });
+                const row = await this.api('quick-print/jobs/' + jid, { method: 'GET' });
                 this.quickPrint.job = row;
             } catch (e) {
                 this.quickPrint.error = String((e && e.message) || e || 'Refresh failed.');
@@ -1478,6 +1700,7 @@ function ekoEditorCanvasFactory() {
                 this.$nextTick(() => {
                     this.$nextTick(() => this.fitAllTextElementsHeightsToContent());
                 });
+                void this.maybeOpenQuickPrintFromQuery();
             } catch (e) {
                 this.syncLogicalCanvasSizeFromMm();
                 this.elements = this.defaultElements();
@@ -2541,6 +2764,9 @@ function ekoEditorCanvasFactory() {
                 this.saveResult = '';
             }
             this.hasUnsavedChanges = next;
+            if (next) {
+                this.scheduleSessionAutosave();
+            }
         },
 
         restoreElementsFromJson(json) {
@@ -2981,6 +3207,7 @@ function ekoEditorCanvasFactory() {
             if (this.previewOnly) {
                 return;
             }
+            this._forceSessionThumb = true;
             const id = Number(this.cfg().templateId || 0);
             if (!id) {
                 return;
@@ -3061,6 +3288,16 @@ function ekoEditorCanvasFactory() {
         },
 
         scheduleThumbnail(templateId) {
+            const tok = String((this.cfg() || {}).templateSessionToken || '').trim();
+            if (tok) {
+                const now = Date.now();
+                const minGap = 45000;
+                if (!this._forceSessionThumb && now - (this._lastSessionThumbAt || 0) < minGap) {
+                    return;
+                }
+                this._lastSessionThumbAt = now;
+                this._forceSessionThumb = false;
+            }
             this.generateThumbnail(templateId);
         },
 

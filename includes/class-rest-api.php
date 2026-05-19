@@ -75,6 +75,36 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/internals/derivation-stats',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_internals_derivation_stats'],
+                'permission_callback' => [$this, 'require_admin'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/internals/public-experience-stats',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_internals_public_experience_stats'],
+                'permission_callback' => [$this, 'require_admin'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/internals/health',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_internals_health'],
+                'permission_callback' => [$this, 'require_admin'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/users',
             [
                 'methods'             => \WP_REST_Server::READABLE,
@@ -236,6 +266,101 @@ final class Eko_Sampa_Rest_Api {
 
         register_rest_route(
             self::NS,
+            '/public/catalog',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_public_catalog'],
+                'permission_callback' => '__return_true',
+                'args'                => [
+                    'page'     => [
+                        'required' => false,
+                        'type'     => 'integer',
+                        'default'  => 1,
+                        'minimum'  => 1,
+                    ],
+                    'per_page' => [
+                        'required' => false,
+                        'type'     => 'integer',
+                        'default'  => 24,
+                        'minimum'  => 1,
+                        'maximum'  => 48,
+                    ],
+                    'search'   => [
+                        'required' => false,
+                        'type'     => 'string',
+                    ],
+                    'categoria' => [
+                        'required' => false,
+                        'type'     => 'string',
+                    ],
+                    'scope'    => [
+                        'required' => false,
+                        'type'     => 'string',
+                        'default'  => 'all',
+                        'enum'     => [
+                            'all',
+                            'featured',
+                            'recent',
+                            'popular',
+                            'trending_today',
+                            'trending_week',
+                            'recently_printed',
+                            'most_saved',
+                        ],
+                    ],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/public/categories',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [$this, 'route_public_categories'],
+                'permission_callback' => '__return_true',
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/public/templates/(?P<id>\d+)/session',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_public_template_start_session'],
+                'permission_callback' => '__return_true',
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/public/telemetry',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_public_telemetry'],
+                'permission_callback' => '__return_true',
+                'args'                => [
+                    'event' => [
+                        'required' => true,
+                        'type'     => 'string',
+                        'enum'     => ['conversion_modal_open', 'editor_boot'],
+                    ],
+                ],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
+            '/templates/(?P<id>\d+)/persist-to-mine',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [$this, 'route_templates_persist_session_to_mine'],
+                'permission_callback' => [$this, 'require_app_user'],
+            ]
+        );
+
+        register_rest_route(
+            self::NS,
             '/templates',
             [
                 [
@@ -258,12 +383,12 @@ final class Eko_Sampa_Rest_Api {
                 [
                     'methods'             => \WP_REST_Server::READABLE,
                     'callback'            => [$this, 'route_templates_get'],
-                    'permission_callback' => [$this, 'require_templates_cap'],
+                    'permission_callback' => [$this, 'template_rest_read_permission'],
                 ],
                 [
                     'methods'             => \WP_REST_Server::EDITABLE,
                     'callback'            => [$this, 'route_templates_update'],
-                    'permission_callback' => [$this, 'require_templates_cap'],
+                    'permission_callback' => [$this, 'template_rest_write_permission'],
                 ],
                 [
                     'methods'             => \WP_REST_Server::DELETABLE,
@@ -299,7 +424,7 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
                 'callback'            => [$this, 'route_templates_thumbnail'],
-                'permission_callback' => [$this, 'require_templates_cap'],
+                'permission_callback' => [$this, 'template_rest_write_permission'],
             ]
         );
 
@@ -309,7 +434,7 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
                 'callback'            => [$this, 'route_templates_thumbnail_generate'],
-                'permission_callback' => [$this, 'require_templates_cap'],
+                'permission_callback' => [$this, 'template_rest_write_permission'],
             ]
         );
 
@@ -319,7 +444,7 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::READABLE,
                 'callback'            => [$this, 'route_templates_placeholders'],
-                'permission_callback' => [$this, 'require_templates_cap'],
+                'permission_callback' => [$this, 'template_rest_read_permission'],
             ]
         );
 
@@ -329,7 +454,7 @@ final class Eko_Sampa_Rest_Api {
             [
                 'methods'             => \WP_REST_Server::READABLE,
                 'callback'            => [$this, 'route_quick_print_options'],
-                'permission_callback' => [$this, 'quick_print_permission'],
+                'permission_callback' => '__return_true',
             ]
         );
 
@@ -534,6 +659,76 @@ final class Eko_Sampa_Rest_Api {
         return current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_TEMPLATES);
     }
 
+    public function template_rest_read_permission(\WP_REST_Request $request): bool {
+        if ($this->require_templates_cap()) {
+            return true;
+        }
+
+        return $this->template_rest_session_token_valid_for($request, (int) $request['id']);
+    }
+
+    public function template_rest_write_permission(\WP_REST_Request $request): bool {
+        if ($this->require_templates_cap()) {
+            return true;
+        }
+
+        return $this->template_rest_session_token_valid_for($request, (int) $request['id']);
+    }
+
+    private function template_rest_session_token_valid_for(\WP_REST_Request $request, int $id): bool {
+        return $this->template_session_token_valid($id, $this->get_request_session_token($request));
+    }
+
+    private function template_session_token_valid(int $template_id, string $token): bool {
+        if ($template_id <= 0 || $token === '') {
+            return false;
+        }
+        $row = ( new Eko_Sampa_Template() )->get_row_by_id($template_id);
+
+        return Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $token);
+    }
+
+    public function get_request_session_token(\WP_REST_Request $request): string {
+        $q = $request->get_param('session_token');
+        if (is_string($q) && trim($q) !== '') {
+            return preg_replace('/[^a-f0-9]/i', '', sanitize_text_field($q));
+        }
+        $params = $request->get_json_params();
+        if (is_array($params) && isset($params['session_token']) && is_string($params['session_token'])) {
+            return preg_replace('/[^a-f0-9]/i', '', sanitize_text_field($params['session_token']));
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function template_rest_resolve_row(\WP_REST_Request $request): ?array {
+        $id = (int) $request['id'];
+        if ($id <= 0) {
+            return null;
+        }
+        $m     = new Eko_Sampa_Template();
+        $token = $this->get_request_session_token($request);
+
+        if ($this->require_templates_cap()) {
+            $r = $m->get_row_by_id($id);
+
+            return is_array($r) ? $r : null;
+        }
+        if ($token !== '') {
+            $r = $m->get_row_by_id($id);
+            if (Eko_Sampa_Template_Derivation::request_can_use_session_row($r, $token)) {
+                return $r;
+            }
+
+            return null;
+        }
+
+        return $m->get($id);
+    }
+
     public function require_orders_cap(): bool {
         return current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS);
     }
@@ -573,6 +768,11 @@ final class Eko_Sampa_Rest_Api {
             }
         }
 
+        if ($request->get_param('catalog_public') !== null
+            && in_array((string) $request->get_param('catalog_public'), ['1', 'true', 'yes'], true)) {
+            $args['catalog_public_only'] = true;
+        }
+
         return $args;
     }
 
@@ -589,6 +789,40 @@ final class Eko_Sampa_Rest_Api {
                 'is_admin'     => current_user_can('manage_options'),
             ]
         );
+    }
+
+    public function route_internals_derivation_stats(\WP_REST_Request $request): \WP_REST_Response {
+        unset($request);
+        Eko_Sampa_Template_Derivation::publish_observability_snapshot();
+        $snap = get_option(Eko_Sampa_Template_Derivation::OPTION_OBSERVABILITY, []);
+
+        return new \WP_REST_Response(is_array($snap) ? $snap : new \stdClass(), 200);
+    }
+
+    public function route_internals_public_experience_stats(\WP_REST_Request $request): \WP_REST_Response {
+        unset($request);
+
+        return new \WP_REST_Response(Eko_Sampa_Public_Experience_Service::instance()->get_aggregated_stats(), 200);
+    }
+
+    public function route_internals_health(\WP_REST_Request $request): \WP_REST_Response {
+        unset($request);
+
+        return new \WP_REST_Response(Eko_Sampa_Public_Analytics::instance()->build_health_payload(), 200);
+    }
+
+    public function route_public_telemetry(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $nonce = (string) $request->get_header('X-WP-Nonce');
+        if (! wp_verify_nonce($nonce, 'wp_rest')) {
+            return new \WP_Error('eko_sampa_invalid', __('Invalid request.', 'eko-sampa'), ['status' => 403]);
+        }
+        $event = sanitize_key((string) $request->get_param('event'));
+        $ok    = Eko_Sampa_Public_Experience_Service::instance()->ingest_public_telemetry($event);
+        if ($ok instanceof \WP_Error) {
+            return $ok;
+        }
+
+        return new \WP_REST_Response(['ok' => true], 200);
     }
 
     public function route_users(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1000,7 +1234,7 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_templates_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $params = $this->json_params($request);
+        $params = $this->sanitize_template_admin_only_fields($this->json_params($request));
         $err    = $this->validate_template_json_payload($params);
         if ($err instanceof \WP_Error) {
             return $err;
@@ -1026,7 +1260,7 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_templates_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id  = (int) $request['id'];
-        $row = (new Eko_Sampa_Template())->get($id);
+        $row = $this->template_rest_resolve_row($request);
         if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1057,13 +1291,34 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_templates_update(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id     = (int) $request['id'];
-        $params = $this->json_params($request);
+        $params = $this->sanitize_template_admin_only_fields($this->json_params($request));
         $err    = $this->validate_template_json_payload($params);
         if ($err instanceof \WP_Error) {
             return $err;
         }
 
-        $ok = (new Eko_Sampa_Template())->update($id, $params);
+        $row = $this->template_rest_resolve_row($request);
+        if (! is_array($row)) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $tok = $this->get_request_session_token($request);
+        if ($tok !== '' && Eko_Sampa_Template_Derivation::is_session_row($row)) {
+            $allowed = array_flip(['json_data', 'width_mm', 'height_mm']);
+            $params  = array_intersect_key($params, $allowed);
+        }
+
+        if (Eko_Sampa_Template_Derivation::is_master_row($row) && ! current_user_can('manage_options')) {
+            return new \WP_Error(
+                'eko_sampa_master_immutable',
+                __('Official (master) templates cannot be modified here. Use “Use template” to open a working copy.', 'eko-sampa'),
+                ['status' => 403]
+            );
+        }
+
+        $tok = $this->get_request_session_token($request);
+        $tpl = new Eko_Sampa_Template();
+        $ok  = $tpl->update($id, $params, $tok !== '' ? $tok : null);
         if (! $ok) {
             return new \WP_Error(
                 'eko_sampa_update_failed',
@@ -1072,19 +1327,25 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        $row = (new Eko_Sampa_Template())->get($id);
-        if (is_array($row) && Eko_Sampa_Template_Thumbnail::should_auto_server_thumbnail_after_template_write($row)) {
+        $fresh = $this->template_rest_resolve_row($request);
+        if (is_array($fresh) && Eko_Sampa_Template_Thumbnail::should_auto_server_thumbnail_after_template_write($fresh)) {
             Eko_Sampa_Template_Thumbnail_Generator::generate_for_id($id, ['request_source' => 'template_write_hook']);
-            $row = (new Eko_Sampa_Template())->get($id);
+            $fresh = $this->template_rest_resolve_row($request);
         }
 
-        return new \WP_REST_Response(is_array($row) ? Eko_Sampa_Template_Thumbnail::enrich_row($row) : $row);
+        return new \WP_REST_Response(is_array($fresh) ? Eko_Sampa_Template_Thumbnail::enrich_row($fresh) : $fresh);
     }
 
     public function route_templates_delete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id     = (int) $request['id'];
         $strict = in_array((string) $request->get_param('strict'), ['1', 'true', 'yes'], true);
-        $res    = eko_sampa_safe_delete_template($id, ['strict' => $strict]);
+        $res    = eko_sampa_safe_delete_template(
+            $id,
+            [
+                'strict'         => $strict,
+                'session_token'  => $this->get_request_session_token($request),
+            ]
+        );
         if (empty($res['ok'])) {
             $status = match ($res['code'] ?? '') {
                 'eko_sampa_delete_forbidden' => 403,
@@ -1232,7 +1493,7 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_templates_thumbnail(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id  = (int) $request['id'];
-        $row = (new Eko_Sampa_Template())->get($id);
+        $row = $this->template_rest_resolve_row($request);
         if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1276,7 +1537,7 @@ final class Eko_Sampa_Rest_Api {
             return $saved;
         }
 
-        $fresh = (new Eko_Sampa_Template())->get($id);
+        $fresh = $this->template_rest_resolve_row($request);
         if (! is_array($fresh)) {
             return new \WP_REST_Response(['ok' => true], 200);
         }
@@ -1286,7 +1547,7 @@ final class Eko_Sampa_Rest_Api {
 
     public function route_templates_thumbnail_generate(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id = (int) $request['id'];
-        $row = (new Eko_Sampa_Template())->get($id);
+        $row = $this->template_rest_resolve_row($request);
         if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1323,14 +1584,14 @@ final class Eko_Sampa_Rest_Api {
             return $generated;
         }
 
-        $fresh = (new Eko_Sampa_Template())->get($id);
+        $fresh = $this->template_rest_resolve_row($request);
 
         return new \WP_REST_Response(is_array($fresh) ? Eko_Sampa_Template_Thumbnail::enrich_row($fresh) : ['ok' => true]);
     }
 
     public function route_templates_placeholders(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id  = (int) $request['id'];
-        $row = (new Eko_Sampa_Template())->get($id);
+        $row = $this->template_rest_resolve_row($request);
         if (! is_array($row)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1345,13 +1606,182 @@ final class Eko_Sampa_Rest_Api {
         );
     }
 
+    public function route_public_template_start_session(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $source_id = (int) $request['id'];
+        $body      = $this->json_params($request);
+
+        return Eko_Sampa_Public_Experience_Service::instance()->fork_public_catalog_session(
+            $source_id,
+            is_array($body) ? $body : []
+        );
+    }
+
+    /**
+     * Public catalog rows (master + official catalog only). No json_data in payload.
+     */
+    public function route_public_catalog(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        try {
+            $payload = Eko_Sampa_Public_Experience_Service::instance()->build_public_catalog_payload($request);
+        } catch (\Throwable $e) {
+            if (defined('EKO_SAMPA_DEBUG') && EKO_SAMPA_DEBUG) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log('[eko-sampa] route_public_catalog: ' . $e->getMessage());
+            }
+
+            return new \WP_Error(
+                'eko_sampa_public_catalog_failed',
+                __('Could not load the public catalog.', 'eko-sampa'),
+                ['status' => 503]
+            );
+        }
+        if ($payload instanceof \WP_Error) {
+            return $payload;
+        }
+
+        if (is_array($payload) && ! empty($payload['items']) && is_array($payload['items'])) {
+            $ids = [];
+            foreach ($payload['items'] as $it) {
+                if (is_array($it) && ! empty($it['id'])) {
+                    $ids[] = (int) $it['id'];
+                }
+            }
+            if ($ids !== []) {
+                Eko_Sampa_Public_Analytics::instance()->queue_catalog_views($ids);
+            }
+        }
+
+        return new \WP_REST_Response($payload);
+    }
+
+    public function route_public_categories(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        unset($request);
+        $payload = Eko_Sampa_Public_Experience_Service::instance()->build_public_categories_payload();
+        if ($payload instanceof \WP_Error) {
+            return $payload;
+        }
+
+        return new \WP_REST_Response($payload);
+    }
+
+    public function route_templates_persist_session_to_mine(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
+        $session_id = (int) $request['id'];
+        $params     = $this->json_params($request);
+        $token      = $this->get_request_session_token($request);
+        if ($token === '') {
+            return new \WP_Error('eko_sampa_invalid', __('session_token is required.', 'eko-sampa'), ['status' => 400]);
+        }
+
+        $tpl = new Eko_Sampa_Template();
+        $row = $tpl->get_row_by_id($session_id);
+        if (! Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $token)) {
+            return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+        }
+
+        $uid = (int) get_current_user_id();
+        if ($uid <= 0) {
+            return new \WP_Error(
+                'eko_sampa_auth_required',
+                __('Log in to save templates to your library.', 'eko-sampa'),
+                ['status' => 401]
+            );
+        }
+
+        $max = Eko_Sampa_Template_Derivation::max_saved_templates_per_user();
+        if ($tpl->count_user_saved_templates($uid) >= $max) {
+            return new \WP_Error(
+                'eko_sampa_saved_template_limit',
+                __('You reached the maximum number of saved templates.', 'eko-sampa'),
+                ['status' => 403, 'max_saved_templates_per_user' => $max]
+            );
+        }
+
+        $nome = isset($params['nome']) ? sanitize_text_field((string) $params['nome']) : '';
+        if ($nome === '') {
+            $nome = (string) ( $row['nome'] ?? __( 'My template', 'eko-sampa' ) );
+        }
+
+        $payload = [
+            'nome'                  => $nome,
+            'categoria'             => (string) ( $row['categoria'] ?? '' ),
+            'descricao'             => (string) ( $row['descricao'] ?? '' ),
+            'client_id'             => (int) ( $row['client_id'] ?? 0 ),
+            'product_id'            => (int) ( $row['product_id'] ?? 0 ),
+            'service_id'            => (int) ( $row['service_id'] ?? 0 ),
+            'width_mm'              => (int) ( $row['width_mm'] ?? 0 ),
+            'height_mm'             => (int) ( $row['height_mm'] ?? 0 ),
+            'preview_image'         => '',
+            'json_data'             => $row['json_data'] ?? null,
+            'template_type'         => Eko_Sampa_Template_Derivation::TYPE_USER,
+            'parent_template_id'    => (int) ( $row['parent_template_id'] ?? 0 ),
+            'saved_from_session_id' => $session_id,
+            'is_public'             => 0,
+            'is_public_catalog'     => 0,
+            'allow_personalization' => 1,
+        ];
+
+        $try = $tpl->try_create($payload, false);
+        if (empty($try['success'])) {
+            return new \WP_Error(
+                'eko_sampa_persist_failed',
+                __('Could not save template.', 'eko-sampa'),
+                array_merge(
+                    ['status' => 400],
+                    ['failure_reason' => (string) ( $try['failure_reason'] ?? '' )],
+                    $this->wpdb_debug_data()
+                )
+            );
+        }
+
+        $new_id = (int) ( $try['id'] ?? 0 );
+        if ($new_id <= 0) {
+            return new \WP_Error('eko_sampa_persist_failed', __('Could not save template.', 'eko-sampa'), ['status' => 500]);
+        }
+
+        $parent_id = (int) ( $row['parent_template_id'] ?? 0 );
+        /**
+         * Fires after a session template was persisted into the user library (session row is removed next).
+         *
+         * @param int $session_id Closed session template id.
+         * @param int $new_id     New user-owned template id.
+         * @param int $parent_id  `parent_template_id` from the session row (catalog/master lineage).
+         */
+        do_action('eko_sampa_session_persisted_to_user_template', $session_id, $new_id, $parent_id);
+
+        Eko_Sampa_Template_Thumbnail::copy($session_id, $new_id);
+
+        global $wpdb;
+        $wpdb->delete($wpdb->prefix . 'eko_sampa_quick_print_jobs', ['template_id' => $session_id], ['%d']);
+        $wpdb->delete($wpdb->prefix . 'eko_sampa_templates', ['id' => $session_id], ['%d']);
+        Eko_Sampa_Template_Thumbnail::delete($session_id);
+
+        $saved = $tpl->get($new_id);
+        if (! is_array($saved)) {
+            return new \WP_REST_Response(
+                [
+                    'id'            => $new_id,
+                    'session_closed'=> $session_id,
+                ],
+                201
+            );
+        }
+
+        $out = Eko_Sampa_Template_Thumbnail::enrich_row($saved);
+        $out['session_closed'] = $session_id;
+
+        return new \WP_REST_Response($out, 201);
+    }
+
     public function route_orders_list(\WP_REST_Request $request): \WP_REST_Response {
         return new \WP_REST_Response((new Eko_Sampa_Order())->list($this->list_args($request)));
     }
 
     public function route_orders_create(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $order  = new Eko_Sampa_Order();
-        $raw    = $this->json_params($request);
+        $order = new Eko_Sampa_Order();
+        $raw   = $this->json_params($request);
+        $qtok  = $this->get_request_session_token($request);
+        if ($qtok !== '' && ( ! isset($raw['session_token']) || trim((string) $raw['session_token']) === '' )) {
+            $raw['session_token'] = $qtok;
+        }
         $params = $order->prepare_create_data($raw);
 
         $relations = $order->relations_validate($params, null);
@@ -1395,6 +1825,17 @@ final class Eko_Sampa_Rest_Api {
                 array_merge(['status' => 400], $this->wpdb_debug_data())
             );
         }
+
+        $guest_flow = isset($params['_eko_order_template_session']) && is_string($params['_eko_order_template_session'])
+            && preg_replace('/[^a-f0-9]/i', '', (string) $params['_eko_order_template_session']) !== '';
+        do_action(
+            'eko_sampa_order_created',
+            (int) $id,
+            [
+                'template_id'           => (int) ( $params['template_id'] ?? 0 ),
+                'guest_template_flow'   => $guest_flow,
+            ]
+        );
 
         $created = $order->get((int) $id);
 
@@ -1754,14 +2195,51 @@ final class Eko_Sampa_Rest_Api {
     }
 
     /**
-     * Quick print (editor) — feature-gated; uses template capability (same surface as template REST).
+     * Quick print (editor) — feature-gated; uses template capability or guest session token on the same template/job surface.
      */
-    public function quick_print_permission(): bool {
+    public function quick_print_permission(\WP_REST_Request $request = null): bool {
         if (! apply_filters('eko_sampa_quick_print_enabled', true)) {
             return false;
         }
 
-        return $this->require_templates_cap();
+        if ($this->require_templates_cap()) {
+            return true;
+        }
+
+        if (! $request instanceof \WP_REST_Request) {
+            return false;
+        }
+
+        return $this->quick_print_guest_request_allowed($request);
+    }
+
+    private function quick_print_guest_request_allowed(\WP_REST_Request $request): bool {
+        $token = $this->get_request_session_token($request);
+        if ($token === '') {
+            return false;
+        }
+
+        $route = (string) $request->get_route();
+        $method = (string) $request->get_method();
+
+        if ($method === 'POST' && preg_match('#/quick-print/jobs$#', $route)) {
+            $params = $this->json_params($request);
+            $tid    = (int) ( $params['template_id'] ?? 0 );
+
+            return $this->template_session_token_valid($tid, $token);
+        }
+
+        if (preg_match('#/quick-print/jobs/(\d+)(?:/|$)#', $route, $m)) {
+            $jid = (int) ( $m[1] ?? 0 );
+            if ($jid <= 0) {
+                return false;
+            }
+            $row = ( new Eko_Sampa_Quick_Print_Job() )->get_for_user($jid, 0, $token);
+
+            return is_array($row);
+        }
+
+        return false;
     }
 
     public function route_quick_print_options(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
@@ -1900,7 +2378,13 @@ final class Eko_Sampa_Rest_Api {
             return new \WP_Error('eko_sampa_invalid', __('Invalid template.', 'eko-sampa'), ['status' => 400]);
         }
 
-        if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+        $uid  = (int) get_current_user_id();
+        $gtok = $this->get_request_session_token($request);
+        if ($uid > 0) {
+            if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+                return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+            }
+        } elseif (! $this->template_session_token_valid($tid, $gtok)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
@@ -1918,6 +2402,13 @@ final class Eko_Sampa_Rest_Api {
             return $snap_err;
         }
 
+        if ($uid <= 0) {
+            $qp_guard = Eko_Sampa_Public_Experience::guard_guest_quick_print_create($uid, $tid, $gtok);
+            if ($qp_guard instanceof \WP_Error) {
+                return $qp_guard;
+            }
+        }
+
         $preview = $this->sanitize_quick_print_snapshot_for_response($preview_in);
 
         $model = new Eko_Sampa_Quick_Print_Job();
@@ -1929,14 +2420,22 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        $uid = (int) get_current_user_id();
-        $qty = (int) ( $params['quantity'] ?? 1 );
-        $pk  = isset($params['printer_key']) ? (string) $params['printer_key'] : '__system__';
+        $qty  = (int) ( $params['quantity'] ?? 1 );
+        $pk   = isset($params['printer_key']) ? (string) $params['printer_key'] : '__system__';
         $preset = isset($params['preset_key']) ? (string) $params['preset_key'] : 'default';
 
-        $job = $model->create($uid, $tid, $qty, $pk, $preset);
+        $job = $model->create($uid, $tid, $qty, $pk, $preset, $uid <= 0 ? $gtok : '');
         if ($job instanceof \WP_Error) {
             return $job;
+        }
+
+        if ($uid <= 0) {
+            Eko_Sampa_Public_Experience::record_guest_quick_print_hour_usage();
+            Eko_Sampa_Public_Experience::bump_quick_print_metric();
+        }
+
+        if (is_array($job)) {
+            do_action('eko_sampa_quick_print_job_created', $job);
         }
 
         $qty_eff = is_array($job) ? (int) ( $job['quantity'] ?? 1 ) : max(1, $qty);
@@ -1962,9 +2461,10 @@ final class Eko_Sampa_Rest_Api {
     }
 
     public function route_quick_print_job_get(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
-        $id  = (int) $request['id'];
-        $uid = (int) get_current_user_id();
-        $row = ( new Eko_Sampa_Quick_Print_Job() )->get_for_user($id, $uid);
+        $id   = (int) $request['id'];
+        $uid  = (int) get_current_user_id();
+        $gtok = $this->get_request_session_token($request);
+        $row  = ( new Eko_Sampa_Quick_Print_Job() )->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
         if ($row === null) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1975,8 +2475,9 @@ final class Eko_Sampa_Rest_Api {
     public function route_quick_print_job_cancel(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id    = (int) $request['id'];
         $uid   = (int) get_current_user_id();
+        $gtok  = $this->get_request_session_token($request);
         $model = new Eko_Sampa_Quick_Print_Job();
-        $row   = $model->get_for_user($id, $uid);
+        $row   = $model->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
         if ($row === null) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -1989,19 +2490,20 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_CANCELLED);
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_CANCELLED, $uid <= 0 ? $gtok : '');
         if ($r instanceof \WP_Error) {
             return $r;
         }
 
-        return new \WP_REST_Response($model->get_for_user($id, $uid));
+        return new \WP_REST_Response($model->get_for_user($id, $uid, $uid <= 0 ? $gtok : ''));
     }
 
     public function route_quick_print_job_browser_handoff(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id    = (int) $request['id'];
         $uid   = (int) get_current_user_id();
+        $gtok  = $this->get_request_session_token($request);
         $model = new Eko_Sampa_Quick_Print_Job();
-        $row   = $model->get_for_user($id, $uid);
+        $row   = $model->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
         if ($row === null) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -2015,19 +2517,20 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_SENT_TO_BROWSER);
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_SENT_TO_BROWSER, $uid <= 0 ? $gtok : '');
         if ($r instanceof \WP_Error) {
             return $r;
         }
 
-        return new \WP_REST_Response($model->get_for_user($id, $uid));
+        return new \WP_REST_Response($model->get_for_user($id, $uid, $uid <= 0 ? $gtok : ''));
     }
 
     public function route_quick_print_job_complete(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id    = (int) $request['id'];
         $uid   = (int) get_current_user_id();
+        $gtok  = $this->get_request_session_token($request);
         $model = new Eko_Sampa_Quick_Print_Job();
-        $row   = $model->get_for_user($id, $uid);
+        $row   = $model->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
         if ($row === null) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -2041,19 +2544,25 @@ final class Eko_Sampa_Rest_Api {
             );
         }
 
-        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_COMPLETED);
+        $r = $model->set_status($id, $uid, Eko_Sampa_Quick_Print_Job::STATUS_COMPLETED, $uid <= 0 ? $gtok : '');
         if ($r instanceof \WP_Error) {
             return $r;
         }
 
-        return new \WP_REST_Response($model->get_for_user($id, $uid));
+        $fresh = $model->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
+        if (is_array($fresh)) {
+            do_action('eko_sampa_quick_print_job_completed', $fresh);
+        }
+
+        return new \WP_REST_Response($fresh);
     }
 
     public function route_quick_print_job_reprint(\WP_REST_Request $request): \WP_REST_Response|\WP_Error {
         $id     = (int) $request['id'];
         $uid    = (int) get_current_user_id();
+        $gtok   = $this->get_request_session_token($request);
         $model  = new Eko_Sampa_Quick_Print_Job();
-        $source = $model->get_for_user($id, $uid);
+        $source = $model->get_for_user($id, $uid, $uid <= 0 ? $gtok : '');
         if ($source === null) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
@@ -2075,7 +2584,11 @@ final class Eko_Sampa_Rest_Api {
 
         $preview = $this->sanitize_quick_print_snapshot_for_response($raw);
         $tid     = (int) ( $source['template_id'] ?? 0 );
-        if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+        if ($uid > 0) {
+            if (! is_array(( new Eko_Sampa_Template() )->get($tid))) {
+                return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
+            }
+        } elseif (! $this->template_session_token_valid($tid, $gtok)) {
             return new \WP_Error('eko_sampa_not_found', __('Not found.', 'eko-sampa'), ['status' => 404]);
         }
 
@@ -2091,7 +2604,7 @@ final class Eko_Sampa_Rest_Api {
         $pk  = isset($params['printer_key']) ? (string) $params['printer_key'] : (string) ( $source['printer_key'] ?? '__system__' );
         $preset = isset($params['preset_key']) ? (string) $params['preset_key'] : (string) ( $source['preset_key'] ?? 'default' );
 
-        $job = $model->create($uid, $tid, $qty, $pk, $preset);
+        $job = $model->create($uid, $tid, $qty, $pk, $preset, $uid <= 0 ? $gtok : '');
         if ($job instanceof \WP_Error) {
             return $job;
         }
@@ -2134,6 +2647,39 @@ final class Eko_Sampa_Rest_Api {
         $fallback = $request->get_body_params();
 
         return is_array($fallback) ? $fallback : [];
+    }
+
+    /**
+     * Strip derivation / lifecycle columns non-admins must not set via REST (master/session metadata).
+     *
+     * @param array<string, mixed> $params
+     *
+     * @return array<string, mixed>
+     */
+    private function sanitize_template_admin_only_fields(array $params): array {
+        if (current_user_can('manage_options')) {
+            return $params;
+        }
+
+        foreach (
+            [
+                'template_type',
+                'parent_template_id',
+                'session_token',
+                'expires_at',
+                'last_activity_at',
+                'saved_from_session_id',
+                'session_fingerprint',
+                'session_lifecycle',
+                'is_public_catalog',
+                'is_user_shareable',
+                'is_marketplace_item',
+            ] as $k
+        ) {
+            unset($params[ $k ]);
+        }
+
+        return $params;
     }
 
     /**

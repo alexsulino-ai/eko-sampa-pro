@@ -61,6 +61,12 @@ final class Eko_Sampa_Frontend_Router {
     }
 
     public function register_rewrite_rules(): void {
+        add_rewrite_rule(
+            '^eko-sampa/?$',
+            'index.php?' . self::QUERY_FLAG . '=1&' . self::QUERY_VIEW . '=public_home',
+            'top'
+        );
+
         $routes = [
             'dashboard' => 'eko-sampa_dashboard',
             'login'     => 'eko-sampa_login',
@@ -118,6 +124,14 @@ final class Eko_Sampa_Frontend_Router {
         }
 
         $view = $this->current_view();
+        if ($view === 'public_home') {
+            if (! Eko_Sampa_Public_Experience::is_public_home_enabled()) {
+                wp_die(esc_html__('This page is not available.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 404]);
+            }
+
+            return;
+        }
+
         if ($view === 'login') {
             if (is_user_logged_in() && $this->user_may_use_app()) {
                 wp_safe_redirect(self::get_url('dashboard'));
@@ -125,6 +139,32 @@ final class Eko_Sampa_Frontend_Router {
             }
 
             return;
+        }
+
+        if ($view === 'editor') {
+            if (is_user_logged_in()) {
+                if (! $this->user_may_use_app()) {
+                    wp_die(esc_html__('You do not have access to this application.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 403]);
+                }
+                if (! self::viewer_can_access($view)) {
+                    wp_die(esc_html__('You do not have permission to view this page.', 'eko-sampa'), esc_html__('Eko Sampa', 'eko-sampa'), ['response' => 403]);
+                }
+
+                return;
+            }
+            if (Eko_Sampa_Public_Experience::guest_editor_session_row_valid()) {
+                return;
+            }
+            if (Eko_Sampa_Public_Experience_Service::instance()->guest_editor_session_stale()) {
+                $GLOBALS['eko_sampa_guest_session_expired'] = true;
+                $tid = isset($_GET['template_id']) ? absint((int) $_GET['template_id']) : 0;
+                $tok = isset($_GET['session_token']) ? preg_replace('/[^a-f0-9]/i', '', sanitize_text_field((string) wp_unslash((string) $_GET['session_token']))) : '';
+                $row = $tid > 0 ? ( new Eko_Sampa_Template() )->get_row_by_id($tid) : null;
+                $GLOBALS['eko_sampa_guest_session_expired_reason'] = Eko_Sampa_Public_Experience_Service::instance()->guest_session_diagnostic(is_array($row) ? $row : null, $tok);
+                $GLOBALS['eko_sampa_guest_session_parent_master_id'] = is_array($row) ? (int) ( $row['parent_template_id'] ?? 0 ) : 0;
+
+                return;
+            }
         }
 
         if (! is_user_logged_in()) {
@@ -219,6 +259,9 @@ final class Eko_Sampa_Frontend_Router {
             wp_die(esc_html__('Invalid login request.', 'eko-sampa'), '', ['response' => 403]);
         }
 
+        $redirect_post = isset($_POST['redirect_to']) ? wp_unslash((string) $_POST['redirect_to']) : '';
+        $redirect_to   = wp_validate_redirect($redirect_post, self::get_url('dashboard'));
+
         $login    = isset($_POST['log']) ? sanitize_user(wp_unslash((string) $_POST['log'])) : '';
         $password = isset($_POST['pwd']) ? (string) wp_unslash($_POST['pwd']) : '';
         $remember = ! empty($_POST['rememberme']);
@@ -231,11 +274,15 @@ final class Eko_Sampa_Frontend_Router {
 
         $user = wp_signon($credentials, is_ssl());
         if (is_wp_error($user)) {
-            wp_safe_redirect(add_query_arg('login', 'failed', self::get_url('login')));
+            $fail = add_query_arg('login', 'failed', self::get_url('login'));
+            if ($redirect_post !== '') {
+                $fail = add_query_arg('redirect_to', rawurlencode($redirect_post), $fail);
+            }
+            wp_safe_redirect($fail);
             exit;
         }
 
-        wp_safe_redirect(self::get_url('dashboard'));
+        wp_safe_redirect($redirect_to);
         exit;
     }
 
@@ -254,6 +301,7 @@ final class Eko_Sampa_Frontend_Router {
 
     public static function get_url(string $view, ?int $order_id = null): string {
         $slugs = [
+            'public_home' => 'eko-sampa',
             'dashboard' => 'eko-sampa_dashboard',
             'login'     => 'eko-sampa_login',
             'clients'   => 'eko-sampa_clients',
@@ -400,6 +448,7 @@ final class Eko_Sampa_Frontend_Router {
      */
     public static function render_app_view(string $view): void {
         $allowed = [
+            'public_home',
             'dashboard',
             'login',
             'clients',
@@ -433,6 +482,39 @@ final class Eko_Sampa_Frontend_Router {
             }
 
             return;
+        }
+
+        if ($view === 'public_home') {
+            if (! Eko_Sampa_Public_Experience::is_public_home_enabled()) {
+                echo '<p class="eko-sampa-gate">' . esc_html__('This page is not available.', 'eko-sampa') . '</p>';
+
+                return;
+            }
+            $pub = EKO_SAMPA_PLUGIN_DIR . 'views/frontend-public-home.php';
+            if (is_readable($pub)) {
+                require $pub;
+            }
+
+            return;
+        }
+
+        if ($view === 'editor' && ! is_user_logged_in()) {
+            if (! empty($GLOBALS['eko_sampa_guest_session_expired'])) {
+                $exp = EKO_SAMPA_PLUGIN_DIR . 'views/frontend-guest-session-expired.php';
+                if (is_readable($exp)) {
+                    require $exp;
+                }
+
+                return;
+            }
+            if (Eko_Sampa_Public_Experience::guest_editor_session_row_valid()) {
+                $guest = EKO_SAMPA_PLUGIN_DIR . 'views/frontend-guest-editor-wrap.php';
+                if (is_readable($guest)) {
+                    require $guest;
+                }
+
+                return;
+            }
         }
 
         if (! is_user_logged_in()) {

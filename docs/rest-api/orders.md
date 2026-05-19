@@ -6,7 +6,7 @@
 
 ### Pipeline
 
-1. `$params = $order->prepare_create_data($raw)`
+1. `$params = $order->prepare_create_data($raw)` — aceita `session_token` no JSON ou `?session_token=` (para encomendas a partir de um template em **sessão** com o mesmo browser/token).
 2. `$relations = $order->relations_validate($params, null)`
 3. Se `!ok` → `maybe_repair_orphan_template_service_for_order` → revalida
 4. Se ainda `!ok` → `WP_Error` `eko_sampa_order_invalid_relations`

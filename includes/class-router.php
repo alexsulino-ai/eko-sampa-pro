@@ -64,6 +64,15 @@ final class Eko_Sampa_Router {
             self::MENU_SLUG . '-diagnostics',
             [$this, 'render_diagnostics_page']
         );
+
+        add_submenu_page(
+            self::MENU_SLUG,
+            __('Public home & guests', 'eko-sampa'),
+            __('Public & guests', 'eko-sampa'),
+            'manage_options',
+            self::MENU_SLUG . '-public-experience',
+            [$this, 'render_public_experience_page']
+        );
     }
 
     /**
@@ -168,6 +177,17 @@ final class Eko_Sampa_Router {
             if (! is_array($delete_audit)) {
                 $delete_audit = [];
             }
+            require $view;
+        }
+    }
+
+    public function render_public_experience_page(): void {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to access this page.', 'eko-sampa'));
+        }
+
+        $view = EKO_SAMPA_PLUGIN_DIR . 'views/admin-public-experience.php';
+        if (is_readable($view)) {
             require $view;
         }
     }

@@ -81,6 +81,8 @@ final class Eko_Sampa_Assets {
 
     public const HANDLE_FRONTEND_APP = 'eko-sampa-frontend-app';
 
+    public const HANDLE_PUBLIC_HOME = 'eko-sampa-public-home';
+
     public const HANDLE_EKO_UI = 'eko-sampa-ui';
 
     public const HANDLE_EKO_TOAST = 'eko-sampa-toast';
@@ -312,6 +314,17 @@ final class Eko_Sampa_Assets {
                 $this->plugin_asset_url($fe_app_rel),
                 $fe_deps,
                 $this->plugin_asset_version($fe_app_rel),
+                true
+            );
+        }
+
+        $pub_rel = 'assets/js/public-home.js';
+        if (is_readable(EKO_SAMPA_PLUGIN_DIR . $pub_rel)) {
+            wp_register_script(
+                self::HANDLE_PUBLIC_HOME,
+                $this->plugin_asset_url($pub_rel),
+                [],
+                $this->plugin_asset_version($pub_rel),
                 true
             );
         }
@@ -579,6 +592,24 @@ final class Eko_Sampa_Assets {
             );
         }
 
+        if ($this->is_frontend_public_home_view()) {
+            if (wp_script_is(self::HANDLE_PUBLIC_HOME, 'registered')) {
+                wp_enqueue_script(self::HANDLE_PUBLIC_HOME);
+                wp_localize_script(
+                    self::HANDLE_PUBLIC_HOME,
+                    'ekoSampaPublic',
+                    [
+                        'restRoot'       => esc_url_raw(rest_url('eko-sampa/v1/')),
+                        'nonce'          => wp_create_nonce('wp_rest'),
+                        'editorBaseUrl'  => Eko_Sampa_Frontend_Router::get_url('editor'),
+                        'pluginVersion'  => EKO_SAMPA_VERSION,
+                    ]
+                );
+            }
+
+            return;
+        }
+
         if ($this->should_enqueue_frontend_rest_bundle()) {
             if (wp_script_is(self::HANDLE_EKO_UI, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EKO_UI);
@@ -613,6 +644,17 @@ final class Eko_Sampa_Assets {
                             'orderTemplateRequired' => __('Select a template for this order.', 'eko-sampa'),
                         ],
                         'crud'           => Eko_Sampa_Frontend_Router::current_crud_context(),
+                        'template_quota' => ( function (): ?array {
+                            $uid = get_current_user_id();
+                            if ($uid <= 0) {
+                                return null;
+                            }
+
+                            return [
+                                'used' => ( new Eko_Sampa_Template() )->count_user_saved_templates($uid),
+                                'max'  => Eko_Sampa_Template_Derivation::max_saved_templates_per_user(),
+                            ];
+                        } )(),
                     ]
                 );
             }
@@ -678,18 +720,48 @@ final class Eko_Sampa_Assets {
             if (wp_script_is(self::HANDLE_EDITOR_CANVAS, 'registered')) {
                 wp_enqueue_script(self::HANDLE_EDITOR_CANVAS);
                 $tid = isset($_GET['template_id']) ? absint((int) $_GET['template_id']) : 0;
+                $stk = isset($_GET['session_token']) ? preg_replace('/[^a-f0-9]/i', '', sanitize_text_field((string) $_GET['session_token'])) : '';
+                $editor_base = Eko_Sampa_Frontend_Router::get_url('editor');
+                $recover_q   = isset($_GET['eko_recover_session']) && in_array((string) $_GET['eko_recover_session'], ['1', 'true', 'yes'], true);
+                if ($recover_q && $stk !== '' && $tid > 0) {
+                    Eko_Sampa_Public_Experience_Service::instance()->bump_recovery_banner_metric();
+                }
+                $redirect    = $tid > 0
+                    ? add_query_arg(
+                        array_filter(
+                            [
+                                'template_id'   => $tid,
+                                'session_token' => $stk !== '' ? $stk : null,
+                            ]
+                        ),
+                        $editor_base
+                    )
+                    : $editor_base;
+                $login_url = is_user_logged_in()
+                    ? wp_login_url($redirect)
+                    : add_query_arg(
+                        'redirect_to',
+                        rawurlencode($redirect),
+                        Eko_Sampa_Frontend_Router::get_url('login')
+                    );
                 wp_localize_script(
                     self::HANDLE_EDITOR_CANVAS,
                     'ekoSampaEditor',
                     [
-                        'templateId'     => $tid,
-                        'root'           => esc_url_raw(rest_url('eko-sampa/v1/')),
+                        'templateId'          => $tid,
+                        'templateSessionToken'=> $stk,
+                        'isLoggedIn'          => is_user_logged_in(),
+                        'loginUrl'            => $login_url,
+                        'sessionAutosaveDebounceMs' => 12000,
+                        'showSessionRecoveryBanner' => $recover_q && $stk !== '' && $tid > 0,
+                        'root'                => esc_url_raw(rest_url('eko-sampa/v1/')),
                         'nonce'          => wp_create_nonce('wp_rest'),
                         'pluginVersion'  => EKO_SAMPA_VERSION,
                         'quickPrint'     => [
                             'enabled' => (bool) apply_filters('eko_sampa_quick_print_enabled', true),
                         ],
                         'canOrderCreate' => current_user_can('manage_options') || current_user_can(Eko_Sampa_Roles::CAP_MANAGE_ORDERS),
+                        'guestEditor'    => ! is_user_logged_in() && Eko_Sampa_Public_Experience::guest_editor_session_row_valid(),
                         'render'         => [
                             'schemaVersion' => Eko_Sampa_Render_Schema::VERSION,
                             'units'         => Eko_Sampa_Render_Schema::units_meta(),
@@ -763,17 +835,22 @@ final class Eko_Sampa_Assets {
 
         // Alpine last: alpine:init listeners must already be attached (class docblock).
         // Print view uses vanilla mount script only (no Alpine components).
-        if (! $this->is_frontend_print_view() && wp_script_is(self::HANDLE_ALPINE, 'registered')) {
+        if (! $this->is_frontend_print_view()
+            && ! $this->is_frontend_public_home_view()
+            && wp_script_is(self::HANDLE_ALPINE, 'registered')) {
             wp_enqueue_script(self::HANDLE_ALPINE);
         }
     }
 
     /**
-     * @param array<int, string> $classes
+     * @param mixed $classes WordPress passes string[]; coerce if another filter broke the chain.
      *
      * @return array<int, string>
      */
-    public function filter_body_class(array $classes): array {
+    public function filter_body_class($classes): array {
+        if (! is_array($classes)) {
+            $classes = [];
+        }
         if ($this->is_frontend_virtual_route()) {
             $classes[] = 'eko-sampa-route';
         }
@@ -812,7 +889,7 @@ final class Eko_Sampa_Assets {
         if (! $want) {
             if ($this->is_frontend_virtual_route()) {
                 $v = sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW));
-                if ($v === 'login' || $v === 'print') {
+                if ($v === 'login' || $v === 'print' || $v === 'public_home') {
                     $skip = 'virtual_route_' . $v . '_skips_rest_bundle';
                 } elseif ($v === '') {
                     $skip = 'virtual_route_empty_view';
@@ -851,11 +928,25 @@ final class Eko_Sampa_Assets {
     private function should_enqueue_frontend_rest_bundle(): bool {
         if ($this->is_frontend_virtual_route()) {
             $view = sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW));
+            if ($view === 'public_home') {
+                return false;
+            }
+            if ($view === 'editor' && ! is_user_logged_in() && Eko_Sampa_Public_Experience::guest_editor_session_row_valid()) {
+                return false;
+            }
 
             return $view !== '' && ! in_array($view, ['login', 'print'], true);
         }
 
         return $this->singular_has_eko_shortcode() && is_user_logged_in();
+    }
+
+    private function is_frontend_public_home_view(): bool {
+        if (! $this->is_frontend_virtual_route()) {
+            return false;
+        }
+
+        return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'public_home';
     }
 
     private function is_frontend_virtual_route(): bool {
@@ -877,6 +968,9 @@ final class Eko_Sampa_Assets {
     }
 
     private function is_frontend_editor_view(): bool {
+        if (! empty($GLOBALS['eko_sampa_guest_session_expired'])) {
+            return false;
+        }
         if ($this->is_frontend_virtual_route()) {
             return sanitize_key((string) get_query_var(Eko_Sampa_Frontend_Router::QUERY_VIEW)) === 'editor';
         }

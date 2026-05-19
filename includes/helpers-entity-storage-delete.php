@@ -42,6 +42,9 @@ function eko_sampa_safe_delete_template(int $template_id, array $options = []): 
     );
 
     $strict = ! empty($opts['strict']);
+    $sess_tok = isset($opts['session_token']) && is_string($opts['session_token'])
+        ? preg_replace('/[^a-f0-9]/i', '', $opts['session_token'])
+        : '';
     $tpl    = new Eko_Sampa_Template();
     $row    = $tpl->get_row_by_id($template_id);
     if (! is_array($row)) {
@@ -54,7 +57,14 @@ function eko_sampa_safe_delete_template(int $template_id, array $options = []): 
         ];
     }
 
-    if (! is_array($tpl->get($template_id))) {
+    $visible = is_array($tpl->get($template_id));
+    if (! $visible && $sess_tok !== ''
+        && Eko_Sampa_Template_Derivation::is_session_row($row)
+        && Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $sess_tok)) {
+        $visible = true;
+    }
+
+    if (! $visible) {
         return [
             'ok'      => false,
             'code'    => 'eko_sampa_delete_forbidden',
@@ -76,6 +86,14 @@ function eko_sampa_safe_delete_template(int $template_id, array $options = []): 
     }
 
     $ok = $tpl->delete($template_id);
+    if (! $ok && $sess_tok !== ''
+        && Eko_Sampa_Template_Derivation::is_session_row($row)
+        && Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $sess_tok)) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eko_sampa_templates';
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $ok = false !== $wpdb->delete($table, ['id' => $template_id], ['%d']);
+    }
     if (! $ok) {
         return [
             'ok'      => false,

@@ -1193,6 +1193,7 @@ function ekoTemplatesFactory() {
             q: '',
             cat: '',
             filterUserId: '',
+            listScope: 'mine',
             users: [],
             clients: [],
             form: {
@@ -1207,6 +1208,10 @@ function ekoTemplatesFactory() {
                 product_id: 0,
                 preview_image: '',
                 user_id: '',
+                template_type: 'user',
+                is_public: 0,
+                is_public_catalog: 0,
+                allow_personalization: 1,
             },
         },
         loading: false,
@@ -1446,6 +1451,12 @@ function ekoTemplatesFactory() {
             r.preview_image = r.preview_image != null ? String(r.preview_image) : '';
             r.width_mm = r.width_mm != null ? Number(r.width_mm) : 210;
             r.height_mm = r.height_mm != null ? Number(r.height_mm) : 297;
+            r.template_type = r.template_type != null ? String(r.template_type) : 'user';
+            r.is_public = r.is_public != null ? parseInt(String(r.is_public), 10) || 0 : 0;
+            r.is_public_catalog =
+                r.is_public_catalog != null ? parseInt(String(r.is_public_catalog), 10) || 0 : 0;
+            r.allow_personalization =
+                r.allow_personalization != null ? parseInt(String(r.allow_personalization), 10) || 0 : 1;
             return r;
         },
         templateIdFromRow(row) {
@@ -1506,13 +1517,20 @@ function ekoTemplatesFactory() {
                     return null;
                 }
             }
-            return {
+            const base = {
                 client_id: 0,
                 template_id: tid,
                 service_id: sid || 0,
                 status: 'pending',
                 dynamic_data_json: {},
             };
+            const ed = typeof window !== 'undefined' ? window.ekoSampaEditor || {} : {};
+            const stok =
+                tid === Number(ed.templateId || 0) ? String(ed.templateSessionToken || '').replace(/[^a-f0-9]/gi, '') : '';
+            if (stok) {
+                base.session_token = stok;
+            }
+            return base;
         },
         async createOrderFromTemplate(row) {
             const tid = this.templateIdFromRow(row);
@@ -1670,8 +1688,11 @@ function ekoTemplatesFactory() {
             if (this.state.cat) {
                 qs.set('categoria', this.state.cat);
             }
-            if (this.isAdmin && this.state.filterUserId) {
+            if (this.isAdmin && this.state.filterUserId && this.state.listScope !== 'public') {
                 qs.set('filter_user_id', this.state.filterUserId);
+            }
+            if (this.state.listScope === 'public') {
+                qs.set('catalog_public', '1');
             }
             try {
                 const arr = await window.ekoSampaApi('templates?' + qs.toString(), { method: 'GET' });
@@ -1698,6 +1719,79 @@ function ekoTemplatesFactory() {
             }
             this.state.page++;
             this.load();
+        },
+        setListScope(scope) {
+            const s = scope === 'public' ? 'public' : 'mine';
+            if (this.state.listScope === s) {
+                return;
+            }
+            this.state.listScope = s;
+            this.state.page = 1;
+            this.load();
+        },
+        isTemplatePersonalizationFork(row) {
+            const r = row || {};
+            const ap = r.allow_personalization != null ? parseInt(String(r.allow_personalization), 10) : 1;
+            if (ap !== 1) {
+                return false;
+            }
+            const t = String(r.template_type || 'user').toLowerCase();
+            if (t === 'session') {
+                return false;
+            }
+            const pub = parseInt(String(r.is_public || 0), 10) === 1;
+            const cat = r.is_public_catalog != null ? parseInt(String(r.is_public_catalog), 10) : null;
+            if (t === 'master') {
+                if (cat !== null && !Number.isNaN(cat)) {
+                    return cat === 1;
+                }
+                return pub;
+            }
+            return pub;
+        },
+        async useTemplateRow(row) {
+            const r = row && typeof row === 'object' ? row : {};
+            const id = parseInt(String(r.id || 0), 10);
+            if (!id) {
+                return;
+            }
+            if (!this.isTemplatePersonalizationFork(r)) {
+                window.location.href = this.editorUrl(id);
+                return;
+            }
+            this.error = null;
+            try {
+                const created = await window.ekoSampaApi('public/templates/' + id + '/session', { method: 'POST', body: {} });
+                const tid = created && created.id ? parseInt(String(created.id), 10) : 0;
+                const tok = created && created.session_token ? String(created.session_token) : '';
+                if (tid && tok) {
+                    window.location.href = this.editorUrlSession(tid, tok);
+                    return;
+                }
+                this.error = 'Could not start personalization session.';
+            } catch (e) {
+                this.error = String((e && e.message) || e || 'Session error');
+            }
+        },
+        editorUrlSession(id, token) {
+            const idStr = String(id);
+            const tokEnc = encodeURIComponent(String(token || ''));
+            let base = (window.ekoSampaRest && window.ekoSampaRest.urls && window.ekoSampaRest.urls.editor) || '';
+            if (typeof base !== 'string') {
+                base = '';
+            }
+            if (!base) {
+                return '/eko-sampa_editor/?template_id=' + encodeURIComponent(idStr) + '&session_token=' + tokEnc;
+            }
+            try {
+                const u = new URL(base, window.location.origin);
+                u.searchParams.set('template_id', idStr);
+                u.searchParams.set('session_token', String(token || ''));
+                return u.toString();
+            } catch (e) {
+                const sep = base.indexOf('?') >= 0 ? '&' : '?';
+                return base + sep + 'template_id=' + encodeURIComponent(idStr) + '&session_token=' + tokEnc;
+            }
         },
         editorUrl(id) {
             const idStr = String(id);
@@ -1756,11 +1850,78 @@ function ekoTemplatesFactory() {
                 product_id: 0,
                 preview_image: '',
                 user_id: '',
+                template_type: 'user',
+                is_public: 0,
+                is_public_catalog: 0,
+                allow_personalization: 1,
             };
+        },
+        onTemplateTypeChanged() {
+            const t = String(this.state.form.template_type || 'user').toLowerCase();
+            if (t === 'master') {
+                const ip = parseInt(String(this.state.form.is_public || 0), 10);
+                const ic = parseInt(String(this.state.form.is_public_catalog || 0), 10);
+                const v = ip || ic ? 1 : 0;
+                this.state.form.is_public = v;
+                this.state.form.is_public_catalog = v;
+            } else {
+                this.state.form.is_public_catalog = 0;
+            }
+        },
+        templatePublicHomeChecked() {
+            if (String(this.state.form.template_type || 'user').toLowerCase() !== 'master') {
+                return false;
+            }
+            const ic = parseInt(String(this.state.form.is_public_catalog || 0), 10);
+            const ip = parseInt(String(this.state.form.is_public || 0), 10);
+            return ic === 1 || ip === 1;
+        },
+        setTemplatePublicHomeVisible(on) {
+            const v = on ? 1 : 0;
+            this.state.form.is_public_catalog = v;
+            this.state.form.is_public = v;
+        },
+        templateShowsOnPublicHome(row) {
+            const r = row && typeof row === 'object' ? row : {};
+            if (String(r.template_type || 'user').toLowerCase() !== 'master') {
+                return false;
+            }
+            return parseInt(String(r.is_public_catalog || 0), 10) === 1;
+        },
+        templateQuotaMax() {
+            const q = typeof window !== 'undefined' && window.ekoSampaRest && window.ekoSampaRest.template_quota;
+            if (!q || q.max == null) {
+                return 0;
+            }
+            return parseInt(String(q.max), 10) || 0;
+        },
+        templateQuotaUsed() {
+            const q = typeof window !== 'undefined' && window.ekoSampaRest && window.ekoSampaRest.template_quota;
+            if (!q || q.used == null) {
+                return 0;
+            }
+            return parseInt(String(q.used), 10) || 0;
+        },
+        templateQuotaApproaching() {
+            const m = this.templateQuotaMax();
+            const u = this.templateQuotaUsed();
+            if (m <= 0) {
+                return false;
+            }
+            return u / m >= 0.85;
+        },
+        showTemplateQuotaBar() {
+            if (this.mode !== 'list') {
+                return false;
+            }
+            if (this.state.listScope !== 'mine') {
+                return false;
+            }
+            return this.templateQuotaMax() > 0;
         },
         templateSavePayload() {
             const f = this.state.form || {};
-            return {
+            const base = {
                 nome: f.nome != null ? String(f.nome) : '',
                 categoria: f.categoria != null ? String(f.categoria) : '',
                 descricao: f.descricao != null ? String(f.descricao) : '',
@@ -1770,7 +1931,14 @@ function ekoTemplatesFactory() {
                 service_id: parseInt(String(f.service_id || 0), 10) || 0,
                 product_id: parseInt(String(f.product_id || 0), 10) || 0,
                 preview_image: f.preview_image != null ? String(f.preview_image) : '',
+                template_type: f.template_type != null ? String(f.template_type) : 'user',
+                is_public: f.is_public ? 1 : 0,
+                allow_personalization: f.allow_personalization ? 1 : 0,
             };
+            if (this.isAdmin) {
+                base.is_public_catalog = f.is_public_catalog ? 1 : 0;
+            }
+            return base;
         },
         async save() {
             this.error = null;

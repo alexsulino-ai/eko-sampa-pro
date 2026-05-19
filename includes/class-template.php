@@ -87,14 +87,19 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             'formats'                       => [],
         ];
 
+        $guest_session = ! empty($work['_eko_internal_session_insert']);
+        if ($guest_session) {
+            unset($work['_eko_internal_session_insert']);
+        }
+
         $uid = $this->current_user_id();
-        if ($uid <= 0) {
+        if ($uid <= 0 && ! $guest_session) {
             $out['failure_reason'] = 'no_actor_user';
 
             return $out;
         }
 
-        if ($this->is_unrestricted() && isset($work['user_id'])) {
+        if (! $guest_session && $this->is_unrestricted() && isset($work['user_id'])) {
             $forced = absint((int) $work['user_id']);
             if ($forced > 0) {
                 $uid = $forced;
@@ -102,6 +107,7 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
         }
 
         $row = $this->sanitize_row($work, false);
+        $this->align_master_catalog_flags_on_insert_row($row);
         if (array_key_exists('json_data', $work)) {
             $this->json_normalize_last_error = '';
             $encoded = $this->normalize_json($work['json_data']);
@@ -118,7 +124,11 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             $row['json_data'] = $encoded;
         }
 
-        $row['user_id'] = $uid;
+        if ($guest_session) {
+            $row['user_id'] = 0;
+        } else {
+            $row['user_id'] = $uid;
+        }
 
         $bridge                         = Eko_Sampa_Template_Legacy_Row_Bridge::augment($this->insert_table_name(), $row);
         $row                            = $bridge['row'];
@@ -285,14 +295,51 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
     }
 
     /**
+     * Template visibility for order creation: ownership-scoped rows, or session rows when token validates.
+     */
+    public function get_for_order_context(int $id, string $session_token = ''): ?array {
+        if ($id <= 0) {
+            return null;
+        }
+        $session_token = preg_replace('/[^a-f0-9]/i', '', trim($session_token));
+        $row           = $this->get_row_by_id($id);
+        if (! is_array($row)) {
+            return null;
+        }
+        if (Eko_Sampa_Template_Derivation::is_session_row($row)) {
+            if ($session_token === '') {
+                return null;
+            }
+
+            return Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $session_token) ? $row : null;
+        }
+
+        return $this->get($id);
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
-    public function update(int $id, array $data): bool {
-        if ($id <= 0 || ! $this->get($id)) {
+    public function update(int $id, array $data, ?string $session_token = null): bool {
+        $session_token = $session_token !== null ? trim($session_token) : null;
+
+        if ($id <= 0) {
+            return false;
+        }
+
+        $session_mode = $session_token !== null && $session_token !== '';
+        if ($session_mode) {
+            $scope = $this->get_row_by_id($id);
+            if (! is_array($scope)
+                || ! Eko_Sampa_Template_Derivation::request_can_use_session_row($scope, (string) $session_token)) {
+                return false;
+            }
+        } elseif (! $this->get($id)) {
             return false;
         }
 
         $row = $this->sanitize_row($data, true);
+        $this->align_master_catalog_flags_on_update_row($id, $data, $row);
         if (array_key_exists('json_data', $data)) {
             $encoded = $this->normalize_json($data['json_data']);
             if ($encoded === false && $this->json_input_present($data['json_data'])) {
@@ -310,7 +357,11 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             return true;
         }
 
-        [$extra, $own] = $this->ownership_sql();
+        if ($session_mode) {
+            $row['last_activity_at'] = current_time('mysql');
+        }
+
+        [, $own] = $session_mode ? ['', []] : $this->ownership_sql();
         $where  = array_merge(['id' => $id], $this->ownership_where_columns($own));
         $wfmt   = array_merge(['%d'], $this->ownership_where_formats($own));
         $result = $this->db()->update(
@@ -367,6 +418,19 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             $cat_vals[] = sanitize_text_field((string) $args['categoria']);
         }
 
+        $colmap = $this->table_column_name_map();
+        if (! empty($args['catalog_public_only']) && isset($colmap['template_type'], $colmap['is_public'], $colmap['allow_personalization'])) {
+            if (isset($colmap['is_public_catalog'])) {
+                $extra = ' AND (is_public_catalog = 1 OR is_public = 1) AND allow_personalization = 1 AND template_type IN (%s, %s)';
+            } else {
+                $extra = ' AND is_public = 1 AND allow_personalization = 1 AND template_type IN (%s, %s)';
+            }
+            $own     = [Eko_Sampa_Template_Derivation::TYPE_MASTER, Eko_Sampa_Template_Derivation::TYPE_USER];
+        } elseif (isset($colmap['template_type']) && empty($args['include_sessions'])) {
+            $extra .= ' AND template_type <> %s';
+            $own[] = Eko_Sampa_Template_Derivation::TYPE_SESSION;
+        }
+
         $sql  = 'SELECT * FROM ' . $this->table() . ' WHERE 1=1' . $extra . $search_sql . $cat_sql
             . ' ORDER BY ' . $orderby . ' ' . $order
             . ' LIMIT %d OFFSET %d';
@@ -374,6 +438,128 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
         $rows = $this->db()->get_results($prep, ARRAY_A);
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Public marketing catalog: master rows only, official catalog flag (fallback: legacy is_public).
+     * No ownership scope — intended only for unauthenticated REST after server-side checks.
+     *
+     * @param array<string, mixed> $args limit, offset, orderby, order, s, categoria, featured_ids, id_order
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function list_public_master_catalog(array $args = []): array {
+        global $wpdb;
+
+        $limit   = $this->sanitize_limit((int) ($args['limit'] ?? 24));
+        $offset  = $this->sanitize_offset((int) ($args['offset'] ?? 0));
+        $orderby = $this->sanitize_orderby(
+            sanitize_key((string) ($args['orderby'] ?? 'updated_at')),
+            $this->allowed_orderby(),
+            'updated_at'
+        );
+        $order = $this->sanitize_order((string) ($args['order'] ?? 'DESC'));
+
+        $colmap = $this->table_column_name_map();
+        if (! isset($colmap['template_type'])) {
+            return [];
+        }
+
+        $pub_sql = isset($colmap['is_public_catalog'])
+            ? 'is_public_catalog = 1'
+            : 'is_public = 1';
+
+        $search_sql = '';
+        $search_vals = [];
+        if (! empty($args['s'])) {
+            $like         = '%' . $this->db()->esc_like(sanitize_text_field((string) $args['s'])) . '%';
+            $search_sql   = ' AND (nome LIKE %s OR descricao LIKE %s OR categoria LIKE %s)';
+            $search_vals  = [$like, $like, $like];
+        }
+
+        $cat_sql = '';
+        $cat_vals = [];
+        if (! empty($args['categoria'])) {
+            $cat_sql = ' AND categoria = %s';
+            $cat_vals[] = sanitize_text_field((string) $args['categoria']);
+        }
+
+        $feat_sql = '';
+        $feat_vals = [];
+        if (! empty($args['featured_ids']) && is_array($args['featured_ids'])) {
+            $ids = array_values(array_filter(array_map('absint', $args['featured_ids']), static fn (int $v): bool => $v > 0));
+            if ($ids !== []) {
+                $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+                $feat_sql     = " AND id IN ({$placeholders})";
+                $feat_vals    = $ids;
+            }
+        }
+
+        $id_order = [];
+        if (! empty($args['id_order']) && is_array($args['id_order'])) {
+            $id_order = array_values(array_filter(array_map('absint', $args['id_order']), static fn (int $v): bool => $v > 0));
+            if ($id_order !== [] && $feat_sql === '') {
+                $placeholders = implode(',', array_fill(0, count($id_order), '%d'));
+                $feat_sql     = " AND id IN ({$placeholders})";
+                $feat_vals    = $id_order;
+            }
+        }
+
+        $t    = $this->table();
+        $type = Eko_Sampa_Template_Derivation::TYPE_MASTER;
+        // Exclude json_data — public catalog must not load full layouts into memory per row.
+        $cols = 'id, nome, categoria, descricao, width_mm, height_mm, preview_image, thumbnail_version,'
+            . ' thumbnail_visual_hash, thumbnail_capture_source, allow_personalization, template_type,'
+            . ' updated_at, created_at';
+
+        $order_sql = ' ORDER BY ' . $orderby . ' ' . $order;
+        if ($id_order !== []) {
+            $safe = implode(',', array_map('absint', $id_order));
+            if ($safe !== '') {
+                $order_sql = ' ORDER BY FIELD(id,' . $safe . ') ASC ';
+            }
+        }
+
+        $sql  = "SELECT {$cols} FROM {$t} WHERE template_type = %s AND allow_personalization = 1 AND {$pub_sql}"
+            . $search_sql . $cat_sql . $feat_sql
+            . $order_sql
+            . ' LIMIT %d OFFSET %d';
+
+        $prep = $this->prepare($sql, array_merge([$type], $search_vals, $cat_vals, $feat_vals, [$limit, $offset]));
+        $rows = $this->db()->get_results($prep, ARRAY_A);
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Distinct non-empty categories for public master catalog.
+     *
+     * @return array<int, string>
+     */
+    public function list_public_master_categories(): array {
+        global $wpdb;
+
+        $colmap = $this->table_column_name_map();
+        if (! isset($colmap['template_type'])) {
+            return [];
+        }
+        $pub_sql = isset($colmap['is_public_catalog'])
+            ? 'is_public_catalog = 1'
+            : 'is_public = 1';
+
+        $t = $this->table();
+        $type = Eko_Sampa_Template_Derivation::TYPE_MASTER;
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $sql = $wpdb->prepare(
+            "SELECT DISTINCT categoria FROM {$t} WHERE template_type = %s AND categoria <> '' AND allow_personalization = 1 AND {$pub_sql} ORDER BY categoria ASC LIMIT 200",
+            $type
+        );
+        $col = $wpdb->get_col($sql);
+        if (! is_array($col)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('strval', $col)));
     }
 
     /**
@@ -498,6 +684,107 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             $out['preview_image'] = isset($data['preview_image'])
                 ? sanitize_text_field((string) $data['preview_image'])
                 : '';
+        }
+
+        if (! $partial || array_key_exists('template_type', $data)) {
+            if (array_key_exists('template_type', $data)) {
+                $raw = sanitize_key((string) $data['template_type']);
+            } elseif (! $partial) {
+                $raw = Eko_Sampa_Template_Derivation::TYPE_USER;
+            } else {
+                $raw = null;
+            }
+            if ($raw !== null) {
+                $out['template_type'] = in_array(
+                    $raw,
+                    [
+                        Eko_Sampa_Template_Derivation::TYPE_USER,
+                        Eko_Sampa_Template_Derivation::TYPE_MASTER,
+                        Eko_Sampa_Template_Derivation::TYPE_SESSION,
+                    ],
+                    true
+                )
+                    ? $raw
+                    : Eko_Sampa_Template_Derivation::TYPE_USER;
+            }
+        }
+        if (! $partial || array_key_exists('parent_template_id', $data)) {
+            $out['parent_template_id'] = isset($data['parent_template_id']) ? absint((int) $data['parent_template_id']) : 0;
+        }
+        if (! $partial || array_key_exists('session_token', $data)) {
+            $out['session_token'] = isset($data['session_token'])
+                ? preg_replace('/[^a-f0-9]/i', '', (string) $data['session_token'])
+                : '';
+        }
+        if (! $partial || array_key_exists('expires_at', $data)) {
+            if (array_key_exists('expires_at', $data) && $data['expires_at'] !== null && (string) $data['expires_at'] !== '') {
+                $out['expires_at'] = sanitize_text_field((string) $data['expires_at']);
+            } elseif (! $partial) {
+                $out['expires_at'] = null;
+            }
+        }
+        if (! $partial || array_key_exists('last_activity_at', $data)) {
+            if (array_key_exists('last_activity_at', $data) && $data['last_activity_at'] !== null && (string) $data['last_activity_at'] !== '') {
+                $out['last_activity_at'] = sanitize_text_field((string) $data['last_activity_at']);
+            } elseif (! $partial) {
+                $out['last_activity_at'] = null;
+            }
+        }
+        if (! $partial || array_key_exists('saved_from_session_id', $data)) {
+            $out['saved_from_session_id'] = isset($data['saved_from_session_id']) ? absint((int) $data['saved_from_session_id']) : 0;
+        }
+        if (! $partial || array_key_exists('allow_personalization', $data)) {
+            if (array_key_exists('allow_personalization', $data)) {
+                $out['allow_personalization'] = ! empty($data['allow_personalization']) ? 1 : 0;
+            } elseif (! $partial) {
+                $out['allow_personalization'] = 1;
+            }
+        }
+        if (! $partial || array_key_exists('is_public', $data)) {
+            if (array_key_exists('is_public', $data)) {
+                $out['is_public'] = ! empty($data['is_public']) ? 1 : 0;
+            } elseif (! $partial) {
+                $out['is_public'] = 0;
+            }
+        }
+        if (! $partial || array_key_exists('session_fingerprint', $data)) {
+            if (array_key_exists('session_fingerprint', $data)) {
+                $out['session_fingerprint'] = preg_replace('/[^a-f0-9]/i', '', (string) $data['session_fingerprint']);
+            }
+        }
+        if (! $partial || array_key_exists('session_lifecycle', $data)) {
+            if (array_key_exists('session_lifecycle', $data)) {
+                $raw = strtolower(trim(sanitize_key((string) $data['session_lifecycle'])));
+                $allow = [
+                    '',
+                    Eko_Sampa_Template_Derivation::LIFECYCLE_ACTIVE,
+                    Eko_Sampa_Template_Derivation::LIFECYCLE_EXPIRED,
+                    Eko_Sampa_Template_Derivation::LIFECYCLE_ABANDONED,
+                    Eko_Sampa_Template_Derivation::LIFECYCLE_PERSISTED,
+                ];
+                $out['session_lifecycle'] = in_array($raw, $allow, true) ? $raw : Eko_Sampa_Template_Derivation::LIFECYCLE_ACTIVE;
+            }
+        }
+        if (! $partial || array_key_exists('is_public_catalog', $data)) {
+            if (array_key_exists('is_public_catalog', $data)) {
+                $out['is_public_catalog'] = ! empty($data['is_public_catalog']) ? 1 : 0;
+            } elseif (! $partial) {
+                $out['is_public_catalog'] = 0;
+            }
+        }
+        if (! $partial || array_key_exists('is_user_shareable', $data)) {
+            if (array_key_exists('is_user_shareable', $data)) {
+                $out['is_user_shareable'] = ! empty($data['is_user_shareable']) ? 1 : 0;
+            } elseif (! $partial) {
+                $out['is_user_shareable'] = 0;
+            }
+        }
+        if (! $partial || array_key_exists('is_marketplace_item', $data)) {
+            if (array_key_exists('is_marketplace_item', $data)) {
+                $out['is_marketplace_item'] = ! empty($data['is_marketplace_item']) ? 1 : 0;
+            } elseif (! $partial) {
+                $out['is_marketplace_item'] = 0;
+            }
         }
 
         return $out;
@@ -816,6 +1103,19 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
             'thumbnail_version'     => '%d',
             'thumbnail_visual_hash' => '%s',
             'thumbnail_capture_source' => '%s',
+            'template_type'         => '%s',
+            'parent_template_id'    => '%d',
+            'session_token'         => '%s',
+            'expires_at'            => '%s',
+            'last_activity_at'      => '%s',
+            'saved_from_session_id' => '%d',
+            'allow_personalization' => '%d',
+            'is_public'             => '%d',
+            'session_fingerprint'   => '%s',
+            'session_lifecycle'     => '%s',
+            'is_public_catalog'     => '%d',
+            'is_user_shareable'     => '%d',
+            'is_marketplace_item'   => '%d',
             'created_at'            => '%s',
             'updated_at'            => '%s',
         ];
@@ -834,5 +1134,194 @@ final class Eko_Sampa_Template extends Eko_Sampa_Model_Base {
      */
     private function update_formats(array $row): array {
         return $this->insert_formats($row);
+    }
+
+    /**
+     * Fork a public catalog row into an anonymous / unscoped working session (same JSON pipeline).
+     *
+     * @return array<string, mixed> Same shape as {@see try_create()} (success, id, failure_reason, …).
+     */
+    public function create_public_session_from_source(int $source_id): array {
+        $src = $this->get_row_by_id($source_id);
+        if (! is_array($src) || ! Eko_Sampa_Template_Derivation::can_fork_public_session($src)) {
+            return [
+                'success'        => false,
+                'failure_reason' => 'fork_not_allowed',
+            ];
+        }
+
+        $bounds = Eko_Sampa_Template_Derivation::expires_bounds_for_new_session();
+        if (! is_array($bounds)) {
+            return [
+                'success'        => false,
+                'failure_reason' => 'session_bounds_failed',
+            ];
+        }
+
+        $nome_base = (string) ( $src['nome'] ?? '' );
+        $suffix    = ' — ' . __('Working session', 'eko-sampa');
+        $nome      = $nome_base . $suffix;
+        $max       = self::NOME_MAX_CHARS;
+        $len       = function_exists('mb_strlen')
+            ? mb_strlen($nome, 'UTF-8')
+            : strlen($nome);
+        if ($len > $max) {
+            $suffix_len = function_exists('mb_strlen')
+                ? mb_strlen($suffix, 'UTF-8')
+                : strlen($suffix);
+            $cut = $max - $suffix_len;
+            if ($cut < 1) {
+                $cut = 1;
+            }
+            $nome = ( function_exists('mb_substr')
+                ? mb_substr($nome_base, 0, $cut, 'UTF-8')
+                : substr($nome_base, 0, $cut) ) . $suffix;
+        }
+
+        $sess_tok = Eko_Sampa_Template_Derivation::new_session_token();
+
+        $payload = [
+            '_eko_internal_session_insert' => true,
+            'user_id'                      => 0,
+            'nome'                         => $nome,
+            'categoria'                    => (string) ( $src['categoria'] ?? '' ),
+            'descricao'                    => (string) ( $src['descricao'] ?? '' ),
+            'client_id'                    => 0,
+            'product_id'                   => (int) ( $src['product_id'] ?? 0 ),
+            'service_id'                   => (int) ( $src['service_id'] ?? 0 ),
+            'width_mm'                     => (int) ( $src['width_mm'] ?? 0 ),
+            'height_mm'                    => (int) ( $src['height_mm'] ?? 0 ),
+            'preview_image'                => '',
+            'json_data'                    => $src['json_data'] ?? null,
+            'template_type'                => Eko_Sampa_Template_Derivation::TYPE_SESSION,
+            'parent_template_id'           => $source_id,
+            'session_token'                => $sess_tok,
+            'session_fingerprint'          => Eko_Sampa_Template_Derivation::compute_session_fingerprint($sess_tok),
+            'session_lifecycle'            => Eko_Sampa_Template_Derivation::LIFECYCLE_ACTIVE,
+            'expires_at'                   => (string) ( $bounds['expires_gmt'] ?? '' ),
+            'last_activity_at'             => (string) ( $bounds['created_mysql'] ?? '' ),
+            'saved_from_session_id'        => 0,
+            'allow_personalization'        => 1,
+            'is_public'                    => 0,
+            'is_public_catalog'            => 0,
+            'is_user_shareable'            => 0,
+            'is_marketplace_item'          => 0,
+        ];
+
+        $try = $this->try_create($payload, false);
+        if (empty($try['success'])) {
+            return $try;
+        }
+
+        $new_id = (int) ( $try['id'] ?? 0 );
+        if ($new_id > 0) {
+            Eko_Sampa_Template_Thumbnail::copy($source_id, $new_id);
+        }
+
+        return $try;
+    }
+
+    /**
+     * Reuse an existing guest session row for a public master when the client still holds a valid token.
+     * Does not create a new fork; validates parent, type, and full session gate.
+     *
+     * @return array<string, mixed>|null Session row or null.
+     */
+    public function try_reuse_guest_session_for_public_master(int $master_id, int $session_template_id, string $token): ?array {
+        if ($master_id <= 0 || $session_template_id <= 0) {
+            return null;
+        }
+        $token = preg_replace('/[^a-f0-9]/i', '', trim($token));
+        if ($token === '') {
+            return null;
+        }
+        $row = $this->get_row_by_id($session_template_id);
+        if (! is_array($row)) {
+            return null;
+        }
+        if (! Eko_Sampa_Template_Derivation::is_session_row($row)) {
+            return null;
+        }
+        if ((int) ( $row['user_id'] ?? -1 ) !== 0) {
+            return null;
+        }
+        if ((int) ( $row['parent_template_id'] ?? 0 ) !== $master_id) {
+            return null;
+        }
+        if (! Eko_Sampa_Template_Derivation::request_can_use_session_row($row, $token)) {
+            return null;
+        }
+
+        return $row;
+    }
+
+    /**
+     * Count persisted user-owned templates (excludes master/session rows when columns exist).
+     */
+    public function count_user_saved_templates(int $user_id): int {
+        if ($user_id <= 0) {
+            return 0;
+        }
+
+        $map = $this->table_column_name_map();
+        if (! isset($map['template_type'])) {
+            return 0;
+        }
+
+        $sql = 'SELECT COUNT(*) FROM ' . $this->table()
+            . ' WHERE user_id = %d AND (template_type = %s OR template_type = \'\' OR template_type IS NULL)';
+        $prep = $this->prepare($sql, [$user_id, Eko_Sampa_Template_Derivation::TYPE_USER]);
+        $n    = $this->db()->get_var($prep);
+
+        return is_numeric($n) ? (int) $n : 0;
+    }
+
+    /**
+     * Public `/eko-sampa/` catalog uses `is_public_catalog` on **master** rows; older UI only sent `is_public`.
+     * After full sanitise on create, OR the two flags so both columns match.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function align_master_catalog_flags_on_insert_row(array &$row): void {
+        if (! isset($this->table_column_name_map()['is_public_catalog'])) {
+            return;
+        }
+        if (($row['template_type'] ?? '') !== Eko_Sampa_Template_Derivation::TYPE_MASTER) {
+            return;
+        }
+        $v = ( (int) ( ! empty($row['is_public_catalog']) ) ) | ( (int) ( ! empty($row['is_public']) ) );
+        $row['is_public_catalog'] = $v ? 1 : 0;
+        $row['is_public']        = $v ? 1 : 0;
+    }
+
+    /**
+     * On PATCH, if either public flag is present for a **master** row, write both columns consistently.
+     *
+     * @param array<string, mixed> $original_patch Raw request body keys.
+     * @param array<string, mixed> $row            Sanitised update map (by ref).
+     */
+    private function align_master_catalog_flags_on_update_row(int $id, array $original_patch, array &$row): void {
+        if (! isset($this->table_column_name_map()['is_public_catalog'])) {
+            return;
+        }
+        if (! array_key_exists('is_public', $original_patch) && ! array_key_exists('is_public_catalog', $original_patch)) {
+            return;
+        }
+        $existing = $this->get_row_by_id($id);
+        if (! is_array($existing) || ! Eko_Sampa_Template_Derivation::is_master_row($existing)) {
+            return;
+        }
+        $ip = array_key_exists('is_public', $original_patch) ? ( (int) ( ! empty($original_patch['is_public']) ) ) : null;
+        $ic = array_key_exists('is_public_catalog', $original_patch) ? ( (int) ( ! empty($original_patch['is_public_catalog']) ) ) : null;
+        $v  = 0;
+        if ($ic !== null && $ip !== null) {
+            $v = ( $ic || $ip ) ? 1 : 0;
+        } elseif ($ic !== null) {
+            $v = $ic ? 1 : 0;
+        } elseif ($ip !== null) {
+            $v = $ip ? 1 : 0;
+        }
+        $row['is_public_catalog'] = $v;
+        $row['is_public']         = $v;
     }
 }

@@ -21,6 +21,10 @@
 |--------|------|-------|
 | GET | `/me` | user atual |
 | GET | `/users` | admin filter |
+| GET | `/internals/derivation-stats` | admin — snapshot de derivação |
+| GET | `/internals/public-experience-stats` | admin — métricas públicas agregadas |
+| GET | `/internals/health` | admin — saúde operacional (QP preso, cron, contadores analytics) — ver [../platform-observability.md](../platform-observability.md) |
+| GET | `/public/catalog` | público (se home pública ativa); scopes incl. `trending_today`, `trending_week`, `recently_printed`, `most_saved` |
 | * | `/clients`, `/clients/{id}` | CRUD |
 | * | `/services`, `/services/{id}` | CRUD |
 | * | `/services/{id}/fields/...` | fields CRUD, reorder, check-slug |

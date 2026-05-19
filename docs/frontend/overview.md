@@ -12,6 +12,7 @@
 
 | Slug | view |
 |------|------|
+| `eko-sampa` | public_home (catálogo público) |
 | `eko-sampa_dashboard` | dashboard |
 | `eko-sampa_login` | login |
 | `eko-sampa_clients` | clients CRUD |

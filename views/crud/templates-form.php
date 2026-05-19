@@ -75,8 +75,50 @@ $crud_nav = [
             <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Linked service ID', 'eko-sampa'); ?>
                 <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" x-model.number="state.form.service_id" />
             </label>
-            <label class="block text-xs font-medium text-slate-600"><?php echo esc_html__('WooCommerce product ID', 'eko-sampa'); ?>
+            <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('WooCommerce product ID', 'eko-sampa'); ?>
                 <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="number" min="0" x-model.number="state.form.product_id" />
+            </label>
+            <?php if (current_user_can('manage_options')) : ?>
+                <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Template role', 'eko-sampa'); ?>
+                    <select class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" x-model="state.form.template_type" @change="onTemplateTypeChanged()">
+                        <option value="user"><?php echo esc_html__('User template (saved copy)', 'eko-sampa'); ?></option>
+                        <option value="master"><?php echo esc_html__('Master (official, immutable for non-admins)', 'eko-sampa'); ?></option>
+                    </select>
+                </label>
+            <?php endif; ?>
+            <template x-if="String(state.form.template_type || 'user') === 'master'">
+                <label class="flex items-start gap-2 text-xs font-medium text-slate-600 sm:col-span-2">
+                    <input
+                        type="checkbox"
+                        class="mt-0.5 rounded border-slate-300"
+                        :checked="templatePublicHomeChecked()"
+                        @change="setTemplatePublicHomeVisible($event.target.checked)"
+                    />
+                    <span>
+                        <?php echo esc_html__('Show on public home (/eko-sampa/) without login', 'eko-sampa'); ?>
+                        <span class="mt-0.5 block font-normal text-slate-500"><?php echo esc_html__('Requires “Allow personalization” below. Only Master templates can appear in the public catalog.', 'eko-sampa'); ?></span>
+                    </span>
+                </label>
+            </template>
+            <template x-if="String(state.form.template_type || 'user') !== 'master'">
+                <label class="flex items-center gap-2 text-xs font-medium text-slate-600 sm:col-span-2">
+                    <input
+                        type="checkbox"
+                        class="rounded border-slate-300"
+                        :checked="!!parseInt(String(state.form.is_public || 0), 10)"
+                        @change="state.form.is_public = $event.target.checked ? 1 : 0"
+                    />
+                    <span><?php echo esc_html__('Public catalog (internal list / legacy visibility)', 'eko-sampa'); ?></span>
+                </label>
+            </template>
+            <label class="flex items-center gap-2 text-xs font-medium text-slate-600 sm:col-span-2">
+                <input
+                    type="checkbox"
+                    class="rounded border-slate-300"
+                    :checked="!!parseInt(String(state.form.allow_personalization !== undefined ? state.form.allow_personalization : 1), 10)"
+                    @change="state.form.allow_personalization = $event.target.checked ? 1 : 0"
+                />
+                <span><?php echo esc_html__('Allow “Use template” (fork working session)', 'eko-sampa'); ?></span>
             </label>
             <label class="block text-xs font-medium text-slate-600 sm:col-span-2"><?php echo esc_html__('Preview image URL', 'eko-sampa'); ?>
                 <input class="mt-1 w-full rounded border border-slate-200 px-2 py-1 text-sm" type="text" x-model="state.form.preview_image" placeholder="https://…" />

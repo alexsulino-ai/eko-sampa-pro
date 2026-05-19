@@ -19,16 +19,72 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
 ?>
 <div
     id="eko-sampa-editor"
-    class="<?php echo esc_attr($eko_editor_root_class); ?>"
+    class="<?php echo esc_attr($eko_editor_root_class); ?> transition-opacity duration-150 ease-out"
     x-data="window.ekoEditorCanvasFactory()"
     @keydown.window="editorWindowKeydown($event)"
 >
+    <?php do_action('eko_sampa_editor_canvas_shell_ready'); ?>
     <header class="eko-sampa-editor__toolbar flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 md:px-4">
+        <div
+            x-show="!previewOnly && showSessionRecoveryBanner && !sessionRecoveryDismissed"
+            x-cloak
+            class="flex w-full basis-full flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 sm:flex-row sm:items-center sm:justify-between"
+        >
+            <span class="font-medium"><?php echo esc_html__('Encontrámos uma personalização em curso neste dispositivo.', 'eko-sampa'); ?></span>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" class="rounded-lg bg-amber-800 px-3 py-1 text-[11px] font-semibold text-white hover:bg-amber-900" @click="sessionRecoveryDismissed = true"><?php echo esc_html__('Continuar edição', 'eko-sampa'); ?></button>
+                <button type="button" class="rounded-lg border border-amber-300 bg-white px-3 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100" @click="discardGuestRecovery()"><?php echo esc_html__('Descartar aviso', 'eko-sampa'); ?></button>
+            </div>
+        </div>
         <h1 class="text-sm font-semibold text-slate-900 md:text-base">
             <?php echo esc_html__('Visual editor', 'eko-sampa'); ?>
+            <span
+                x-show="cfg().guestEditor"
+                x-cloak
+                class="ml-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+                title="<?php echo esc_attr__('Sessão temporária: se sair sem guardar em Meus templates, este trabalho pode ser removido automaticamente.', 'eko-sampa'); ?>"
+            ><?php echo esc_html__('Sessão temporária', 'eko-sampa'); ?></span>
         </h1>
         <template x-if="!previewOnly">
             <div class="flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    class="rounded border border-indigo-600 bg-indigo-600 px-2 py-1 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    x-show="Number(cfg().templateId || 0) > 0"
+                    :disabled="_persistRunning || !hasUnsavedChanges"
+                    @click="saveNow()"
+                ><?php echo esc_html__('Salvar', 'eko-sampa'); ?></button>
+                <button
+                    type="button"
+                    class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    x-show="quickPrintFeatureEnabled()"
+                    @click="openQuickPrintManager()"
+                    title="<?php echo esc_attr__('Quick print manager (saved template)', 'eko-sampa'); ?>"
+                >
+                    <span class="inline-flex items-center gap-1">
+                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M6 18h12M6 14h12M4 22h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2Z" />
+                            <path d="M6 10V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4" />
+                        </svg>
+                        <span><?php echo esc_html__('Imprimir', 'eko-sampa'); ?></span>
+                    </span>
+                </button>
+                <button
+                    type="button"
+                    class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-950/60 dark:text-indigo-100 dark:hover:bg-indigo-900/50"
+                    x-show="canCreateOrderFromEditor()"
+                    @click="createOrderFromEditor()"
+                    title="<?php echo esc_attr__('Create order from this template (same flow as template details)', 'eko-sampa'); ?>"
+                ><?php echo esc_html__('Create order', 'eko-sampa'); ?></button>
+                <button
+                    type="button"
+                    class="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+                    x-show="sessionTokenPresent()"
+                    @click="persistToMyTemplates()"
+                    :disabled="_persistRunning"
+                    title="<?php echo esc_attr__('Cria uma cópia na sua biblioteca e fecha esta sessão de trabalho.', 'eko-sampa'); ?>"
+                ><?php echo esc_html__('Salvar em Meus Templates', 'eko-sampa'); ?></button>
+                <span class="hidden h-6 w-px bg-slate-200 sm:inline-block" aria-hidden="true"></span>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addText()"><?php echo esc_html__('Text', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addPlaceholder()"><?php echo esc_html__('Placeholder', 'eko-sampa'); ?></button>
                 <button type="button" class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50" @click="addRectangle()"><?php echo esc_html__('Rectangle', 'eko-sampa'); ?></button>
@@ -54,35 +110,6 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                         <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold tabular-nums hover:bg-slate-50" @click="alignElementBottom()" title="<?php echo esc_attr__('Align element to bottom edge of canvas', 'eko-sampa'); ?>">B</button>
                     </div>
                 </template>
-                <button
-                    type="button"
-                    class="rounded border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                    x-show="quickPrintFeatureEnabled()"
-                    @click="openQuickPrintManager()"
-                    title="<?php echo esc_attr__('Quick print manager (saved template)', 'eko-sampa'); ?>"
-                >
-                    <span class="inline-flex items-center gap-1">
-                        <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M6 18h12M6 14h12M4 22h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2Z" />
-                            <path d="M6 10V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4" />
-                        </svg>
-                        <span><?php echo esc_html__('Imprimir', 'eko-sampa'); ?></span>
-                    </span>
-                </button>
-                <button
-                    type="button"
-                    class="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-950/60 dark:text-indigo-100 dark:hover:bg-indigo-900/50"
-                    x-show="canCreateOrderFromEditor()"
-                    @click="createOrderFromEditor()"
-                    title="<?php echo esc_attr__('Create order from this template (same flow as template details)', 'eko-sampa'); ?>"
-                ><?php echo esc_html__('Create order', 'eko-sampa'); ?></button>
-                <button
-                    type="button"
-                    class="rounded border border-indigo-600 bg-indigo-600 px-2 py-1 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    x-show="Number(cfg().templateId || 0) > 0"
-                    :disabled="_persistRunning || !hasUnsavedChanges"
-                    @click="saveNow()"
-                ><?php echo esc_html__('Salvar', 'eko-sampa'); ?></button>
             </div>
         </template>
         <template x-if="!previewOnly">
@@ -616,6 +643,12 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                 <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
                     <div class="eko-quick-print-hide-print space-y-3">
                     <p class="text-xs text-red-600" x-show="quickPrint.error" x-text="quickPrint.error"></p>
+                    <p
+                        class="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                        x-show="quickPrintPhase"
+                        x-text="quickPrintPhaseLabel()"
+                    ></p>
+                    <p class="text-xs font-medium text-slate-700 dark:text-slate-200" x-show="quickPrintUserMessage" x-text="quickPrintUserMessage"></p>
                     <p class="text-xs text-slate-500" x-show="quickPrint.loading"><?php echo esc_html__('Loading…', 'eko-sampa'); ?></p>
                     <div class="grid gap-3 sm:grid-cols-3" x-show="!quickPrint.loading">
                         <label class="block text-xs">
@@ -687,11 +720,13 @@ $eko_editor_root_class     = $eko_sampa_editor_embedded
                     <button
                         type="button"
                         class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="quickPrint.loading || quickPrintJobCreating || _quickPrintPrintInProgress || (quickPrint.job && quickPrint.job.status === 'sent_to_browser')"
+                        :disabled="quickPrint.loading || quickPrintJobCreating || _quickPrintPrintInProgress || (quickPrint.job && quickPrint.job.status === 'sent_to_browser') || (quickPrint.previewStatus && String(quickPrint.previewStatus).trim() !== '')"
                         @click="quickPrintFooterPrimaryClick()"
                     ><?php echo esc_html__('Print', 'eko-sampa'); ?></button>
                 </div>
             </div>
         </div>
     </template>
+
+    <?php require EKO_SAMPA_PLUGIN_DIR . 'views/partials/public-experience/conversion-modal.php'; ?>
 </div>

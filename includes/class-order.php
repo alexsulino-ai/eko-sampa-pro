@@ -83,7 +83,7 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         if (isset($data['_eko_sampa_field_snapshot']) && is_string($data['_eko_sampa_field_snapshot'])) {
             $snap_override = $data['_eko_sampa_field_snapshot'];
         }
-        unset($data['_eko_sampa_field_snapshot']);
+        unset($data['_eko_sampa_field_snapshot'], $data['_eko_order_template_session']);
 
         $row = $this->sanitize_row($data, false);
         if (array_key_exists('dynamic_data_json', $data)) {
@@ -354,10 +354,29 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
      * @return array<string, mixed>
      */
     public function prepare_create_data(array $data): array {
+        if (isset($data['session_token']) && is_string($data['session_token'])) {
+            $tok = preg_replace('/[^a-f0-9]/i', '', $data['session_token']);
+            if ($tok !== '') {
+                $data['_eko_order_template_session'] = $tok;
+            }
+        }
+        unset($data['session_token']);
+
         $data = $this->resolve_order_relations_from_template($data);
         $data = $this->inherit_client_from_template($data);
 
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function order_template_session_token_from_data(array $data): string {
+        if (isset($data['_eko_order_template_session']) && is_string($data['_eko_order_template_session'])) {
+            return preg_replace('/[^a-f0-9]/i', '', $data['_eko_order_template_session']);
+        }
+
+        return '';
     }
 
     /**
@@ -387,7 +406,8 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             return $data;
         }
 
-        $template = (new Eko_Sampa_Template())->get($template_id);
+        $tok      = $this->order_template_session_token_from_data($data);
+        $template = ( new Eko_Sampa_Template() )->get_for_order_context($template_id, $tok);
         if (! is_array($template)) {
             return $data;
         }
@@ -413,7 +433,8 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
             return $data;
         }
 
-        $template = (new Eko_Sampa_Template())->get($template_id);
+        $tok      = $this->order_template_session_token_from_data($data);
+        $template = ( new Eko_Sampa_Template() )->get_for_order_context($template_id, $tok);
         if (! is_array($template)) {
             return $data;
         }
@@ -504,7 +525,8 @@ final class Eko_Sampa_Order extends Eko_Sampa_Model_Base {
         $template_row = null;
         if ($ids['template_id'] > 0) {
             $template_model = new Eko_Sampa_Template();
-            $template_row   = $template_model->get($ids['template_id']);
+            $sess_tok        = $this->order_template_session_token_from_data($data);
+            $template_row    = $template_model->get_for_order_context($ids['template_id'], $sess_tok);
             $debug['template_exists']  = is_array($template_model->get_row_by_id($ids['template_id']));
             $debug['template_visible'] = is_array($template_row);
             $debug['template_user_id'] = is_array($template_row) ? absint((int) ( $template_row['user_id'] ?? 0 )) : null;

@@ -301,6 +301,10 @@ final class Eko_Sampa_Template_Thumbnail {
             return false;
         }
 
+        if (Eko_Sampa_Template_Derivation::is_session_row($row)) {
+            return false;
+        }
+
         return ! self::exists($id);
     }
 
@@ -349,8 +353,9 @@ final class Eko_Sampa_Template_Thumbnail {
 
     /**
      * @param array<string, mixed> $row
+     * @param bool               $lightweight When true, never decode `json_data` (public catalog REST).
      */
-    public static function resolve_state(array $row): string {
+    public static function resolve_state(array $row, bool $lightweight = false): string {
         $id = (int) ( $row['id'] ?? 0 );
         if ($id <= 0) {
             return self::STATE_MISSING;
@@ -362,6 +367,10 @@ final class Eko_Sampa_Template_Thumbnail {
 
         if (! self::exists($id)) {
             return self::STATE_MISSING;
+        }
+
+        if ($lightweight) {
+            return self::STATE_READY;
         }
 
         $stored_visual = (string) ( $row['thumbnail_visual_hash'] ?? '' );
@@ -649,6 +658,48 @@ final class Eko_Sampa_Template_Thumbnail {
             'preview_image_public_ok'  => $preview_public !== '',
             'preview_image_broken_stored' => $preview_rel !== '' && $preview_public === '',
         ];
+    }
+
+    /**
+     * Public marketing catalog: thumbnail + preview URLs only (no json_data / visual hash recompute).
+     *
+     * @param array<string, mixed> $row
+     *
+     * @return array<string, mixed>
+     */
+    public static function enrich_row_for_public_catalog(array $row): array {
+        unset($row['json_data']);
+
+        $id = (int) ( $row['id'] ?? 0 );
+        if ($id <= 0) {
+            return $row;
+        }
+
+        $version = self::file_version($id);
+        if ($version <= 0) {
+            $version = (int) ( $row['thumbnail_version'] ?? 0 );
+        }
+
+        $has                         = self::exists($id);
+        $row['thumbnail_version']    = $version;
+        $row['thumbnail_state']      = self::resolve_state($row, true);
+        $row['has_thumbnail']        = $has;
+        $row['thumbnail_url']          = $has ? self::public_url($id, $version) : '';
+        $row['thumbnail_capture_source'] = (string) ( $row['thumbnail_capture_source'] ?? '' );
+
+        $preview_rel = trim((string) ( $row['preview_image'] ?? '' ));
+        $stored_preview_url = $preview_rel !== ''
+            ? Eko_Sampa_Storage_Manager::public_url_for_upload_relative($preview_rel)
+            : '';
+        $row['preview_image_resolved'] = $preview_rel !== '' && $stored_preview_url !== '';
+
+        $display_preview = $stored_preview_url;
+        if ($display_preview === '' && $row['has_thumbnail']) {
+            $display_preview = (string) $row['thumbnail_url'];
+        }
+        $row['preview_image_public_url'] = $display_preview;
+
+        return $row;
     }
 
     /**

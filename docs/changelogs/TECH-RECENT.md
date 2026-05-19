@@ -4,6 +4,14 @@ Registo **orientado a desenvolvimento** (não substitui `CHANGELOG.md` de releas
 
 ---
 
+## Public experience (guest + home)
+
+- **Service layer:** `Eko_Sampa_Public_Experience_Service` centraliza catálogo público, quotas, SEO leve, stats agregados, `POST /public/telemetry`.
+- **Home JS:** paginação incremental + cache curto + tab “Populares”; `?fork=` para reabrir sessão a partir do master.
+- **Sessão expirada:** página dedicada sem enqueue do bundle do editor quando `eko_sampa_guest_session_expired` está activo.
+
+---
+
 ## Thumbnails
 
 - **Correções de overwrite / corrida**: lock por `templateId`, `runId`, abort da corrida anterior, verificação `isRunCurrent` antes de upload; fila com debounce e skip quando `visual_hash` coincide com thumbnail existente.

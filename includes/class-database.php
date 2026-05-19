@@ -189,6 +189,8 @@ final class Eko_Sampa_Database {
             '1.0.8' => [$this, 'migrate_to_1_0_8'],
             '1.0.9' => [$this, 'migrate_to_1_0_9'],
             '1.0.10' => [$this, 'migrate_to_1_0_10'],
+            '1.0.11' => [$this, 'migrate_to_1_0_11'],
+            '1.0.12' => [$this, 'migrate_to_1_0_12'],
         ];
     }
 
@@ -639,6 +641,19 @@ final class Eko_Sampa_Database {
                 'thumbnail_visual_hash' => "varchar(16) NOT NULL DEFAULT ''",
                 'thumbnail_capture_source' => "varchar(32) NOT NULL DEFAULT ''",
                 'json_data'             => 'longtext NULL',
+                'template_type'         => "varchar(24) NOT NULL DEFAULT 'user'",
+                'parent_template_id'    => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'session_token'         => "varchar(64) NOT NULL DEFAULT ''",
+                'expires_at'            => 'datetime NULL',
+                'last_activity_at'      => 'datetime NULL',
+                'saved_from_session_id' => 'bigint(20) unsigned NOT NULL DEFAULT 0',
+                'allow_personalization' => 'tinyint(1) NOT NULL DEFAULT 1',
+                'is_public'             => 'tinyint(1) NOT NULL DEFAULT 0',
+                'session_fingerprint'     => "varchar(64) NOT NULL DEFAULT ''",
+                'session_lifecycle'     => "varchar(24) NOT NULL DEFAULT ''",
+                'is_public_catalog'     => 'tinyint(1) NOT NULL DEFAULT 0',
+                'is_user_shareable'     => 'tinyint(1) NOT NULL DEFAULT 0',
+                'is_marketplace_item'   => 'tinyint(1) NOT NULL DEFAULT 0',
                 'created_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP',
                 'updated_at'    => 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
             ]
@@ -863,6 +878,116 @@ final class Eko_Sampa_Database {
 		{$suffix}";
 
         dbDelta($sql);
+    }
+
+    /**
+     * Template derivation (master → session → user) + quick-print guest binding column.
+     */
+    private function migrate_to_1_0_11(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        $this->schema_align_templates($wpdb);
+
+        if ($this->table_exists($wpdb, 'eko_sampa_quick_print_jobs')) {
+            $qp = $wpdb->prefix . 'eko_sampa_quick_print_jobs';
+            $this->add_missing_columns(
+                $wpdb,
+                $qp,
+                [
+                    'session_token' => "varchar(64) NOT NULL DEFAULT ''",
+                ]
+            );
+        }
+
+        if (! $this->table_exists($wpdb, 'eko_sampa_templates')) {
+            Eko_Sampa_Model_Base::clear_table_column_map_cache();
+
+            return;
+        }
+
+        $templates = $wpdb->prefix . 'eko_sampa_templates';
+        $have      = $this->table_column_set($wpdb, $templates);
+        if (isset($have['template_type'])) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query(
+                "UPDATE `{$templates}` SET template_type = 'user' WHERE template_type = '' OR template_type IS NULL"
+            );
+        }
+
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $indexes = $wpdb->get_results("SHOW INDEX FROM `{$templates}`", ARRAY_A);
+        $has_ix  = false;
+        if (is_array($indexes)) {
+            foreach ($indexes as $ix) {
+                if (! is_array($ix)) {
+                    continue;
+                }
+                $name = isset($ix['Key_name']) ? (string) $ix['Key_name'] : '';
+                if ($name === 'eko_tpl_deriv_cleanup') {
+                    $has_ix = true;
+                    break;
+                }
+            }
+        }
+        if (! $has_ix && isset($have['template_type'], $have['expires_at'])) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query(
+                "ALTER TABLE `{$templates}` ADD INDEX eko_tpl_deriv_cleanup (template_type(16), expires_at)"
+            );
+        }
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
+    }
+
+    /**
+     * Session hardening: fingerprint + lifecycle + catalog flags; quick-print job expiry / abandoned markers.
+     */
+    private function migrate_to_1_0_12(string $charset_collate): void {
+        unset($charset_collate);
+
+        global $wpdb;
+
+        $this->schema_align_templates($wpdb);
+
+        if ($this->table_exists($wpdb, 'eko_sampa_quick_print_jobs')) {
+            $qp = $wpdb->prefix . 'eko_sampa_quick_print_jobs';
+            $this->add_missing_columns(
+                $wpdb,
+                $qp,
+                [
+                    'expires_at'   => 'datetime NULL',
+                    'abandoned_at' => 'datetime NULL',
+                ]
+            );
+        }
+
+        if (! $this->table_exists($wpdb, 'eko_sampa_templates')) {
+            Eko_Sampa_Model_Base::clear_table_column_map_cache();
+
+            return;
+        }
+
+        $templates = $wpdb->prefix . 'eko_sampa_templates';
+        $have      = $this->table_column_set($wpdb, $templates);
+
+        if (isset($have['is_public_catalog'], $have['is_public'])) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query(
+                "UPDATE `{$templates}` SET is_public_catalog = 1 WHERE is_public = 1 AND is_public_catalog = 0"
+            );
+        }
+
+        if (isset($have['session_lifecycle'], $have['template_type'])) {
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            $wpdb->query(
+                "UPDATE `{$templates}` SET session_lifecycle = 'active' "
+                . "WHERE template_type = 'session' AND (session_lifecycle = '' OR session_lifecycle IS NULL)"
+            );
+        }
+
+        Eko_Sampa_Model_Base::clear_table_column_map_cache();
     }
 
     /**

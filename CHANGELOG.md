@@ -6,6 +6,123 @@ O formato inspira-se em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.0.
 
 ---
 
+## [1.10.0] — 2026-05-18
+
+### Adicionado
+
+- **`Eko_Sampa_Public_Analytics`:** contadores agregados (catálogo, conversão, editor, quick print), rollup limitado por master, fila transient para “views”, snapshot de popularidade + cron horário `eko_sampa_analytics_hourly`.
+- **Catálogo público:** novos scopes REST `trending_today`, `trending_week`, `recently_printed`, `most_saved` (tabs na home); ordenação por `FIELD(id,…)` em `list_public_master_catalog` quando `id_order` está definido.
+- **Saúde operacional:** `GET /eko-sampa/v1/internals/health` (admin) com filas presas, QP abandonado, snapshot de derivação + métricas públicas.
+- **Admin “Public & guests”:** avisos operacionais + tabela de analytics agregados + ligação ao endpoint de health.
+- **Fork convidado:** reuso servidor (transient por client key + master) além do JSON `reuse`.
+- **Telemetria:** `POST /public/telemetry` aceita `editor_boot`; `do_action('eko_sampa_editor_recovery_tracked')` para contagem de recuperação.
+- **Hooks:** `eko_sampa_order_created`, `eko_sampa_quick_print_job_created`, `eko_sampa_quick_print_job_completed`, `eko_sampa_guest_qp_marked_abandoned`, `eko_sampa_guest_sessions_expired_cleanup`; filtro `eko_sampa_analytics_event_context` via `eko_sampa_analytics_filter_event_context()`.
+- **Docs:** `docs/analytics-architecture.md`, `docs/platform-observability.md`, `docs/healthcheck-and-cleanup.md`.
+
+### Alterado
+
+- Quick print (UI): fases `quickPrintPhase` + rótulos; bloqueio se o modal já está a abrir; correção do handler `afterprint` para usar `self.api` ao concluir job.
+
+---
+
+## [1.9.0] — 2026-05-18
+
+### Adicionado
+
+- **Home pública (funil):** hero de conversão (Começar agora / Ver modelos), cartões com badges **Popular** / **Destaque** / **Novo**, reutilização de fork via `sessionStorage` + corpo JSON `reuse` em `POST /public/templates/{id}/session` (200 sem novo fork quando a sessão convidada ainda é válida); **Imprimir rápido** abre o editor com `eko_open_qp=1` (modal QP automático para convidado).
+- **Biblioteca “Meus templates”:** barra de uso `used/max` (`eko_sampa_max_saved_templates_per_user`) e aviso ao aproximar do limite.
+- **Editor:** toolbar com hierarquia Salvar → Imprimir → Create order → Salvar em Meus; badge **Sessão temporária** com tooltip; banner de recuperação com **Continuar edição** / **Descartar aviso**; bloqueio de novo job de quick print enquanto existir job `queued` ou `sent_to_browser`.
+- **Extensibilidade:** `includes/helpers-public-funnel.php` — `eko_sampa_public_funnel_do()`, filtro `eko_sampa_marketplace_catalog_row` (marketplace-ready sem dados extra).
+
+### Alterado
+
+- Resposta do fork público usa `enrich_row_for_public_catalog` (sem `json_data` no JSON REST).
+
+## [1.8.5] — 2026-05-18
+
+### Corrigido
+
+- **REST `GET /public/catalog` (erro 500 / crítico):** o catálogo deixa de fazer `SELECT *` com `json_data` e usa `enrich_row_for_public_catalog()` — sem recalcular hash visual a partir do layout (evita esgotar memória com templates grandes). Cache transient `pubcat_v2`; falhas devolvem 503 em vez de derrubar o REST.
+
+## [1.8.4] — 2026-05-18
+
+### Corrigido
+
+- **Erro crítico (PHP 8) na home pública:** o filtro `document_title_parts` e o filtro `body_class` deixam de exigir `array` no argumento — se outro plugin ou o tema devolver um tipo inválido na cadeia de filtros, o núcleo já não dispara `TypeError` com `strict_types` ao carregar `/eko-sampa/`. Meta `og:url` usa `esc_attr(esc_url(...))` no atributo `content`.
+
+## [1.8.3] — 2026-05-18
+
+### Adicionado
+
+- **Gestão de templates públicos (admin):** o formulário de template **master** envia `is_public_catalog` no guardar (alinhado com `is_public` no servidor); lista de templates mostra o distintivo **Public web** quando o master está no catálogo anónimo (`/eko-sampa/`).
+
+## [1.8.2] — 2026-05-18
+
+### Corrigido
+
+- **Home pública (visitante):** `GET public/catalog` e `GET public/categories` não enviam `X-WP-Nonce`, evitando erro quando a página HTML está em cache com nonce `wp_rest` expirado. A grelha do catálogo volta a renderizar; repaint completo a partir de `state.items` corrige duplicação ao paginar.
+
+## [1.8.1] — 2026-05-18
+
+### Adicionado
+
+- **`Eko_Sampa_Public_Experience_Service`**: escopo `recent` (ordenado por `created_at`), `guest_quick_print_enabled` por linha do catálogo, telemetria `POST /public/telemetry` (`conversion_modal_open`, nonce + rate limit), agregado admin `top_masters_by_guest_fork`, notas em `get_aggregated_stats()`.
+- **Router convidado**: sessão inválida com query plausível → `frontend-guest-session-expired.php` + `?fork=` para o master derivado quando conhecido.
+- **Partials** `views/partials/public-experience/*` (hero, filtros, skeleton, banner convidado, modal conversão).
+- **`public-home.js`**: tab **Populares**, cache GET em memória, `IntersectionObserver` + sentinel, skeleton, `?fork=` deep-link, badge QP, hover leve nos cartões.
+- **Admin “Public & guests”**: trending IDs, teto global de sessões convidado, snapshot consolidado.
+- **Docs:** `docs/public-experience-architecture.md`, `docs/guest-conversion-flow.md`.
+
+### Alterado
+
+- **Conversão:** modal com benefícios; convidado bloqueado em **Create order** com o mesmo fluxo; impressão rápida com mensagens de fase + bloqueio se `previewStatus` ativo.
+- **SEO home pública:** meta description/OG + JSON-LD; título HTML via `document_title_parts` quando `?categoria=`.
+- **Métrica recuperação:** incremento ao carregar o editor com `eko_recover_session` + token + `template_id` válidos na query.
+
+---
+
+## [1.8.0] — 2026-05-18
+
+### Adicionado
+
+- **Home pública** `/eko-sampa/`: catálogo só **master** + **`is_public_catalog = 1`**, pesquisa, categorias, tabs (todos / destaque / recentes), `GET /public/catalog` e `GET /public/categories` (cache leve), CTAs Personalizar / Imprimir rápido (fork de sessão).
+- **Convidado no editor:** rota `editor` sem login quando `template_id` + `session_token` válidos; envoltório `frontend-guest-editor-wrap.php`; modal elegante para «Salvar em Meus Templates» com `redirect_to` no login frontend.
+- **Anti-abuso:** `guard_session_fork` + contagem horária de forks só após sucesso; quick print convidado: quota horária após job criado; métricas opcionais em opções.
+- **Admin:** Eko Sampa → **Public & guests** (toggles e limites).
+- **Documentação:** `docs/public-home-flow.md`, `docs/guest-session-lifecycle.md`.
+
+### Alterado
+
+- `can_fork_public_session`: exige **master**; com coluna `is_public_catalog` exige valor `1` (sem OR com `is_public` nesse caso).
+- `list_public_master_catalog` / categorias alinhados ao mesmo critério de catálogo público.
+
+---
+
+## [1.7.9] — 2026-05-18
+
+### Adicionado
+
+- **Hardening de sessão (DB 1.0.12):** `session_fingerprint` + `session_lifecycle`; validação unificada `request_can_use_session_row` em REST/model; PATCH de sessão limitado a `json_data` / dimensões; quick print convidado com `expires_at`, estado `abandoned`, limpeza em cron; contadores `eko_sampa_derivation_observability` + `GET /internals/derivation-stats` (admin); flags `is_public_catalog` / `is_user_shareable` / `is_marketplace_item` (retrocompat com `is_public`); hooks `eko_sampa_template_session_forked` e `eko_sampa_session_persisted_to_user_template`.
+- **Editor:** autosave debounced da sessão; miniatura cliente com throttle; botão «Salvar em Meus Templates»; banner de recuperação com `eko_recover_session=1`; `persist-to-mine` com `require_app_user`.
+- **Pedidos:** `session_token` opcional no `POST /orders` (corpo ou query) + `get_for_order_context` para templates em sessão.
+- **Documentação:** `docs/session-hardening.md`.
+
+### Alterado
+
+- **Persistência / delete:** `eko_sampa_safe_delete_template` aceita `session_token` para remover sessões válidas sem `user_id`.
+- **Miniatura servidor:** sem auto-GD para linhas `template_type = session` (evita explosão de renders).
+
+---
+
+## [1.7.8] — 2026-05-18
+
+### Adicionado
+
+- **Derivação de templates (master → sessão → utilizador):** colunas DB 1.0.11, fork público `POST /public/templates/{id}/session`, persistência `POST /templates/{id}/persist-to-mine`, catálogo `?catalog_public=1`, imutabilidade de `master` para não-admins, cron de limpeza de sessões, quick print anónimo com `session_token`.
+- **Documentação:** `docs/template-derivation-system.md`.
+
+---
+
 ## [1.7.7] — 2026-05-16
 
 ### Corrigido / produção

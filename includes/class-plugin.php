@@ -68,8 +68,10 @@ final class Eko_Sampa_Plugin {
         $this->admin_redirect->register_hooks();
         $this->shortcodes->register_hooks();
         $this->rest_api->register_hooks();
+        Eko_Sampa_Template_Derivation::register_cron();
         $this->router->register_hooks();
         $this->assets->register_hooks();
+        Eko_Sampa_Public_Experience::register_hooks();
 
         if (class_exists('WooCommerce', false)) {
             (new Eko_Sampa_Wc_Bridge())->register_hooks();

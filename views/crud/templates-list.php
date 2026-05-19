@@ -25,6 +25,10 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                 <button type="button" :aria-pressed="listView === 'grid'" @click="setListView('grid')"><?php echo esc_html__('Grid', 'eko-sampa'); ?></button>
                 <button type="button" :aria-pressed="listView === 'list'" @click="setListView('list')"><?php echo esc_html__('List', 'eko-sampa'); ?></button>
             </div>
+            <div class="eko-templates-view-toggle" role="group" aria-label="<?php echo esc_attr__('Library scope', 'eko-sampa'); ?>">
+                <button type="button" class="text-xs" :class="state.listScope === 'mine' ? 'ring-2 ring-indigo-500' : ''" @click="setListScope('mine')"><?php echo esc_html__('My templates', 'eko-sampa'); ?></button>
+                <button type="button" class="text-xs" :class="state.listScope === 'public' ? 'ring-2 ring-indigo-500' : ''" @click="setListScope('public')"><?php echo esc_html__('Public catalog', 'eko-sampa'); ?></button>
+            </div>
             <?php if (current_user_can('manage_options')) : ?>
                 <select class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" x-model="state.filterUserId" @change="state.page=1; load()">
                     <option value=""><?php echo esc_html__('All users', 'eko-sampa'); ?></option>
@@ -37,6 +41,28 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
             <input class="rounded-lg border border-slate-200 px-3 py-2 text-sm" type="text" x-model="state.cat" @change="state.page=1; load()" placeholder="<?php echo esc_attr__('Category', 'eko-sampa'); ?>" />
             <button type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50" @click="state.page=1; load()"><?php echo esc_html__('Apply', 'eko-sampa'); ?></button>
             <a class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700" href="<?php echo esc_url($new_url); ?>"><?php echo esc_html__('New template', 'eko-sampa'); ?></a>
+        </div>
+    </div>
+
+    <div
+        class="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+        x-show="showTemplateQuotaBar()"
+        x-cloak
+    >
+        <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span class="text-slate-700">
+                <span class="font-medium tabular-nums" x-text="templateQuotaUsed()"></span>
+                /
+                <span class="tabular-nums" x-text="templateQuotaMax()"></span>
+                <?php echo esc_html__(' templates guardados (limite da biblioteca)', 'eko-sampa'); ?>
+            </span>
+            <span class="text-xs font-medium text-amber-800" x-show="templateQuotaApproaching()" x-cloak><?php echo esc_html__('Está perto do limite da biblioteca.', 'eko-sampa'); ?></span>
+        </div>
+        <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+                class="h-full rounded-full bg-indigo-500 transition-[width]"
+                :style="'width:' + (templateQuotaMax() > 0 ? Math.min(100, Math.round((templateQuotaUsed() / templateQuotaMax()) * 100)) : 0) + '%'"
+            ></div>
         </div>
     </div>
 
@@ -68,7 +94,14 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     </div>
                 </div>
                 <div class="eko-template-card__body">
-                    <h3 class="eko-template-card__title" x-text="r.nome"></h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="eko-template-card__title" x-text="r.nome"></h3>
+                        <span
+                            class="inline-flex shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
+                            x-show="templateShowsOnPublicHome(r)"
+                            x-cloak
+                        ><?php echo esc_html__('Public web', 'eko-sampa'); ?></span>
+                    </div>
                     <p class="eko-template-card__meta" x-text="formatDimensions(r)"></p>
                     <p class="eko-template-card__meta" x-show="r.categoria" x-text="r.categoria"></p>
                     <p class="eko-template-card__meta" x-text="formatUpdated(r)"></p>
@@ -77,10 +110,10 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                         eko_sampa_crud_actions_render(
                             [
                                 ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm', 'icon_only' => true],
-                                ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm', 'icon_only' => true],
-                                ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm', 'icon_only' => true],
-                                ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm', 'icon_only' => true],
-                                ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm', 'icon_only' => true, 'show' => "state.listScope !== 'public'"],
+                                ['type' => 'editor', 'click' => 'useTemplateRow(r)', 'label' => __('Use template', 'eko-sampa'), 'title' => __('Open a working copy to customize without changing the original.', 'eko-sampa'), 'can' => 'template.editor', 'size' => 'sm', 'icon_only' => true],
+                                ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm', 'icon_only' => true, 'show' => "state.listScope !== 'public'"],
+                                ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm', 'icon_only' => true, 'show' => "state.listScope !== 'public'"],
                             ]
                         );
                         ?>
@@ -116,7 +149,14 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     </div>
                 </div>
                 <div class="eko-template-row__main">
-                    <h3 class="text-sm font-semibold text-slate-900" x-text="r.nome"></h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="text-sm font-semibold text-slate-900" x-text="r.nome"></h3>
+                        <span
+                            class="inline-flex shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900"
+                            x-show="templateShowsOnPublicHome(r)"
+                            x-cloak
+                        ><?php echo esc_html__('Public web', 'eko-sampa'); ?></span>
+                    </div>
                     <p class="text-xs text-slate-500" x-text="formatDimensions(r) + (r.categoria ? ' · ' + r.categoria : '')"></p>
                     <p class="text-xs text-slate-400" x-text="formatUpdated(r)"></p>
                 </div>
@@ -125,10 +165,10 @@ $new_url = Eko_Sampa_Frontend_Router::get_resource_url('templates', 'new');
                     eko_sampa_crud_actions_render(
                         [
                             ['type' => 'view', 'href' => 'viewUrl(r.id)', 'can' => 'template.view', 'size' => 'sm'],
-                            ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm'],
-                            ['type' => 'editor', 'href' => 'editorUrl(r.id)', 'can' => 'template.editor', 'size' => 'sm'],
-                            ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm'],
-                            ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm'],
+                            ['type' => 'edit', 'href' => 'editUrl(r.id)', 'can' => 'template.edit', 'size' => 'sm', 'show' => "state.listScope !== 'public'"],
+                            ['type' => 'editor', 'click' => 'useTemplateRow(r)', 'label' => __('Use template', 'eko-sampa'), 'title' => __('Open a working copy to customize without changing the original.', 'eko-sampa'), 'can' => 'template.editor', 'size' => 'sm'],
+                            ['type' => 'duplicate', 'click' => 'duplicate(r.id)', 'can' => 'template.duplicate', 'size' => 'sm', 'show' => "state.listScope !== 'public'"],
+                            ['type' => 'delete', 'click' => 'remove(r.id)', 'can' => 'template.delete', 'policy' => 'disabled', 'size' => 'sm', 'show' => "state.listScope !== 'public'"],
                         ]
                     );
                     ?>
